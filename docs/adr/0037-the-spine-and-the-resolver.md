@@ -184,6 +184,13 @@ that never happened — and on the owner's own vault at v316 both drew cards
   model-router purpose and a filing mutation of its own. v316's two legs are
   the package's half of that: the platform's `resolve` purpose plans with leg
   A, buys the completion, and files with leg C as the classify successor.
+- A question the resolver closes has to stop being asked. Because the resolver
+  places a moment rather than answering a bank row, a `tl:`/`lo:` question
+  minted from an earlier projection can outlive its work item; v319 therefore
+  retires every pending minted row whose identity the current projection no
+  longer carries — annotated (`retired: placed by the resolver (work item gone
+  from the projection)`), never deleted — on every `timeline_candidates` build
+  and at the end of any publication that moves the work-item set (lifehug#368).
 - Complexity budget: the intended shape is *spine + model + verification +
   ledger*. New placement rules should improve the spine or the verifier, not
   add joins in front of the model.

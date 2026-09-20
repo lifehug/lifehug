@@ -792,6 +792,192 @@ def retire_for_landmark(domain: object, record: object, *, view: object = None,
 
 
 # --------------------------------------------------------------------------
+# Retire on DISAPPEARANCE (v319, ADR 0037, issue #368)
+#
+# Retire-on-answer above closes a row when its identity is ANSWERED. Under the
+# spine-and-resolver loop that is no longer how a keystone usually closes: the
+# resolver reads a story against the spine and PLACES the moment, so the next
+# publication simply does not carry that keystone, that opportunity or that
+# work item any more. The row minted from last week's projection outlived its
+# question, stayed pending, and reached the daily surface — on the owner's own
+# vault, 22 rows and one asked question ("When was move to Yucaipa?").
+#
+# So a second closing rule, with the same posture as the first: annotated,
+# never deleted, and derived entirely from what the CURRENT projection says.
+# --------------------------------------------------------------------------
+
+#: What a row closed by this pass says about itself, in the bank, forever. A
+#: checked row with no answer file behind it needs a reason on its own line —
+#: the person did not answer it; the vault did.
+STALE_RETIREMENT_REASON = (
+    "retired: placed by the resolver (work item gone from the projection)"
+)
+
+
+def live_identities(view: object) -> set:
+    """Every identity the CURRENT projection still stands behind.
+
+    The union of the three names one gap can be minted under, because a bank
+    row may carry any of them: the `tl:`/`lo:` question identity, the substrate
+    ``work_item_id``, and the node/event/subject ref a keystone's ``anchor``
+    points at. A row matching ANY of them is live — this set decides what stays
+    pending, so it is deliberately generous: leaving one dead row pending for a
+    week is a small cost, retiring a live question the person was about to be
+    asked is not.
+    """
+    block = view if isinstance(view, dict) else {}
+    live: set = set()
+
+    def add(row: object, keys: tuple) -> None:
+        if not isinstance(row, dict):
+            return
+        for key in keys:
+            value = _text(row.get(key))
+            if value:
+                live.add(value)
+
+    for row in block.get("keystones") or ():
+        add(row, ("id", "work_item_id", "anchor", "node_ref"))
+    for row in block.get("landmark_opportunities") or ():
+        add(row, ("id", "work_item_id", "subject"))
+    for row in block.get("work_items") or ():
+        add(row, ("work_item_id", "node_ref", "event_ref", "subject_ref"))
+    # O-E6: a row minted under a LEGACY work-item id is asking about the item
+    # the projection now carries under its canonical one. The published map
+    # travels in the same generation as the items, so both sides of the join
+    # are live together or not at all — the same reason `bank_work_items` reads
+    # it, and pure, because the map is in the view rather than in a vault read.
+    aliases = block.get("work_item_aliases")
+    if isinstance(aliases, dict):
+        for legacy, canonical in aliases.items():
+            if _text(canonical) in live:
+                live.add(_text(legacy))
+    return live
+
+
+def projection_was_read(view: object) -> bool:
+    """Did this view actually come from a published generation?
+
+    The difference between *"the resolver placed everything"* and *"nobody
+    could open the file"*, and the only thing standing between this pass and
+    retiring a whole vault's timeline questions on a bad read. Three ways to
+    be sure, in the order a caller is likely to hold one: the view carries a
+    graph (:func:`view_has_projection`), `temporal_publication.calculated_view`
+    stated ``published`` — which it sets to ``False`` on a missing or
+    unreadable file, deliberately, so absence is never faked — or the payload
+    carries the publisher's own envelope.
+    """
+    block = view if isinstance(view, dict) else {}
+    if view_has_projection(block):
+        return True
+    if block.get("published") is True:
+        return True
+    return bool(block.get("published_at")) and bool(block.get("projection_generation"))
+
+
+def _minted_bank_rows(question_bank_text: object) -> dict:
+    """`{bank_id: {question_id, work_item_id, anchor, answered, text}}`.
+
+    Both provenance readers over the ONE comment, joined: `timeline_probe_
+    index` knows the question identity and whether the row is checked, and
+    `question_planner.bank_work_item_rows` knows the substrate identity —
+    derived from the anchor on a row minted before the `work_item:` marker
+    existed, which is why no migration is needed here either.
+    """
+    text = str(question_bank_text or "")
+    try:
+        import timeline_interaction  # noqa: PLC0415
+
+        index = timeline_interaction.timeline_probe_index(text)
+    except Exception:  # noqa: BLE001
+        return {}
+    rows = {
+        bank_id: {
+            "bank_id": bank_id,
+            "question_id": _text(row.get("question_id")),
+            "anchor": _text(row.get("anchor")),
+            "text": _text(row.get("text")),
+            "answered": bool(row.get("answered")),
+            "work_item_id": "",
+        }
+        for bank_id, row in index.items()
+    }
+    try:
+        from question_planner import bank_work_item_rows  # noqa: PLC0415
+
+        for marked in bank_work_item_rows(text):
+            row = rows.get(str(marked.get("bank_id") or ""))
+            if row is not None and not row["work_item_id"]:
+                row["work_item_id"] = _text(marked.get("work_item_id"))
+    except Exception:  # noqa: BLE001 — the probe index alone is still a rule
+        pass
+    return rows
+
+
+def stale_bank_rows(view: object = None, *,
+                    question_bank_text: object = None) -> list[dict]:
+    """Every PENDING minted row the projection no longer stands behind.
+
+    Two refusals make this safe to run on every build:
+
+    * a view that did not come from a published generation returns nothing
+      (:func:`projection_was_read`). A vault that has never published, or whose
+      read failed, knows nothing about what is live, and absence of evidence
+      must never read as evidence of absence — otherwise one unreadable file
+      retires the whole timeline lane.
+    * an ANSWERED row is never touched, here or anywhere. Neither is a row the
+      owner dismissed: a dismissal lives in its own ledger
+      (:data:`DISMISSALS_FILE`) and this pass never reads or rewrites it.
+    """
+    block = view if isinstance(view, dict) else load_view()
+    if not projection_was_read(block):
+        return []
+    live = live_identities(block)
+    text = (read_text(QUESTIONS_FILE) if question_bank_text is None
+            else str(question_bank_text))
+    stale: list[dict] = []
+    rows = _minted_bank_rows(text)
+    for bank_id in sorted(rows):
+        row = rows[bank_id]
+        if row["answered"]:
+            continue
+        names = {row["question_id"], row["work_item_id"], row["anchor"]}
+        if names & live:
+            continue
+        stale.append(row)
+    return stale
+
+
+def retire_stale(view: object = None, *, question_bank_text: object = None,
+                 reason: object = None, answered_date: object = None) -> list[str]:
+    """Close every row :func:`stale_bank_rows` names. Annotated, not deleted.
+
+    Returns the bank ids that changed, and is pure when ``question_bank_text``
+    is injected — exactly the contract :func:`retire_identities` has, through
+    exactly the same bank writer (`lifehug_core.mark_answered_in_bank`), so
+    there is one way a timeline row is ever checked off.
+    """
+    try:
+        rows = stale_bank_rows(view, question_bank_text=question_bank_text)
+    except Exception:  # noqa: BLE001 — a projection problem retires nothing
+        return []
+    retired = [row["bank_id"] for row in rows]
+    if not retired or question_bank_text is not None:
+        return retired
+    note = str(reason or STALE_RETIREMENT_REASON)
+    try:
+        from lifehug_core import mark_answered_in_bank  # noqa: PLC0415
+
+        for bank_id in retired:
+            mark_answered_in_bank(bank_id,
+                                  str(answered_date) if answered_date else None,
+                                  note=note)
+    except Exception:  # noqa: BLE001 — a bank problem never breaks a publish
+        return []
+    return retired
+
+
+# --------------------------------------------------------------------------
 # CLI — small on purpose: inspect what would be minted, and record an owner no
 # --------------------------------------------------------------------------
 
@@ -814,8 +1000,23 @@ def main(argv: object = None) -> int:
                         help="record an owner's no for a lo:/tl: identity")
     parser.add_argument("--undismiss", metavar="ID")
     parser.add_argument("--reason", default="")
+    parser.add_argument("--retire-stale", action="store_true",
+                        help="retire the pending bank rows whose work item has "
+                             "left the projection (the resolver placed it)")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
+    if args.retire_stale:
+        retired = retire_stale()
+        if args.json:
+            print(json.dumps({"retired": retired,
+                              "reason": STALE_RETIREMENT_REASON}, indent=2))
+        elif retired:
+            print(f"✓ retired {len(retired)} stale timeline question(s): "
+                  + ", ".join(retired))
+            print(f"  {STALE_RETIREMENT_REASON}")
+        else:
+            print("no stale timeline questions in the bank")
+        return 0
     if args.dismiss:
         dismiss(args.dismiss, reason=args.reason)
         print(f"✓ dismissed {args.dismiss}")
@@ -840,6 +1041,7 @@ __all__ = [
     "OFFER_ONLY",
     "PLACEMENT_GAIN_BY_KIND",
     "PROVENANCE",
+    "STALE_RETIREMENT_REASON",
     "SOURCE_KEYSTONE",
     "SOURCE_OPPORTUNITY",
     "bank_candidate_ids",
@@ -849,10 +1051,14 @@ __all__ = [
     "entry_threshold",
     "from_view",
     "identities_for_landmark",
+    "live_identities",
+    "projection_was_read",
     "load_dismissals",
     "load_view",
     "retire_for_landmark",
     "retire_identities",
+    "retire_stale",
+    "stale_bank_rows",
     "undismiss",
     "view_has_projection",
     "whisper_gaps",

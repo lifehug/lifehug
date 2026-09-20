@@ -125,7 +125,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # state/timeline_candidates.json, the owner's durable "no" for a timeline
     # question. Same single-file writer-lock family as focus-dismiss; the
     # default run (--list) writes nothing but the command is classified BY
-    # NAME, exactly as focus-autopilot and era-migrate are.
+    # NAME, exactly as focus-autopilot and era-migrate are. v319 adds
+    # --retire-stale, which checks off the bank rows whose work item has left
+    # the projection — a bank mutation, and one more reason the whole verb
+    # takes the writer lock.
     "timeline-candidates",
     "book-offers", "candidates-auto-promote", "candidates-promote",
     "candidates-promotion-receipt",
@@ -1738,7 +1741,9 @@ def cmd_arc_thread_offers(args: argparse.Namespace) -> int:
 def cmd_timeline_candidates(args: argparse.Namespace) -> int:
     """Cut 5b: what the timeline would ask, and the owner's veto over it."""
     flags: list[str] = []
-    if args.dismiss:
+    if args.retire_stale:
+        flags.append("--retire-stale")
+    elif args.dismiss:
         flags += ["--dismiss", args.dismiss]
         if args.reason:
             flags += ["--reason", args.reason]
@@ -3870,6 +3875,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dismiss", metavar="ID", help="Record an owner's no for a lo:/tl: identity")
     p.add_argument("--undismiss", metavar="ID", help="Lift a dismissal")
     p.add_argument("--reason", default="", help="Why (recorded beside the dismissal)")
+    p.add_argument("--retire-stale", action="store_true",
+                   help="Retire the pending bank rows whose work item has left the "
+                        "projection (the resolver already placed the moment)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_timeline_candidates)
 

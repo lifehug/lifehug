@@ -1980,6 +1980,47 @@ def _landmark_mint_cap() -> int:
         return 1
 
 
+def retire_stale_timeline_questions() -> list[str]:
+    """Close the minted rows the CURRENT projection no longer carries — GUARDED.
+
+    v319 (ADR 0037, issue #368). The resolver closes a keystone by PLACING the
+    moment, so a row minted from an earlier projection can outlive its work
+    item: it is not answered, nothing retires it, and it keeps its slot in the
+    supply this build is about to sample from. Running the pass here — before
+    the mint, before the queue — means the question is gone from the bank by
+    the time anything scores it, which is why the daily surface and the whisper
+    both stop offering it without either of them learning a new rule.
+
+    Guarded like every other timeline read on this path: a projection problem
+    is "retire nothing", never a broken queue.
+    """
+    try:
+        import timeline_candidates  # noqa: PLC0415
+
+        return timeline_candidates.retire_stale(timeline_candidates_view())
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def drop_retired_from_queue(queue_data: object, retired: object) -> dict:
+    """Remove every just-retired bank id from a built queue. Pure.
+
+    Belt and braces over the ordering above: the retirement runs first, so a
+    retired row is already checked off and `build_queue` never sees it. This is
+    the guarantee written down rather than inferred — `state/question_queue.
+    json` must not contain a question the same build retired, whatever order a
+    future caller puts the two in.
+    """
+    data = queue_data if isinstance(queue_data, dict) else {}
+    dropped = {str(row).strip() for row in (retired or ()) if str(row).strip()}
+    if not dropped or not isinstance(data.get("queue"), list):
+        return data
+    data["queue"] = [entry for entry in data["queue"]
+                     if not (isinstance(entry, dict)
+                             and str(entry.get("question_id") or "") in dropped)]
+    return data
+
+
 def mint_keystone_questions(*, dry_run: bool = False) -> list[dict]:
     """v196's name for what is now the general path — kept, delegating.
 
@@ -2298,10 +2339,17 @@ def main() -> int:
 
     if args.write_queue:
         state = load_planner_state(write_default=True)
+        # v319: before the mint, because a row the projection has stopped
+        # carrying is not supply — it is a question the vault already answered.
+        retired = retire_stale_timeline_questions()
         mint_keystone_questions()
         data = build_queue(args.limit, args.arc_max, args.expires_days, state,
                            timeline_probes=current_timeline_probes())
+        data = drop_retired_from_queue(data, retired)
         write_json(QUESTION_QUEUE_FILE, data)
+        if retired:
+            print(f"✓ Retired {len(retired)} timeline question(s) the resolver "
+                  f"already placed: {', '.join(retired)}")
         print(f"✓ Wrote planned queue: {len(data['queue'])} item(s), expires {data['expires_at']}")
         return 0
 
