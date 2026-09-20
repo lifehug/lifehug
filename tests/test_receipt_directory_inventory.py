@@ -185,7 +185,13 @@ class ReceiptInventoryTests(OfferVaultCase):
             alias.unlink()
 
     def test_replacement_during_cached_visit_cannot_return_a_successful_fold(self):
-        original = ts.copy.deepcopy
+        # The hook is `stat_signature` because that is what the no-follow walk
+        # calls for every entry it reaches, so a replacement fired from it
+        # lands DURING the visit — which is the property. v317 hooked
+        # `copy.deepcopy` for the same reason, back when the parse ran inside
+        # the visitor; v318 reads after the walk, so deepcopy would fire after
+        # the tree had already been validated and would prove nothing.
+        original = vp.stat_signature
         target = (self.root / self.paths[0]).parent
         saved = self.root / "saved"
         replaced = False
@@ -200,7 +206,7 @@ class ReceiptInventoryTests(OfferVaultCase):
 
         with ts.receipt_read_batch(self.root):
             self.assert_current()
-            with mock.patch.object(ts.copy, "deepcopy", side_effect=replace):
+            with mock.patch.object(vp, "stat_signature", side_effect=replace):
                 try:
                     with self.assertRaises(ts.TemporalStoreError):
                         ts.fold_active_index(self.root)
@@ -222,9 +228,15 @@ class ReceiptInventoryTests(OfferVaultCase):
         self.assertTrue(batch.closed)
         self.assertEqual(batch.inventory.directories, {})
         self.assertEqual(batch.receipts, {})
-        with mock.patch.object(ts, "receipt_relative_paths", wraps=ts.receipt_relative_paths) as listing:
+        # Two folds, two no-follow walks: a released inventory is re-walked
+        # rather than believed. (v317 counted `receipt_relative_paths`, which
+        # the fold no longer calls — the walk itself is now the enumeration.)
+        with mock.patch.object(
+            vp.VaultDirectoryInventory, "visit_files",
+            autospec=True, side_effect=vp.VaultDirectoryInventory.visit_files,
+        ) as walk:
             self.assertEqual(escaped.run(ts.fold_active_index, self.root), self.oracle())
-            self.assertEqual(listing.call_count, 2)
+            self.assertEqual(walk.call_count, 2)
 
     def test_caught_inner_exception_does_not_close_outer_inventory(self):
         with ts.receipt_read_batch(self.root):

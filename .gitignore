@@ -30,3 +30,12 @@ state/learning_failures.jsonl
 # committed too (v108 — owner relaxed raw storage); only secrets stay ignored.
 state/connectors/gmail_token.json
 state/connectors/gmail_client_secrets.json
+# The temporal fold's input cache (v318). Stat signatures carry this machine's
+# device and inode numbers, so the file is meaningless on any other machine and
+# is declared `tracked: false` in system/vault_contract.json. Deleting it costs
+# one full fold and nothing else.
+state/temporal_claims/fold-cache.json
+# The publication decision cache (v318). Digests of a generation this machine
+# already published; `tracked: false` for the same reason every other cache is
+# — deleting it costs one derivation and changes no answer.
+state/temporal_claims/publication-cache.json

@@ -139,6 +139,20 @@ WORK_ITEMS_FILE = tp.WORK_ITEMS_FILE
 #: and lands a matched pair.
 PUBLICATION_ORDER = (PROJECTION_FILE, WORK_ITEMS_FILE)
 
+#: v318. What the STANDING generation was derived from, beside the pair it
+#: describes. The semantic no-op below has always been able to say "this
+#: republish says nothing new" — but only after deriving the whole projection
+#: to compare against. On a 9,000-claim vault that derivation is seconds of
+#: work to reach a conclusion the inputs already imply, and a compile runs it
+#: on every pass. This file lets `publish` reach the same conclusion from the
+#: inputs alone.
+#:
+#: It is a cache of a DECISION, never of content: nothing here is ever served
+#: to a reader, and every field it holds is re-derived and re-compared before
+#: it is believed. Missing, stale or unreadable costs one ordinary derive.
+PUBLICATION_CACHE_FILE = f"{tp.TEMPORAL_STATE_DIR}/publication-cache.json"
+PUBLICATION_CACHE_VERSION = 1
+
 #: §7's *"explicitly excluded runtime metadata"*, at the envelope level: when
 #: the publication happened, how long each phase took, and which publication
 #: this was. Content identity is what the substrate implies, not when it was
@@ -556,6 +570,7 @@ def publish(
     owner_names: object = (),
     now: object = None,
     correction_ref: object = None,
+    full: bool = False,
 ) -> dict:
     """Derive the whole calculated timeline and publish it. THE ONE WRITER.
 
@@ -576,6 +591,9 @@ def publish(
     ``active_index`` defaults to a fresh fold of this vault's receipts and
     corrections, which is also what re-publishes the index itself; pass one in
     when the caller has already folded and wants exactly that generation.
+    ``full`` forwards to `temporal_store.rebuild_active_index`: the repair
+    path reads every receipt from disk rather than trusting the store's input
+    cache to say which ones have not moved.
 
     ``constraints`` defaults to this vault's filed moves (v232). ``None`` is
     "read them", an explicit sequence is "use exactly these", and ``()`` is
@@ -599,36 +617,68 @@ def publish(
     index = (
         active_index
         if active_index is not None
-        else store.rebuild_active_index(vault_root)
+        else store.rebuild_active_index(vault_root, full=full)
     )
     timings["fold"] = time.perf_counter() - mark
 
     generation = next_generation(vault_root)
+    derivation_inputs = load_derivation_inputs(
+        vault_root,
+        event_resolution_records=event_resolution_records,
+        episode_records=episode_records,
+        era_views=era_views,
+        constraints=constraints,
+        membership_assertions=membership_assertions,
+        display_decisions=display_decisions,
+        frame_display_decisions=frame_display_decisions,
+        landmark_entries=landmark_entries,
+    )
+    published_at = normalized_timestamp(now, error=TemporalPublicationError)
+    questions = resolver_questions(vault_root)
+    digest = store.payload_sha256(_canonical(index if isinstance(index, dict) else list(index)))
+
+    # v318. The derivation's inputs are all read by now; if they digest to what
+    # the standing generation was derived from, and the day has not turned,
+    # deriving again can only reproduce the pair already on disk. This is the
+    # SAME no-op the block below reaches by comparing rendered payloads — taken
+    # earlier, from the inputs, so a compile on an unchanged vault stops paying
+    # for the answer it already has.
+    fingerprint = derivation_fingerprint(
+        index_digest=digest,
+        derivation_inputs=derivation_inputs,
+        resolution_records=resolution_records,
+        roster_snapshot=roster_snapshot,
+        owner_names=owner_names,
+        birth_date=birth_date,
+        owner_ref=owner_ref,
+        resolver_questions=questions,
+    )
+    if not full:
+        standing = _standing_publication(
+            vault_root, fingerprint, today=_utc_day(published_at)
+        )
+        if standing is not None:
+            timings["publish"] = 0.0
+            timings["publication_total"] = time.perf_counter() - started
+            return _standing_summary(
+                standing,
+                timings=timings,
+                paths=[str(store.store_path(vault_root, name))
+                       for name in PUBLICATION_ORDER],
+            )
+
     result = tt.derive_calculated_timeline(
         index,
         resolution_records=resolution_records,
         roster_snapshot=roster_snapshot,
         owner_names=owner_names,
-        **load_derivation_inputs(
-            vault_root,
-            event_resolution_records=event_resolution_records,
-            episode_records=episode_records,
-            era_views=era_views,
-            constraints=constraints,
-            membership_assertions=membership_assertions,
-            display_decisions=display_decisions,
-            frame_display_decisions=frame_display_decisions,
-            landmark_entries=landmark_entries,
-        ),
+        **derivation_inputs,
         birth_date=birth_date,
         owner_ref=owner_ref,
         projection_generation=generation,
         now=now,
     )
     timings.update(result.timings or {})
-
-    published_at = normalized_timestamp(now, error=TemporalPublicationError)
-    digest = store.payload_sha256(_canonical(index if isinstance(index, dict) else list(index)))
 
     mark = time.perf_counter()
     payloads = {
@@ -642,7 +692,7 @@ def publish(
     # ADR 0037 (v316): a card asks the resolver's question when the resolver
     # has one. A display decision over the SAME generation — nothing here
     # re-derives a date, so `calculation_rule_version` does not move.
-    _with_resolver_questions(payloads, resolver_questions(vault_root))
+    _with_resolver_questions(payloads, questions)
 
     # THE SEMANTIC NO-OP (eras design §3.4). Age frames make the projection a
     # function of the clock as well as of the receipts, so "publish again"
@@ -651,6 +701,16 @@ def publish(
     # what the fresh render says, this writes nothing and mints nothing.
     standing = _unchanged_generation(vault_root, payloads)
     if standing is not None:
+        # The pair on disk still stands, so record what it was derived from:
+        # the next publish over the same inputs takes the shortcut above
+        # rather than rendering the whole projection to learn this again.
+        _write_publication_cache(
+            vault_root, fingerprint=fingerprint, generation=standing,
+            published_at=str(_published_at_of(vault_root) or published_at),
+            payloads={name: read_projection(vault_root) if name == PROJECTION_FILE
+                      else read_work_items(vault_root)
+                      for name in PUBLICATION_ORDER},
+        )
         timings["publish"] = time.perf_counter() - mark
         timings["publication_total"] = time.perf_counter() - started
         return _summary(result, generation=standing, unchanged=True,
@@ -663,6 +723,10 @@ def publish(
     # must fail with nothing on disk changed, not halfway through the pair.
     rendered = {name: _canonical(payload) for name, payload in payloads.items()}
     written = [str(_write(vault_root, name, rendered[name])) for name in PUBLICATION_ORDER]
+    _write_publication_cache(
+        vault_root, fingerprint=fingerprint, generation=generation,
+        published_at=published_at, payloads=payloads,
+    )
     timings["publish"] = time.perf_counter() - mark
     timings["publication_total"] = time.perf_counter() - started
 
@@ -682,6 +746,159 @@ def publish(
     return _summary(result, generation=generation, unchanged=False,
                     published_at=published_at, digest=digest, timings=timings,
                     paths=written, receipt=receipt)
+
+
+def _rule_identity() -> dict:
+    """Every version that decides what a derivation would SAY, in one mapping.
+
+    A framework upgrade that moves any of these must re-derive, whatever the
+    substrate says — which is the difference between "nothing changed" and
+    "nothing changed that this build would read the same way".
+    """
+    return {
+        "publication_version": PUBLICATION_VERSION,
+        "claim_schema_version": SCHEMA_VERSION,
+        "projection_schema_version": tp.projection_schema_version(),
+        "calculation_rule_version": tt.CALCULATION_RULE_VERSION,
+        "score_formula_version": tt.SCORE_FORMULA_VERSION,
+    }
+
+
+def derivation_fingerprint(
+    *, index_digest: str, derivation_inputs: dict, resolution_records: object,
+    roster_snapshot: object, owner_names: object, birth_date: object,
+    owner_ref: object, resolver_questions: dict,
+) -> str | None:
+    """A digest over EVERY argument `derive_calculated_timeline` is given.
+
+    That function is a pure function of its arguments and the clock (its own
+    docstring says so, and the age frames are the clock's only route in), so
+    two calls whose arguments digest the same and whose day is the same must
+    produce the same projection. Nothing is sampled and nothing is summarized:
+    the whole of each input goes in, so an input this module forgot to think
+    about cannot be an input it forgot to compare.
+
+    ``None`` when any input will not serialize — which reads as "cannot say",
+    and the caller derives.
+    """
+    try:
+        return store.payload_sha256(_canonical({
+            "index_digest": index_digest,
+            "rule": _rule_identity(),
+            "derivation_inputs": derivation_inputs,
+            "resolution_records": resolution_records,
+            "roster_snapshot": roster_snapshot,
+            "owner_names": list(owner_names or ()),
+            "birth_date": birth_date,
+            "owner_ref": owner_ref,
+            "resolver_questions": resolver_questions,
+        }))
+    except (TypeError, ValueError):
+        return None
+
+
+def _utc_day(value: object) -> str:
+    return str(value or "")[:10]
+
+
+def _read_publication_cache(vault_root: str | Path) -> dict | None:
+    try:
+        payload = _read(vault_root, PUBLICATION_CACHE_FILE)
+    except TemporalPublicationError:
+        # A published file that will not parse is a fault to report; a CACHE
+        # that will not parse is simply not a cache.
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("cache_version") != PUBLICATION_CACHE_VERSION:
+        return None
+    return payload
+
+
+def _standing_publication(
+    vault_root: str | Path, fingerprint: str | None, *, today: str
+) -> dict | None:
+    """The published pair, when a fresh derive would reproduce it exactly.
+
+    Six conditions, and the interesting one is the last. Age frames make the
+    projection a function of the day as well as of the receipts, so a
+    fingerprint match is only "nothing moved" WITHIN one day: cross a day
+    boundary and this returns ``None``, the derivation runs, and the ordinary
+    semantic no-op decides — which is how a birthday still mints a generation
+    and an ordinary Tuesday still does not.
+    """
+    if not fingerprint:
+        return None
+    cache = _read_publication_cache(vault_root)
+    if cache is None or cache.get("derivation_fingerprint") != fingerprint:
+        return None
+    if cache.get("published_day") != today:
+        return None
+    published = read_projection(vault_root)
+    queue = read_work_items(vault_root)
+    if published is None or queue is None:
+        return None
+    generation = _generation_of(published)
+    if generation <= 0 or generation != _generation_of(queue) or generation != cache.get("generation"):
+        return None
+    # The pair must still be the pair this cache describes, byte for byte: a
+    # projection somebody edited by hand is not a publication this module may
+    # claim still stands.
+    for name, payload in ((PROJECTION_FILE, published), (WORK_ITEMS_FILE, queue)):
+        if store.payload_sha256(_canonical(payload)) != cache.get("digests", {}).get(name):
+            return None
+    return published
+
+
+def _write_publication_cache(
+    vault_root: str | Path, *, fingerprint: str | None, generation: int,
+    published_at: str, payloads: dict,
+) -> None:
+    if not fingerprint:
+        return
+    payload = {
+        "cache_version": PUBLICATION_CACHE_VERSION,
+        "derivation_fingerprint": fingerprint,
+        "generation": generation,
+        "published_day": _utc_day(published_at),
+        "digests": {
+            name: store.payload_sha256(_canonical(body))
+            for name, body in payloads.items()
+        },
+    }
+    # Deliberately NOT through `_write`: that writer is the publication pair's,
+    # and :data:`PUBLICATION_ORDER`'s atomicity is a promise about those two
+    # files. A cache written beside them is a third thing and must not be able
+    # to fail a publication or appear in its write order.
+    try:
+        atomic_write_vault_text(
+            store.store_path(vault_root, PUBLICATION_CACHE_FILE),
+            _canonical(payload),
+            vault_root=Path(vault_root),
+        )
+    except (OSError, ValueError):
+        # The pair is published and correct; only the shortcut is missing.
+        return
+
+
+def _standing_summary(published: dict, *, timings: dict, paths: list) -> dict:
+    """The summary a no-op would have returned, read off what already stands."""
+    diagnostics = published.get("diagnostics") if isinstance(published, dict) else None
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    return {
+        "generation": _generation_of(published),
+        "unchanged": True,
+        "published_at": str(published.get("published_at") or ""),
+        "input_digest": str(published.get("input_digest") or ""),
+        "files": list(PUBLICATION_ORDER),
+        "paths": list(paths),
+        "receipt": None,
+        "claims": int(diagnostics.get("claims") or 0),
+        "nodes": len(published.get("nodes") or ()),
+        "work_items": len(published.get("work_items") or ()),
+        "unplaced": len(diagnostics.get("unplaced") or ()),
+        "timings": {key: round(float(value), 9) for key, value in sorted(timings.items())},
+    }
 
 
 def _published_at_of(vault_root: str | Path) -> str | None:
@@ -1043,7 +1260,9 @@ def verify(
     published = read_projection(vault_root)
     if published is None:
         return {"published": False, "identical": False, "generation": 0}
-    index = store.rebuild_active_index(vault_root)
+    # The oracle reads every receipt: an answer that trusted a cache would be
+    # asserting the cache rather than checking the substrate.
+    index = store.rebuild_active_index(vault_root, full=True)
     result = tt.derive_calculated_timeline(
         index,
         resolution_records=resolution_records,
@@ -1126,7 +1345,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.rebuild:
         for relative in PUBLICATION_ORDER:
             store.store_path(root, relative).unlink(missing_ok=True)
-    print(publication_report_line(publish(root)))
+    # The repair path folds from the receipts themselves: "delete the files and
+    # publish again" is only an oracle if it also declines the store's input
+    # cache, so a suspected cache is repaired by the same command.
+    print(publication_report_line(publish(root, full=args.rebuild)))
     return 0
 
 

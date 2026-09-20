@@ -871,8 +871,11 @@ def build_telling_manifest(
     # A read-only consumer may already own a folded evidence view (for example,
     # classifier context excludes classifier claims before deriving its view).
     index = store.fold_active_index(vault_root) if active_index is None else active_index
-    receipts, unreadable = store.load_receipts(vault_root)
-    by_receipt = {receipt.receipt_id: receipt for receipt in receipts}
+    # v318: the declarations, not the receipts. `_extractor_block` and
+    # `telling_ref_for_claim` are the only two things this file ever asked a
+    # receipt for, and both read a mapping, so the manifest no longer parses
+    # every receipt in the vault a second time to find them.
+    by_receipt, unreadable = store.receipt_declarations(vault_root)
     records = (
         list(bindings) if bindings is not None else load_event_identities(vault_root)
     )
@@ -1259,9 +1262,19 @@ def read_telling_manifest(vault_root: str | Path) -> dict | None:
     return payload
 
 
-def rebuild_telling_manifest(vault_root: str | Path) -> dict:
-    """Build it and write it. The binder step's one call."""
-    manifest = build_telling_manifest(vault_root)
+def rebuild_telling_manifest(vault_root: str | Path, *, full: bool = False) -> dict:
+    """Build it and write it. The binder step's one call.
+
+    ``full=True`` reads every receipt and every correction from disk rather
+    than reusing the store's input cache — the same escape hatch
+    `temporal_store.rebuild_active_index` offers, for the same reason.
+    """
+    if full:
+        manifest = build_telling_manifest(
+            vault_root, active_index=store.fold_active_index(vault_root, full=True)
+        )
+    else:
+        manifest = build_telling_manifest(vault_root)
     write_telling_manifest(vault_root, manifest)
     return manifest
 

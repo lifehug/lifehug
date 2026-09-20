@@ -583,8 +583,56 @@ in Cuts 2–5 and this table is rewritten at Cut 7b.
 | Placement identity (mint, join, repair) | `system/timeline.py` (`placement_key`, `legacy_title_key`, `resolve_placements`) |
 | Plan a timeline Play | `lifehug.py arc-plan-target --timeline [--era <slug>]` |
 | Durable state | `state/timeline_placements.json` |
+| The claim substrate and its fold | `system/temporal_store.py` (`write_receipt`, `fold_active_index`, `rebuild_active_index`) |
+| What the fold reads, and what it skips re-reading | `system/temporal_store.py` (`fold_inputs`, `FOLD_CACHE_FILE` → `state/temporal_claims/fold-cache.json`) |
+| What the standing publication was derived from | `system/temporal_publication.py` (`derivation_fingerprint`, `PUBLICATION_CACHE_FILE` → `state/temporal_claims/publication-cache.json`) |
 | Research basis | `system/research/chronology.md`, `system/research/chronology-vis.md`, `system/research.md` §4a |
-| Guard tests | `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py`, `tests/test_cross_dating.py`, `tests/test_placement_score.py`, `tests/test_timeline_place_filing.py` |
+| Guard tests | `tests/test_temporal_fold_cache.py`, `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py`, `tests/test_cross_dating.py`, `tests/test_placement_score.py`, `tests/test_timeline_place_filing.py` |
+
+### The fold on a large vault (v318)
+
+Every step that draws your timeline — the active index, the telling manifest,
+the published projection — is a pure function of the receipts and corrections
+in your vault, and until v318 each one re-read all of them. On a vault with
+nine thousand receipts that was about forty-six seconds per filing, four times
+over the same unchanged files, and the hosted worker ran out of its budget
+before it finished.
+
+v318 changes the READING and nothing else. Three things now happen on every
+call, and none of them is ever skipped: the receipts directory is walked with
+the same no-follow guarantees as before, every file's size, inode and
+modification time are collected fresh, and the fold's arithmetic runs over the
+whole vault's inputs. What the framework no longer does is open, parse and
+re-validate a receipt whose signature has not moved since the last fold — it
+takes that receipt's contribution from the index it already published, and
+from a small sidecar (`state/temporal_claims/fold-cache.json`) that records
+what that index was folded from.
+
+So a filing that adds five receipts reads five receipts. The output is
+byte-identical to a fold that read all nine thousand — that is a test
+(`tests/test_temporal_fold_cache.py`), not a hope — and if the sidecar is
+missing, stale, unreadable or describes a different index, the framework reads
+everything and says nothing about it. Correctness never depends on the cache;
+only the clock does.
+
+`temporal_publication.publish` gained the same kind of shortcut one level up.
+It already declined to mint a new generation when a republish would say
+nothing new, but it had to derive the whole projection to find that out. It now
+digests everything the derivation would be handed — the index, every fold
+authority, the roster, the owner, the resolver's questions — and if that
+digest matches what the standing generation was derived from AND the day has
+not turned, it skips the derivation. The day matters because age frames are a
+function of the calendar: cross midnight and the projection is derived again,
+which is how a birthday still moves your timeline and an ordinary Tuesday
+still does not.
+
+Both files are declared state in `system/vault_contract.json`, both are
+`tracked: false` (stat signatures name one machine's inodes; they must never
+ride a shared vault), and both are safe to delete at any moment — it costs one
+full read. The explicit repair paths never consult them: `python3
+system/temporal_publication.py --rebuild`, `--check` (the rebuild oracle), and
+`LIFEHUG_TEMPORAL_FOLD_CACHE=0` in the environment all fold from the receipts
+themselves.
 
 ## 7. Decisions
 

@@ -76,6 +76,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -87,6 +88,7 @@ if str(SYSTEM_DIR) not in sys.path:
 
 from temporal_claims import (  # noqa: E402
     ACTIVE_INDEX_FILE,
+    TEMPORAL_STATE_DIR,
     CLAIM_STATUSES,
     CONSTRAINT_ID_PREFIX,
     CONSTRAINT_RELATIONS,
@@ -130,6 +132,31 @@ CONVERSATION_SOURCES_DIR = "sources/conversations"
 #: independent of :data:`temporal_claims.SCHEMA_VERSION`, which versions the
 #: records inside it.
 INDEX_VERSION = 1
+
+#: v318. The sidecar that says what the PUBLISHED active index was folded from:
+#: one stat signature per receipt and per correction source, plus each
+#: receipt's ``extractor`` declaration (the one thing the telling manifest
+#: needs that the index itself does not carry). It is an INPUT cache and never
+#: an output one — nothing here is ever returned as a fold result; a signature
+#: that still matches only buys the right to skip re-reading and re-validating
+#: one file. A missing, stale, unparseable or self-inconsistent sidecar costs
+#: exactly one full read, which is what v317 did every time.
+#:
+#: Machine-local by construction (`vault_paths.stat_signature` carries device
+#: and inode), so the contract declares it ``tracked: false``: a shared vault
+#: must not carry one machine's inode numbers to another, where every
+#: signature would miss and the file would be dead weight in git history.
+FOLD_CACHE_FILE = f"{TEMPORAL_STATE_DIR}/fold-cache.json"
+
+#: Bumped when the sidecar's own shape changes. An older or newer number is not
+#: migrated and not read — it is one full fold, and the next write replaces it.
+FOLD_CACHE_VERSION = 1
+
+#: Set to ``0`` to fold every receipt from disk on every call. The escape hatch
+#: for a person who suspects the sidecar rather than the receipts; the
+#: in-process equivalents are `fold_active_index(..., full=True)` and
+#: `temporal_publication.verify`, which never consult it.
+FOLD_CACHE_ENV = "LIFEHUG_TEMPORAL_FOLD_CACHE"
 
 #: Frontmatter ``type`` values this module writes and reads back.
 CONVERSATION_SOURCE_TYPE = "conversation_message"
@@ -693,18 +720,34 @@ def _assertion_view(receipt: dict) -> dict:
     return view
 
 
+def _signature_map(root: Path, relative_dir: str, pattern: str) -> dict[str, tuple]:
+    """``{store-relative path: stat signature}`` for one directory's members.
+
+    ONE enumeration, shared by the listers and by the fold's input cache
+    (recurring-defect doctrine): a cache that decided "unchanged" from a
+    different walk than the loader's would eventually disagree with it about
+    which files exist, and the disagreement would read as a correct fold.
+    Symlinks and non-regular files are skipped here exactly as every reader
+    here has always skipped them, so the two can never diverge.
+    """
+    base = store_path(root, relative_dir)
+    if not base.is_dir():
+        return {}
+    found: dict[str, tuple] = {}
+    for path in base.rglob(pattern):
+        try:
+            info = path.lstat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            continue
+        found[path.relative_to(root).as_posix()] = stat_signature(info)
+    return found
+
+
 def receipt_relative_paths(vault_root: str | Path) -> list[str]:
     """Every checked-in receipt path, sorted, for unscoped receipt loading."""
-    root = _vault_root(vault_root)
-    base = store_path(root, RECEIPTS_DIR)
-    if not base.is_dir():
-        return []
-    found: list[str] = []
-    for path in base.rglob("*.json"):
-        if path.is_symlink() or not path.is_file():
-            continue
-        found.append(path.relative_to(root).as_posix())
-    return sorted(found)
+    return sorted(_signature_map(_vault_root(vault_root), RECEIPTS_DIR, "*.json"))
 
 
 @dataclass
@@ -1124,19 +1167,47 @@ def _correction_reason(body: str) -> str:
     return collapsed_text(" ".join(lines))
 
 
-def load_temporal_corrections(vault_root: str | Path) -> list[TemporalCorrection]:
-    """Every temporal correction in the vault, sorted by id."""
+def _correction_from_row(row: dict) -> TemporalCorrection:
+    """The inverse of :meth:`TemporalCorrection.to_dict`, exactly.
+
+    A correction round-trips through its own serialization: the fold already
+    publishes every one of them into the active index in this shape, so
+    reading one back is reading a record this store wrote, not re-deriving it.
+    """
+    ref = row.get("source_ref") if isinstance(row.get("source_ref"), dict) else {}
+    return TemporalCorrection(
+        correction_id=collapsed_text(row.get("correction_id")),
+        kind=collapsed_text(row.get("kind")),
+        claim_ids=tuple(collapsed_text(value) for value in (row.get("claim_ids") or ())),
+        reason=str(row.get("reason") or ""),
+        source_ref=SourceRef(
+            source_id=collapsed_text(ref.get("source_id")),
+            revision=collapsed_text(ref.get("revision")),
+            source_path=ref.get("source_path"),
+        ),
+        created_at=collapsed_text(row.get("created_at")),
+        scope=collapsed_text(row.get("scope")) or None,
+        relative_path=collapsed_text(row.get("relative_path")),
+        schema_version=int(row.get("schema_version") or SCHEMA_VERSION),
+    )
+
+
+def load_temporal_corrections(
+    vault_root: str | Path, *, full: bool = False
+) -> list[TemporalCorrection]:
+    """Every temporal correction in the vault, sorted by id.
+
+    v318: the directory is walked every time and only a file whose signature
+    moved is re-read. This function is called three times in one filing cycle
+    — the fold, the ordering-constraint fold, and the derivation's constraint
+    read — over a directory that on a large vault holds thousands of sources.
+    """
     root = _vault_root(vault_root)
-    base = store_path(root, CORRECTION_SOURCES_DIR)
-    if not base.is_dir():
-        return []
-    corrections: list[TemporalCorrection] = []
-    for path in sorted(base.rglob("*.md")):
-        if path.is_symlink() or not path.is_file():
-            continue
-        correction = read_temporal_correction(root, path.relative_to(root).as_posix())
-        if correction is not None:
-            corrections.append(correction)
+    signatures = _signature_map(root, CORRECTION_SOURCES_DIR, "*.md")
+    rows = _correction_rows(root, signatures, _prior_inputs(root, full=full))
+    corrections = [
+        _correction_from_row(row) for row in rows.values() if isinstance(row, dict)
+    ]
     corrections.sort(key=lambda item: (item.correction_id, item.relative_path))
     return corrections
 
@@ -1472,10 +1543,8 @@ def load_ordering_constraints(vault_root: str | Path) -> list[dict]:
         return []
 
     rows: dict[str, dict] = {}
-    for path in sorted(base.rglob("move-*.md")):
-        if path.is_symlink() or not path.is_file():
-            continue
-        row = read_ordering_constraint(root, path.relative_to(root).as_posix())
+    for relative in sorted(_signature_map(root, CORRECTION_SOURCES_DIR, "move-*.md")):
+        row = read_ordering_constraint(root, relative)
         if row is not None:
             rows.setdefault(row["constraint_id"], row)
 
@@ -1540,7 +1609,551 @@ def _strongest(marks: Sequence[dict]) -> str:
     return best
 
 
-def fold_active_index(vault_root: str | Path) -> dict:
+@dataclass(frozen=True)
+class _Contribution:
+    """What ONE receipt contributes to the fold, and nothing else about it.
+
+    Everything the fold reads off a receipt, flattened once so the arithmetic
+    below never asks whether it is holding a freshly parsed
+    :class:`temporal_claims.ExtractionReceipt` or a row the previous index
+    already proved. ``claims`` are the rows the fold files verbatim — the
+    claim's own ``to_dict`` plus which receipt carried it.
+    """
+
+    #: Where the bytes actually are. The fold's stable tiebreaker and the key
+    #: every signature is recorded under, because a signature is a statement
+    #: about a FILE.
+    file_path: str
+    #: What the receipt says its path is — derived from its source revision and
+    #: extractor version, and what every emitted row cites. Equal to
+    #: ``file_path`` for every receipt this store has written; kept separate
+    #: because a receipt read from somewhere else must still cite itself.
+    relative_path: str
+    receipt_id: str
+    source_id: str
+    revision: str
+    source_ref: dict
+    extractor_version: str
+    created_at: str
+    extractor: dict
+    claims: tuple[dict, ...]
+
+    @property
+    def sort_key(self) -> tuple[str, str, str]:
+        """:func:`receipt_sort_key`, off the flattened row."""
+        return (self.created_at, self.extractor_version, self.receipt_id)
+
+
+@dataclass
+class _FoldInputs:
+    """Every durable input of one fold, with the signature that vouches for it."""
+
+    receipt_signatures: dict[str, tuple]
+    correction_signatures: dict[str, tuple]
+    contributions: dict[str, _Contribution]
+    unreadable: dict[str, tuple]
+    #: ``None`` means "this file is under ``sources/corrections/`` and is not a
+    #: correction" — a move, or a source of some other kind. Remembering the
+    #: negative is what keeps a vault's ordering constraints from being
+    #: re-parsed as candidate corrections on every fold.
+    corrections: dict[str, dict | None]
+    #: The index object the last fold over exactly these inputs returned, so
+    #: :func:`write_active_index` can tell whether the file it is about to
+    #: publish is the one this sidecar would describe.
+    folded: object = None
+    #: The no-follow walker that produced ``receipt_signatures``. Held across
+    #: folds in one process so an unchanged directory's names are read once,
+    #: exactly as `receipt_read_batch` has always held one.
+    inventory: object = None
+
+
+#: At most this many vaults' inputs are remembered in one interpreter. A host
+#: holds one vault and a test suite holds hundreds; the cap is what keeps the
+#: second case from being a memory leak dressed as a cache.
+_FOLD_MEMO_LIMIT = 4
+_FOLD_MEMO: dict[str, _FoldInputs] = {}
+
+
+def _fold_cache_enabled() -> bool:
+    return collapsed_text(os.environ.get(FOLD_CACHE_ENV, "1")).lower() not in {
+        "0", "off", "false", "no",
+    }
+
+
+def _memo_key(root: Path) -> str:
+    return str(Path(os.path.abspath(root)))
+
+
+def _remember(root: Path, inputs: _FoldInputs) -> None:
+    key = _memo_key(root)
+    _FOLD_MEMO.pop(key, None)
+    _FOLD_MEMO[key] = inputs
+    while len(_FOLD_MEMO) > _FOLD_MEMO_LIMIT:
+        _FOLD_MEMO.pop(next(iter(_FOLD_MEMO)))
+
+
+def forget_fold_inputs(vault_root: str | Path | None = None) -> None:
+    """Drop the in-process input memo — for one vault, or for all of them.
+
+    A test that rewrites a receipt's bytes inside one stat granule, or a host
+    that wants the next fold to start from the files, calls this. It can only
+    ever cost time: every caller re-reads what it drops.
+    """
+    if vault_root is None:
+        _FOLD_MEMO.clear()
+        return
+    _FOLD_MEMO.pop(_memo_key(Path(os.path.abspath(Path(vault_root).expanduser()))), None)
+
+
+def _contribution_of(receipt: ExtractionReceipt, file_path: str) -> _Contribution:
+    claims: list[dict] = []
+    for claim in receipt.claims:
+        row = claim.to_dict()
+        row["receipt_id"] = receipt.receipt_id
+        row["receipt_path"] = receipt.relative_path
+        claims.append(row)
+    return _Contribution(
+        file_path=file_path,
+        relative_path=receipt.relative_path,
+        receipt_id=receipt.receipt_id,
+        source_id=receipt.source_ref.source_id,
+        revision=receipt.source_ref.revision,
+        source_ref=receipt.source_ref.to_dict(),
+        extractor_version=receipt.extractor_version,
+        created_at=receipt.created_at,
+        extractor=dict(receipt.extractor or {}),
+        claims=tuple(claims),
+    )
+
+
+def _read_fold_cache(root: Path) -> dict | None:
+    """The sidecar, or ``None`` when there is nothing this version may trust."""
+    text = _read_text(root, FOLD_CACHE_FILE)
+    if text is None:
+        return None
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("cache_version") != FOLD_CACHE_VERSION:
+        return None
+    if payload.get("index_version") != INDEX_VERSION:
+        return None
+    if payload.get("claim_schema_version") != SCHEMA_VERSION:
+        return None
+    return payload
+
+
+def _signature_of(value: object) -> tuple | None:
+    if not isinstance(value, list) or not value:
+        return None
+    return tuple(value)
+
+
+def _contributions_from_index(index: dict, declared: dict) -> dict[str, _Contribution] | None:
+    """Rebuild each receipt's contribution from the index it already produced.
+
+    The published index is the cache: every claim row in it is the row the
+    fold filed, verbatim apart from the two keys the fold ADDED (``status``
+    and ``status_marks``), and every receipt row carries the source ref, the
+    extractor version and the creation time the grouping needs.
+
+    The one thing the index can lose is a claim id filed by two receipts —
+    ``entries`` is keyed by claim id, so the later writer wins and the earlier
+    receipt's row is not on disk to be found. That is why both counts are
+    checked, globally and per receipt: a vault where they agree has no such
+    collision and the reconstruction is exact; a vault where they do not gets
+    ``None`` and one honest full read.
+    """
+    claims = index.get("claims")
+    receipts = index.get("receipts")
+    if not isinstance(claims, list) or not isinstance(receipts, list):
+        return None
+    by_receipt: dict[str, list[dict]] = {}
+    for row in claims:
+        if not isinstance(row, dict):
+            return None
+        by_receipt.setdefault(collapsed_text(row.get("receipt_id")), []).append(
+            {key: value for key, value in row.items()
+             if key not in ("status", "status_marks")}
+        )
+    if len(claims) != sum(
+        int(row.get("claim_count") or 0) for row in receipts if isinstance(row, dict)
+    ):
+        return None
+
+    found: dict[str, _Contribution] = {}
+    for row in receipts:
+        if not isinstance(row, dict):
+            return None
+        relative = collapsed_text(row.get("relative_path"))
+        receipt_id = collapsed_text(row.get("receipt_id"))
+        source_ref = row.get("source_ref")
+        if not relative or not receipt_id or not isinstance(source_ref, dict):
+            return None
+        if relative in found:
+            return None
+        rows = by_receipt.get(receipt_id, [])
+        if len(rows) != int(row.get("claim_count") or 0):
+            return None
+        entry = declared.get(relative)
+        block = entry.get("extractor") if isinstance(entry, dict) else None
+        found[relative] = _Contribution(
+            file_path=relative,
+            relative_path=relative,
+            receipt_id=receipt_id,
+            source_id=collapsed_text(source_ref.get("source_id")),
+            revision=collapsed_text(source_ref.get("revision")),
+            source_ref=source_ref,
+            extractor_version=collapsed_text(row.get("extractor_version")),
+            created_at=collapsed_text(row.get("created_at")),
+            extractor=block if isinstance(block, dict) else {},
+            claims=tuple(rows),
+        )
+    return found
+
+
+def _disk_inputs(root: Path) -> _FoldInputs | None:
+    """The previous fold's inputs, reconstructed from what it published."""
+    cache = _read_fold_cache(root)
+    if cache is None:
+        return None
+    index_text = _read_text(root, ACTIVE_INDEX_FILE)
+    if index_text is None:
+        return None
+    if hashlib.sha256(index_text.encode("utf-8")).hexdigest() != cache.get("index_sha256"):
+        # Somebody republished the index without the sidecar, or the other way
+        # round. Neither file is wrong; they just no longer describe each other.
+        return None
+    try:
+        index = json.loads(index_text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(index, dict):
+        return None
+
+    declared = cache.get("receipts")
+    declared = declared if isinstance(declared, dict) else {}
+    contributions = _contributions_from_index(index, declared)
+    if contributions is None:
+        return None
+
+    # `contributions` is keyed by the path each receipt CITES; the signatures
+    # are keyed by the file those bytes were read from. They are the same
+    # string for everything this store writes, and the sidecar records the
+    # mapping anyway so that the one case where they differ reuses nothing
+    # rather than reusing the wrong row.
+    by_file: dict[str, _Contribution] = {}
+    receipt_signatures: dict[str, tuple] = {}
+    for relative, entry in declared.items():
+        if not isinstance(entry, dict):
+            continue
+        signature = _signature_of(entry.get("signature"))
+        cited = collapsed_text(entry.get("receipt_path")) or relative
+        contribution = contributions.get(cited)
+        if signature is None or contribution is None:
+            continue
+        receipt_signatures[relative] = signature
+        by_file[relative] = _Contribution(
+            file_path=relative,
+            relative_path=contribution.relative_path,
+            receipt_id=contribution.receipt_id,
+            source_id=contribution.source_id,
+            revision=contribution.revision,
+            source_ref=contribution.source_ref,
+            extractor_version=contribution.extractor_version,
+            created_at=contribution.created_at,
+            extractor=contribution.extractor,
+            claims=contribution.claims,
+        )
+
+    unreadable: dict[str, tuple] = {}
+    for relative, value in (cache.get("unreadable_receipts") or {}).items():
+        signature = _signature_of(value)
+        if signature is not None:
+            unreadable[relative] = signature
+            receipt_signatures[relative] = signature
+
+    rows = index.get("corrections")
+    by_path: dict[str, dict] = {}
+    for row in (rows if isinstance(rows, list) else ()):
+        # A correction row reaches the fold's mark arithmetic by name. One that
+        # does not carry a kind this version knows, or an id, is not a record
+        # this cache may hand back — the whole sidecar is refused rather than a
+        # row quietly dropped, because "fewer corrections" is a wrong answer
+        # that looks exactly like a right one.
+        if not isinstance(row, dict) or not isinstance(row.get("claim_ids"), list):
+            return None
+        if row.get("kind") not in STATUS_BY_CORRECTION_KIND:
+            return None
+        relative = collapsed_text(row.get("relative_path"))
+        if not relative or not collapsed_text(row.get("correction_id")):
+            return None
+        by_path[relative] = row
+    correction_signatures: dict[str, tuple] = {}
+    corrections: dict[str, dict | None] = {}
+    for relative, entry in (cache.get("corrections") or {}).items():
+        signature = _signature_of(entry.get("signature") if isinstance(entry, dict) else None)
+        if signature is None:
+            continue
+        correction_signatures[relative] = signature
+        corrections[relative] = by_path.get(relative)
+
+    return _FoldInputs(
+        receipt_signatures=receipt_signatures,
+        correction_signatures=correction_signatures,
+        contributions=by_file,
+        unreadable=unreadable,
+        corrections=corrections,
+    )
+
+
+def _receipt_inventory(root: Path) -> VaultDirectoryInventory:
+    """The one no-follow walker over this vault's receipts.
+
+    A live :func:`receipt_read_batch` owns one; a bare fold borrows the
+    process memo's; a first fold builds one. There is never a second walker
+    over the same tree, because two of them would each be able to say a
+    directory was unchanged on the strength of the other's visit.
+    """
+    absolute = Path(os.path.abspath(root))
+    batch = _RECEIPT_READ_BATCH.get()
+    if batch is not None and not batch.closed:
+        if batch.root != absolute:
+            raise TemporalStoreError(
+                "unsafe_store_path", "receipt batch cannot cross vaults"
+            )
+        return batch.inventory
+    memo = _FOLD_MEMO.get(_memo_key(root))
+    if memo is not None and isinstance(memo.inventory, VaultDirectoryInventory):
+        return memo.inventory
+    try:
+        return VaultDirectoryInventory(absolute, RECEIPTS_DIR)
+    except (OSError, ValueError) as exc:
+        raise TemporalStoreError("unsafe_store_path", str(exc)) from exc
+
+
+def _receipt_signature_map(
+    root: Path, inventory: VaultDirectoryInventory
+) -> dict[str, tuple]:
+    """``{receipt path: signature}``, through the no-follow walk, every time.
+
+    This is the one step v318 never skips and never caches. A symlink at any
+    ancestor, a swapped directory, a replaced vault root: the walk fails
+    closed on all of them, and it has to happen before any signature may be
+    believed, because a signature is only evidence about a file the walk
+    actually reached.
+    """
+    found: dict[str, tuple] = {}
+    try:
+        inventory.visit_files(lambda relative, signature: found.__setitem__(relative, signature))
+    except (OSError, ValueError) as exc:
+        raise TemporalStoreError("unsafe_store_path", str(exc)) from exc
+    return found
+
+
+def _prior_inputs(root: Path, *, full: bool) -> _FoldInputs | None:
+    """What this process, or the published index, already proved about the vault."""
+    if full or not _fold_cache_enabled():
+        return None
+    return _FOLD_MEMO.get(_memo_key(root)) or _disk_inputs(root)
+
+
+def _correction_rows(
+    root: Path, signatures: dict[str, tuple], prior: _FoldInputs | None
+) -> dict[str, dict | None]:
+    rows: dict[str, dict | None] = {}
+    for relative, signature in signatures.items():
+        if (prior is not None
+                and prior.correction_signatures.get(relative) == signature
+                and relative in prior.corrections):
+            rows[relative] = prior.corrections[relative]
+            continue
+        record = read_temporal_correction(root, relative)
+        rows[relative] = None if record is None else record.to_dict()
+    return rows
+
+
+def fold_inputs(vault_root: str | Path, *, full: bool = False) -> _FoldInputs:
+    """Read every durable fold input, re-reading only what actually moved.
+
+    The directory walk is never skipped: names, sizes, inodes and modification
+    times are collected fresh on every call, because "did anything change" is
+    the one question a cache may not answer for itself. What a matching
+    signature buys is the right not to open, parse and re-validate that one
+    file — which is where v317 spent 7 of its 9 seconds on a 9,000-receipt
+    vault, almost all of it in the no-follow path checks each open repeats.
+
+    ``full=True`` and ``LIFEHUG_TEMPORAL_FOLD_CACHE=0`` both read everything.
+    """
+    root = _vault_root(vault_root)
+    inventory = _receipt_inventory(root)
+    if full:
+        # A full read re-scans every directory too, not only every file: the
+        # escape hatch has to be able to say "believe nothing you remember".
+        inventory.clear()
+    receipt_signatures = _receipt_signature_map(root, inventory)
+    correction_signatures = _signature_map(root, CORRECTION_SOURCES_DIR, "*.md")
+
+    prior = _prior_inputs(root, full=full)
+
+    fresh = _FoldInputs(
+        receipt_signatures=receipt_signatures,
+        correction_signatures=correction_signatures,
+        contributions={},
+        unreadable={},
+        corrections={},
+        inventory=inventory,
+    )
+    for relative, signature in receipt_signatures.items():
+        if prior is not None and prior.receipt_signatures.get(relative) == signature:
+            reused = prior.contributions.get(relative)
+            if reused is not None:
+                fresh.contributions[relative] = reused
+                continue
+            if relative in prior.unreadable:
+                fresh.unreadable[relative] = signature
+                continue
+        receipt = read_receipt(root, relative)
+        if receipt is None:
+            fresh.unreadable[relative] = signature
+        else:
+            fresh.contributions[relative] = _contribution_of(receipt, relative)
+
+    fresh.corrections = _correction_rows(root, correction_signatures, prior)
+
+    if _fold_cache_enabled():
+        _remember(root, fresh)
+    return fresh
+
+
+def _fold(inputs: _FoldInputs) -> dict:
+    """The fold itself — pure arithmetic over :class:`_FoldInputs`, no I/O.
+
+    Byte-for-byte the v221 algorithm. It is separated from the reading only so
+    that "what the fold computes" and "how the inputs were obtained" can be
+    tested against each other: the incremental read and the full read hand
+    this function the same inputs, so they cannot produce different bytes.
+    """
+    contributions = sorted(inputs.contributions.values(), key=lambda item: item.file_path)
+    contributions.sort(key=lambda item: item.sort_key)
+    correction_rows = sorted(
+        (row for row in inputs.corrections.values() if isinstance(row, dict)),
+        key=lambda row: (
+            collapsed_text(row.get("correction_id")),
+            collapsed_text(row.get("relative_path")),
+        ),
+    )
+    unreadable = sorted(inputs.unreadable)
+
+    groups: dict[tuple[str, str], list[_Contribution]] = {}
+    for contribution in contributions:
+        groups.setdefault((contribution.source_id, contribution.revision), []).append(
+            contribution
+        )
+
+    entries: dict[str, dict] = {}
+    marks: dict[str, list[dict]] = {}
+    receipt_rows: list[dict] = []
+    source_rows: list[dict] = []
+    selected_ids: set[str] = set()
+
+    for key in sorted(groups):
+        ordered = sorted(groups[key], key=lambda item: item.sort_key)
+        winner = ordered[-1]
+        selected_ids.add(winner.receipt_id)
+        source_rows.append(
+            {
+                "source_id": key[0],
+                "revision": key[1],
+                "selected_receipt_id": winner.receipt_id,
+                "selected_receipt_path": winner.relative_path,
+                "receipt_ids": sorted(item.receipt_id for item in ordered),
+            }
+        )
+        for contribution in ordered:
+            is_winner = contribution.receipt_id == winner.receipt_id
+            for row in contribution.claims:
+                claim_id = collapsed_text(row.get("claim_id"))
+                entries[claim_id] = copy.deepcopy(row)
+                marks.setdefault(claim_id, [])
+                if not is_winner:
+                    marks[claim_id].append(
+                        _mark("superseded", "reextracted", winner.receipt_id)
+                    )
+
+    for contribution in contributions:
+        if contribution.receipt_id not in selected_ids:
+            continue
+        for row in contribution.claims:
+            for target in row.get("supersedes_claim_ids") or ():
+                marks.setdefault(collapsed_text(target), []).append(
+                    _mark("superseded", "superseded_by_claim", collapsed_text(row.get("claim_id")))
+                )
+
+    unresolved: set[str] = set()
+    for correction in correction_rows:
+        status = STATUS_BY_CORRECTION_KIND[correction["kind"]]
+        for target in correction.get("claim_ids") or ():
+            if target not in entries:
+                unresolved.add(target)
+            marks.setdefault(target, []).append(
+                _mark(status, f"correction_{correction['kind']}", correction["correction_id"])
+            )
+
+    claims: list[dict] = []
+    counts = {status: 0 for status in CLAIM_STATUSES}
+    for claim_id in sorted(entries):
+        row = dict(entries[claim_id])
+        claim_marks = sorted(marks.get(claim_id, []), key=_mark_key)
+        row["status"] = _strongest(claim_marks)
+        row["status_marks"] = claim_marks
+        counts[row["status"]] = counts.get(row["status"], 0) + 1
+        claims.append(row)
+
+    for contribution in contributions:
+        receipt_rows.append(
+            {
+                "receipt_id": contribution.receipt_id,
+                "relative_path": contribution.relative_path,
+                "source_ref": copy.deepcopy(contribution.source_ref),
+                "extractor_version": contribution.extractor_version,
+                "created_at": contribution.created_at,
+                "claim_count": len(contribution.claims),
+                "selected": contribution.receipt_id in selected_ids,
+            }
+        )
+    receipt_rows.sort(key=lambda row: (row["relative_path"], row["receipt_id"]))
+
+    counts.update(
+        {
+            "claims": len(claims),
+            "receipts": len(receipt_rows),
+            "selected_receipts": len(selected_ids),
+            "sources": len(source_rows),
+            "corrections": len(correction_rows),
+        }
+    )
+
+    return {
+        "version": INDEX_VERSION,
+        "claim_schema_version": SCHEMA_VERSION,
+        "counts": counts,
+        "sources": source_rows,
+        "receipts": receipt_rows,
+        "corrections": copy.deepcopy(correction_rows),
+        "claims": claims,
+        "active_claim_ids": [
+            row["claim_id"] for row in claims if row["status"] == "active"
+        ],
+        "unresolved_correction_targets": sorted(unresolved),
+        "unreadable_receipt_paths": unreadable,
+    }
+
+
+def fold_active_index(vault_root: str | Path, *, full: bool = False) -> dict:
     """Rebuild the active claim index from receipts and corrections. Pure.
 
     The whole algorithm, in the order it runs — and none of it depends on the
@@ -1565,114 +2178,44 @@ def fold_active_index(vault_root: str | Path) -> dict:
     The returned mapping contains **no wall-clock field**, which is what makes
     "delete the index, rebuild it, compare the bytes" a real test rather than a
     slogan.
+
+    v318: the READING is incremental (:func:`fold_inputs`) and the arithmetic
+    (:func:`_fold`) is not. A receipt whose stat signature has not moved is not
+    opened again; everything else is read exactly as before, and the fold runs
+    over the whole vault's inputs every time. So the output is a function of
+    the receipts and corrections on disk and of nothing else — the cache can
+    only make the same answer arrive sooner, never make a different one
+    arrive at all. ``full=True`` reads every file regardless, which is what
+    `temporal_publication.verify` and the ``--rebuild`` repair path use.
     """
-    receipts, unreadable = load_receipts(vault_root)
-    corrections = load_temporal_corrections(vault_root)
+    root = _vault_root(vault_root)
+    inputs = fold_inputs(root, full=full)
+    index = _fold(inputs)
+    inputs.folded = index
+    return index
 
-    groups: dict[tuple[str, str], list[ExtractionReceipt]] = {}
-    for receipt in receipts:
-        key = (receipt.source_ref.source_id, receipt.source_ref.revision)
-        groups.setdefault(key, []).append(receipt)
 
-    entries: dict[str, dict] = {}
-    marks: dict[str, list[dict]] = {}
-    receipt_rows: list[dict] = []
-    source_rows: list[dict] = []
-    selected_ids: set[str] = set()
+def receipt_declarations(
+    vault_root: str | Path, *, full: bool = False
+) -> tuple[dict[str, dict], list[str]]:
+    """``({receipt_id: {"extractor": block}}, unreadable_paths)``.
 
-    for key in sorted(groups):
-        ordered = sorted(groups[key], key=receipt_sort_key)
-        winner = ordered[-1]
-        selected_ids.add(winner.receipt_id)
-        source_rows.append(
-            {
-                "source_id": key[0],
-                "revision": key[1],
-                "selected_receipt_id": winner.receipt_id,
-                "selected_receipt_path": winner.relative_path,
-                "receipt_ids": sorted(item.receipt_id for item in ordered),
-            }
-        )
-        for receipt in ordered:
-            is_winner = receipt.receipt_id == winner.receipt_id
-            for claim in receipt.claims:
-                row = claim.to_dict()
-                row["receipt_id"] = receipt.receipt_id
-                row["receipt_path"] = receipt.relative_path
-                entries[claim.claim_id] = row
-                marks.setdefault(claim.claim_id, [])
-                if not is_winner:
-                    marks[claim.claim_id].append(
-                        _mark("superseded", "reextracted", winner.receipt_id)
-                    )
-
-    for receipt in receipts:
-        if receipt.receipt_id not in selected_ids:
-            continue
-        for claim in receipt.claims:
-            for target in claim.supersedes_claim_ids:
-                marks.setdefault(target, []).append(
-                    _mark("superseded", "superseded_by_claim", claim.claim_id)
-                )
-
-    unresolved: set[str] = set()
-    for correction in corrections:
-        status = STATUS_BY_CORRECTION_KIND[correction.kind]
-        for target in correction.claim_ids:
-            if target not in entries:
-                unresolved.add(target)
-            marks.setdefault(target, []).append(
-                _mark(status, f"correction_{correction.kind}", correction.correction_id)
-            )
-
-    claims: list[dict] = []
-    counts = {status: 0 for status in CLAIM_STATUSES}
-    for claim_id in sorted(entries):
-        row = dict(entries[claim_id])
-        claim_marks = sorted(marks.get(claim_id, []), key=_mark_key)
-        row["status"] = _strongest(claim_marks)
-        row["status_marks"] = claim_marks
-        counts[row["status"]] = counts.get(row["status"], 0) + 1
-        claims.append(row)
-
-    for receipt in receipts:
-        receipt_rows.append(
-            {
-                "receipt_id": receipt.receipt_id,
-                "relative_path": receipt.relative_path,
-                "source_ref": receipt.source_ref.to_dict(),
-                "extractor_version": receipt.extractor_version,
-                "created_at": receipt.created_at,
-                "claim_count": len(receipt.claims),
-                "selected": receipt.receipt_id in selected_ids,
-            }
-        )
-    receipt_rows.sort(key=lambda row: (row["relative_path"], row["receipt_id"]))
-
-    counts.update(
+    What a reader needs about a receipt that the active index does not carry:
+    the extractor's DECLARATION about its own run — `event_identity`'s telling
+    keys, document revision and recorder event id all live there. Shaped as a
+    mapping so `event_identity._extractor_block` reads it exactly as it reads
+    a receipt, and served from the same incremental inputs as the fold, so a
+    manifest rebuild no longer re-parses nine thousand receipts to find eight
+    thousand declarations it already had.
+    """
+    inputs = fold_inputs(_vault_root(vault_root), full=full)
+    return (
         {
-            "claims": len(claims),
-            "receipts": len(receipt_rows),
-            "selected_receipts": len(selected_ids),
-            "sources": len(source_rows),
-            "corrections": len(corrections),
-        }
+            contribution.receipt_id: {"extractor": copy.deepcopy(contribution.extractor)}
+            for contribution in inputs.contributions.values()
+        },
+        sorted(inputs.unreadable),
     )
-
-    return {
-        "version": INDEX_VERSION,
-        "claim_schema_version": SCHEMA_VERSION,
-        "counts": counts,
-        "sources": source_rows,
-        "receipts": receipt_rows,
-        "corrections": [correction.to_dict() for correction in corrections],
-        "claims": claims,
-        "active_claim_ids": [
-            row["claim_id"] for row in claims if row["status"] == "active"
-        ],
-        "unresolved_correction_targets": sorted(unresolved),
-        "unreadable_receipt_paths": unreadable,
-    }
 
 
 def active_index_bytes(index: dict) -> str:
@@ -1680,21 +2223,88 @@ def active_index_bytes(index: dict) -> str:
     return _canonical_json(index)
 
 
+def _fold_cache_payload(inputs: _FoldInputs, index_text: str) -> dict:
+    receipts: dict[str, dict] = {}
+    for file_path, contribution in inputs.contributions.items():
+        entry: dict = {"signature": list(inputs.receipt_signatures[file_path])}
+        if contribution.relative_path != file_path:
+            entry["receipt_path"] = contribution.relative_path
+        if contribution.extractor:
+            entry["extractor"] = contribution.extractor
+        receipts[file_path] = entry
+    return {
+        "cache_version": FOLD_CACHE_VERSION,
+        "index_version": INDEX_VERSION,
+        "claim_schema_version": SCHEMA_VERSION,
+        "index_sha256": hashlib.sha256(index_text.encode("utf-8")).hexdigest(),
+        "receipts": receipts,
+        "unreadable_receipts": {
+            path: list(signature) for path, signature in inputs.unreadable.items()
+        },
+        "corrections": {
+            path: {"signature": list(signature)}
+            for path, signature in inputs.correction_signatures.items()
+        },
+    }
+
+
+def _write_fold_cache(root: Path, index: dict, index_text: str) -> None:
+    """Record what the index just published was folded FROM — or record nothing.
+
+    The sidecar is written only for an index this process folded, identified by
+    object identity rather than by a re-read: a caller that hands
+    :func:`write_active_index` an index it built some other way gets its file
+    published and no claim made about its inputs, and the next fold reads
+    every receipt. A stale sidecar is harmless for the same reason — it names
+    a digest the index no longer has, and :func:`_disk_inputs` refuses it.
+    """
+    if not _fold_cache_enabled():
+        return
+    inputs = _FOLD_MEMO.get(_memo_key(root))
+    if inputs is None or inputs.folded is not index:
+        return
+    try:
+        atomic_write_vault_text(
+            store_path(root, FOLD_CACHE_FILE),
+            _canonical_json(_fold_cache_payload(inputs, index_text)),
+            vault_root=root,
+        )
+    except (OSError, ValueError, KeyError):
+        # A cache that cannot be written is a cache that is not there. The
+        # index is already published and correct; the next fold is just slow.
+        return
+
+
 def write_active_index(vault_root: str | Path, index: dict) -> Path:
     """Publish the index atomically. This is the one file here that may be
-    replaced, because it is a materialized view and never evidence."""
+    replaced, because it is a materialized view and never evidence.
+
+    v318: an index whose bytes are already the bytes on disk is not rewritten.
+    On a large vault that is 27 MiB of I/O and a git-visible mtime per compile,
+    for a file that would come out identical — and the sidecar beside it is
+    what a later fold reads instead of nine thousand receipts, so the two are
+    written together or not at all.
+    """
     root = _vault_root(vault_root)
     path = store_path(root, ACTIVE_INDEX_FILE)
-    try:
-        atomic_write_vault_text(path, active_index_bytes(index), vault_root=root)
-    except ValueError as exc:
-        raise TemporalStoreError("unsafe_store_path", str(exc)) from exc
+    text = active_index_bytes(index)
+    if _read_text(root, ACTIVE_INDEX_FILE) != text:
+        try:
+            atomic_write_vault_text(path, text, vault_root=root)
+        except ValueError as exc:
+            raise TemporalStoreError("unsafe_store_path", str(exc)) from exc
+    _write_fold_cache(root, index, text)
     return path
 
 
-def rebuild_active_index(vault_root: str | Path) -> dict:
-    """Fold, publish, return. Deleting the file first must change nothing."""
-    index = fold_active_index(vault_root)
+def rebuild_active_index(vault_root: str | Path, *, full: bool = False) -> dict:
+    """Fold, publish, return. Deleting the file first must change nothing.
+
+    ``full=True`` is the escape hatch: every receipt and every correction is
+    read from disk, whatever the sidecar says, and the sidecar is rewritten
+    from that reading.
+    """
+    index = fold_active_index(vault_root, full=full)
     write_active_index(vault_root, index)
     return index
 
@@ -1778,6 +2388,9 @@ __all__ = [
     "CORRECTION_IDENTITY_KEYS",
     "CORRECTION_ID_PREFIX",
     "CORRECTION_KINDS",
+    "FOLD_CACHE_ENV",
+    "FOLD_CACHE_FILE",
+    "FOLD_CACHE_VERSION",
     "FRONTMATTER_ORDER",
     "MOVE_IDENTITY_KEYS",
     "MOVE_REASON_MAX_CHARS",
@@ -1805,6 +2418,8 @@ __all__ = [
     "file_ordering_constraint",
     "file_temporal_correction",
     "fold_active_index",
+    "fold_inputs",
+    "forget_fold_inputs",
     "format_frontmatter",
     "load_ordering_constraints",
     "load_receipts",
@@ -1821,6 +2436,7 @@ __all__ = [
     "read_store_text",
     "read_temporal_correction",
     "rebuild_active_index",
+    "receipt_declarations",
     "receipt_path",
     "receipt_relative_paths",
     "receipt_sort_key",

@@ -277,6 +277,12 @@ class ReceiptReadBatchTests(OfferVaultCase):
         self.paths = ts.receipt_relative_paths(self.root)
 
     def test_unchanged_receipts_parse_once_and_every_fold_refreshes_inventory(self):
+        # v318 remembers parsed inputs per VAULT rather than per batch, in
+        # memory and in a sidecar beside the published index. Seeding this
+        # vault filled both, so both are dropped here: what follows is about
+        # a vault this process has never read.
+        ts.forget_fold_inputs(self.root)
+        ts.store_path(self.root, ts.FOLD_CACHE_FILE).unlink(missing_ok=True)
         with mock.patch.object(ts, "receipt_from_dict", wraps=ts.receipt_from_dict) as parse, \
                 mock.patch.object(ts, "receipt_relative_paths", wraps=ts.receipt_relative_paths) as listing:
             with ts.receipt_read_batch(self.root):
@@ -289,7 +295,11 @@ class ReceiptReadBatchTests(OfferVaultCase):
                 self.assertEqual(parse.call_count, len(self.paths))
                 self.assertEqual(listing.call_count, 0)
             self.assertEqual(ts.fold_active_index(self.root), first)
-            self.assertEqual(parse.call_count, 2 * len(self.paths))
+            # v317 re-parsed every receipt the moment the batch closed, because
+            # the parsed inputs died with the scope. v318's memo belongs to the
+            # vault: leaving the scope still costs a fresh no-follow walk and
+            # still costs nothing in re-reading.
+            self.assertEqual(parse.call_count, len(self.paths))
 
     def test_new_receipts_and_corrections_are_visible_in_the_next_fold(self):
         with ts.receipt_read_batch(self.root):
