@@ -134,23 +134,30 @@ CONVERSATION_SOURCES_DIR = "sources/conversations"
 INDEX_VERSION = 1
 
 #: v318. The sidecar that says what the PUBLISHED active index was folded from:
-#: one stat signature per receipt and per correction source, plus each
-#: receipt's ``extractor`` declaration (the one thing the telling manifest
-#: needs that the index itself does not carry). It is an INPUT cache and never
-#: an output one — nothing here is ever returned as a fold result; a signature
-#: that still matches only buys the right to skip re-reading and re-validating
-#: one file. A missing, stale, unparseable or self-inconsistent sidecar costs
+#: one signature per receipt and per correction source, plus each receipt's
+#: ``extractor`` declaration (the one thing the telling manifest needs that
+#: the index itself does not carry). It is an INPUT cache and never an output
+#: one — nothing here is ever returned as a fold result; a signature that
+#: still matches only buys the right to skip re-reading and re-validating one
+#: file. A missing, stale, unparseable or self-inconsistent sidecar costs
 #: exactly one full read, which is what v317 did every time.
 #:
-#: Machine-local by construction (`vault_paths.stat_signature` carries device
-#: and inode), so the contract declares it ``tracked: false``: a shared vault
-#: must not carry one machine's inode numbers to another, where every
-#: signature would miss and the file would be dead weight in git history.
+#: v322: the sidecar's signatures are CONTENT signatures (size and SHA-256 of
+#: the bytes), so the file means the same thing on every machine and travels
+#: with the vault — the contract declares it ``tracked: true``. A fresh clone
+#: hashes every receipt once (reading, not parsing or validating) and reuses
+#: everything whose bytes did not move. Inside one process the stat signature
+#: still vouches first, so an unchanged file is not even re-hashed.
 FOLD_CACHE_FILE = f"{TEMPORAL_STATE_DIR}/fold-cache.json"
 
 #: Bumped when the sidecar's own shape changes. An older or newer number is not
 #: migrated and not read — it is one full fold, and the next write replaces it.
-FOLD_CACHE_VERSION = 1
+#: 1 was v318's stat-signature sidecar; 2 carries content signatures.
+FOLD_CACHE_VERSION = 2
+
+#: The first element of every content signature. A stat signature is six
+#: integers; a content signature is ``(CONTENT_SIGNATURE_KIND, size, hex)``.
+CONTENT_SIGNATURE_KIND = "sha256"
 
 #: Set to ``0`` to fold every receipt from disk on every call. The escape hatch
 #: for a person who suspects the sidecar rather than the receipts; the
@@ -1646,7 +1653,14 @@ class _Contribution:
 
 @dataclass
 class _FoldInputs:
-    """Every durable input of one fold, with the signature that vouches for it."""
+    """Every durable input of one fold, with the signature that vouches for it.
+
+    ``receipt_signatures`` / ``correction_signatures`` are whatever vouched for
+    the file when it was last believed: a stat signature inside one process, a
+    content signature when the inputs came back from the sidecar on disk.
+    ``content_signatures`` is what the sidecar will be written from; a file
+    without one is simply re-read by the next fold that starts from disk.
+    """
 
     receipt_signatures: dict[str, tuple]
     correction_signatures: dict[str, tuple]
@@ -1657,6 +1671,7 @@ class _FoldInputs:
     #: negative is what keeps a vault's ordering constraints from being
     #: re-parsed as candidate corrections on every fold.
     corrections: dict[str, dict | None]
+    content_signatures: dict[str, tuple] = field(default_factory=dict)
     #: The index object the last fold over exactly these inputs returned, so
     #: :func:`write_active_index` can tell whether the file it is about to
     #: publish is the one this sidecar would describe.
@@ -1750,6 +1765,44 @@ def _signature_of(value: object) -> tuple | None:
     if not isinstance(value, list) or not value:
         return None
     return tuple(value)
+
+
+def _is_content_signature(signature: tuple | None) -> bool:
+    return (
+        isinstance(signature, tuple)
+        and len(signature) == 3
+        and signature[0] == CONTENT_SIGNATURE_KIND
+    )
+
+
+def _content_signature(root: Path, relative: str) -> tuple | None:
+    """``(kind, size, sha256)`` of one file's bytes, through the store's own
+    no-follow reader; ``None`` for a file that reader will not hand back."""
+    text = _read_text(root, relative)
+    if text is None:
+        return None
+    data = text.encode("utf-8")
+    return (CONTENT_SIGNATURE_KIND, len(data), hashlib.sha256(data).hexdigest())
+
+
+def _still_vouched(
+    root: Path, relative: str, signature: tuple, prior: _FoldInputs | None, table: dict[str, tuple]
+) -> tuple | None:
+    """The content signature to carry forward when ``prior`` still vouches for
+    ``relative`` — by the same stat signature (same process) or by the same
+    bytes (a sidecar from disk, possibly another machine's) — else ``None``."""
+    if prior is None:
+        return None
+    remembered = table.get(relative)
+    if remembered is None:
+        return None
+    if remembered == signature:
+        return prior.content_signatures.get(relative) or (
+            remembered if _is_content_signature(remembered) else None
+        )
+    if _is_content_signature(remembered) and _content_signature(root, relative) == remembered:
+        return remembered
+    return None
 
 
 def _contributions_from_index(index: dict, declared: dict) -> dict[str, _Contribution] | None:
@@ -1962,17 +2015,31 @@ def _prior_inputs(root: Path, *, full: bool) -> _FoldInputs | None:
 
 
 def _correction_rows(
-    root: Path, signatures: dict[str, tuple], prior: _FoldInputs | None
+    root: Path,
+    signatures: dict[str, tuple],
+    prior: _FoldInputs | None,
+    content: dict[str, tuple | None] | None = None,
 ) -> dict[str, dict | None]:
+    if content is None:
+        content = {}
     rows: dict[str, dict | None] = {}
     for relative, signature in signatures.items():
-        if (prior is not None
-                and prior.correction_signatures.get(relative) == signature
-                and relative in prior.corrections):
+        vouched = (
+            _still_vouched(root, relative, signature, prior, prior.correction_signatures)
+            if prior is not None and relative in prior.corrections
+            else None
+        )
+        if vouched is not None or (
+            prior is not None
+            and relative in prior.corrections
+            and prior.correction_signatures.get(relative) == signature
+        ):
             rows[relative] = prior.corrections[relative]
+            content[relative] = vouched or _content_signature(root, relative)
             continue
         record = read_temporal_correction(root, relative)
         rows[relative] = None if record is None else record.to_dict()
+        content[relative] = _content_signature(root, relative)
     return rows
 
 
@@ -2008,21 +2075,35 @@ def fold_inputs(vault_root: str | Path, *, full: bool = False) -> _FoldInputs:
         inventory=inventory,
     )
     for relative, signature in receipt_signatures.items():
-        if prior is not None and prior.receipt_signatures.get(relative) == signature:
+        vouched = _still_vouched(root, relative, signature, prior, prior.receipt_signatures) \
+            if prior is not None else None
+        same_stat = prior is not None and prior.receipt_signatures.get(relative) == signature
+        if vouched is not None or same_stat:
             reused = prior.contributions.get(relative)
             if reused is not None:
                 fresh.contributions[relative] = reused
+                if vouched is not None:
+                    fresh.content_signatures[relative] = vouched
                 continue
             if relative in prior.unreadable:
                 fresh.unreadable[relative] = signature
+                if vouched is not None:
+                    fresh.content_signatures[relative] = vouched
                 continue
         receipt = read_receipt(root, relative)
         if receipt is None:
             fresh.unreadable[relative] = signature
         else:
             fresh.contributions[relative] = _contribution_of(receipt, relative)
+        digest = _content_signature(root, relative)
+        if digest is not None:
+            fresh.content_signatures[relative] = digest
 
-    fresh.corrections = _correction_rows(root, correction_signatures, prior)
+    correction_content: dict[str, tuple | None] = {}
+    fresh.corrections = _correction_rows(root, correction_signatures, prior, correction_content)
+    for relative, digest in correction_content.items():
+        if digest is not None:
+            fresh.content_signatures[relative] = digest
 
     if _fold_cache_enabled():
         _remember(root, fresh)
@@ -2224,9 +2305,14 @@ def active_index_bytes(index: dict) -> str:
 
 
 def _fold_cache_payload(inputs: _FoldInputs, index_text: str) -> dict:
+    """Content signatures only: a file this fold never hashed is left out of
+    the sidecar, and the next fold that starts from disk reads it."""
     receipts: dict[str, dict] = {}
     for file_path, contribution in inputs.contributions.items():
-        entry: dict = {"signature": list(inputs.receipt_signatures[file_path])}
+        digest = inputs.content_signatures.get(file_path)
+        if digest is None:
+            continue
+        entry: dict = {"signature": list(digest)}
         if contribution.relative_path != file_path:
             entry["receipt_path"] = contribution.relative_path
         if contribution.extractor:
@@ -2239,11 +2325,14 @@ def _fold_cache_payload(inputs: _FoldInputs, index_text: str) -> dict:
         "index_sha256": hashlib.sha256(index_text.encode("utf-8")).hexdigest(),
         "receipts": receipts,
         "unreadable_receipts": {
-            path: list(signature) for path, signature in inputs.unreadable.items()
+            path: list(inputs.content_signatures[path])
+            for path in inputs.unreadable
+            if path in inputs.content_signatures
         },
         "corrections": {
-            path: {"signature": list(signature)}
-            for path, signature in inputs.correction_signatures.items()
+            path: {"signature": list(inputs.content_signatures[path])}
+            for path in inputs.correction_signatures
+            if path in inputs.content_signatures
         },
     }
 
@@ -2388,6 +2477,7 @@ __all__ = [
     "CORRECTION_IDENTITY_KEYS",
     "CORRECTION_ID_PREFIX",
     "CORRECTION_KINDS",
+    "CONTENT_SIGNATURE_KIND",
     "FOLD_CACHE_ENV",
     "FOLD_CACHE_FILE",
     "FOLD_CACHE_VERSION",

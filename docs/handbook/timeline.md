@@ -630,6 +630,16 @@ takes that receipt's contribution from the index it already published, and
 from a small sidecar (`state/temporal_claims/fold-cache.json`) that records
 what that index was folded from.
 
+Since v322 that sidecar records the SHA-256 of each receipt's bytes rather
+than the machine's inode and modification time, and it is committed with the
+vault (`tracked: true`, like the index it describes). A fresh checkout — the
+hosted worker starts one for every job — hashes each receipt once, which is
+reading, not parsing or validating, and reuses everything whose bytes did not
+move. Inside one process the stat signature still vouches first, so an
+unchanged file is not even re-hashed. The publication cache beside it was
+already keyed on content (the derivation fingerprint and the day) and travels
+the same way.
+
 So a filing that adds five receipts reads five receipts. The output is
 byte-identical to a fold that read all nine thousand — that is a test
 (`tests/test_temporal_fold_cache.py`), not a hope — and if the sidecar is

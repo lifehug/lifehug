@@ -202,17 +202,55 @@ class CacheInvalidationTests(FoldCacheCase):
     def cache(self) -> dict:
         return json.loads(ts.store_path(self.vault, ts.FOLD_CACHE_FILE).read_text())
 
-    def test_touching_one_receipt_reparses_exactly_that_receipt(self) -> None:
+    def test_touching_one_receipt_with_the_same_bytes_re_reads_nothing(self) -> None:
+        """v322: the sidecar vouches for BYTES, not for inodes and mtimes. A
+        file rewritten with the same bytes (or the same file in a fresh
+        clone) is hashed, matched and not parsed again."""
         ts.rebuild_active_index(self.vault)
         ts.forget_fold_inputs(self.vault)
         path = Path(self.filed[0]["path"])
-        # Same bytes, new signature: the cache keys on the file, not on a guess
-        # about whether anybody would have changed it.
         payload = path.read_text(encoding="utf-8")
         path.write_text(payload, encoding="utf-8")
         _index, reads = self.counted_fold()
+        self.assertEqual(reads, 0)
+        self.assert_identical("a touched receipt with the same bytes folds the same")
+
+    def test_rewriting_one_receipts_bytes_reparses_exactly_that_receipt(self) -> None:
+        ts.rebuild_active_index(self.vault)
+        ts.forget_fold_inputs(self.vault)
+        path = Path(self.filed[0]["path"])
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        # Same size, different bytes: the content signature, not the length,
+        # is what has to move.
+        mention = payload["claims"][0]["subject_mention"]
+        payload["claims"][0]["subject_mention"] = mention[:-1] + ("X" if mention[-1] != "X" else "Y")
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        _index, reads = self.counted_fold()
         self.assertEqual(reads, 1)
-        self.assert_identical("a touched receipt is re-read and folds the same")
+        self.assert_identical("a rewritten receipt is re-read and folds like a full read")
+
+    def test_a_fresh_clone_reuses_the_committed_sidecar(self) -> None:
+        """The hosted case: a new checkout of the vault on another machine has
+        every inode, device and mtime different and every byte the same."""
+        ts.rebuild_active_index(self.vault)
+        clone = Path(tempfile.mkdtemp(prefix="fold-clone-", dir=self.vault.parent))
+        shutil.rmtree(clone)
+        shutil.copytree(self.vault, clone)
+        for path in clone.rglob("*"):
+            if path.is_file():
+                os.utime(path, (1_600_000_000, 1_600_000_000))
+        ts.forget_fold_inputs(clone)
+        with mock.patch.object(ts, "read_receipt", wraps=ts.read_receipt) as read:
+            cloned = ts.fold_active_index(clone)
+        self.assertEqual(read.call_count, 0)
+        self.assertEqual(
+            ts.active_index_bytes(cloned),
+            ts.active_index_bytes(ts.fold_active_index(self.vault, full=True)),
+        )
+        sidecar = json.loads(ts.store_path(clone, ts.FOLD_CACHE_FILE).read_text())
+        for entry in sidecar["receipts"].values():
+            self.assertEqual(entry["signature"][0], ts.CONTENT_SIGNATURE_KIND)
+            self.assertEqual(len(entry["signature"]), 3)
 
     def test_deleting_the_sidecar_falls_back_to_a_full_read(self) -> None:
         expected = ts.active_index_bytes(ts.rebuild_active_index(self.vault))
@@ -470,7 +508,9 @@ class PublicationShortcutTests(FoldCacheCase):
 class ContractTests(FoldCacheCase):
     """Both caches are declared state, written through the vault's own writer."""
 
-    def test_both_caches_are_declared_untracked_state(self) -> None:
+    def test_both_caches_are_declared_tracked_state(self) -> None:
+        """v322: content-keyed, so they ride the vault like the index they
+        describe. Optional still — a vault without them folds once in full."""
         import vault_paths as vp  # noqa: PLC0415
 
         for name, relative in (
@@ -481,7 +521,7 @@ class ContractTests(FoldCacheCase):
             self.assertEqual(entry["external_path"], relative)
             self.assertEqual(entry["kind"], "file")
             self.assertFalse(entry["required"])
-            self.assertIs(entry["tracked"], False)
+            self.assertIs(entry["tracked"], True)
 
     def test_both_caches_land_inside_the_vault_and_nowhere_else(self) -> None:
         ts.rebuild_active_index(self.vault)
