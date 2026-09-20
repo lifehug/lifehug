@@ -231,20 +231,23 @@ class VaultContractTests(unittest.TestCase):
         # `vault-contract-v15`; v303 adds deterministic archive-classification
         # receipts at `state/classification_batches` (`vault-contract-v16`);
         # v304 binds its pure validator and framework identity (`v17`); v318
-        # adds the temporal fold's machine-local input cache at
-        # `state/temporal_claims/fold-cache.json` — the first entry the
-        # contract carries with `tracked: false`, because stat signatures
-        # name one machine's inodes and must never ride a shared vault
-        # (`vault-contract-v18`).
+        # adds the temporal fold's input cache at
+        # `state/temporal_claims/fold-cache.json` as the contract's first
+        # `tracked: false` entry, because its stat signatures named one
+        # machine's inodes (`vault-contract-v18`); v322 keys that sidecar and
+        # the publication cache on content instead and COMMITS both, so a
+        # hosted checkout inherits the fold it would otherwise redo from
+        # scratch on every job (`vault-contract-v19`).
         # The release commit that takes this branch's version slot moves
         # both this number and `vault_contract.json`'s together.
-        self.assertEqual(exported["identity"]["framework_version"], 318)
+        self.assertEqual(exported["identity"]["framework_version"], 322)
         fold_cache = exported["data_paths"]["temporal_fold_cache"]
         self.assertEqual(
             fold_cache["external_path"], "state/temporal_claims/fold-cache.json"
         )
-        self.assertIs(fold_cache["tracked"], False)
-        self.assertNotIn(
+        self.assertIs(fold_cache["tracked"], True)
+        self.assertIs(exported["data_paths"]["temporal_publication_cache"]["tracked"], True)
+        self.assertIn(
             "temporal_fold_cache",
             {
                 name

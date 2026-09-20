@@ -1,7 +1,7 @@
 {
-  "version": 321,
+  "version": 322,
   "released": "2026-09-20",
-  "changelog": "v321: The hosted refresh reads the newest words first too. v320 taught the local refresh planner to drain its backlog by what the information is; the canonical archive batch planner the hosted worker calls (`classify-story --batch-plan`) still sorted stale-first and then alphabetically by path, so on a vault with a few hundred context refreshes pending a story appended to an answer was still the last thing read. Both planners now share one order: a filed correction, then a story just told or edited, then the classifier's own rule upgrades, then the ambient context moving under an unchanged story. No prompt, schema or rule-version change.",
+  "changelog": "v322: The fold cache travels with the vault. v318's incremental fold kept its input cache as a machine-local sidecar (stat signatures: inode and mtime), declared tracked:false, so every fresh checkout — which is every hosted job — refolded all nine thousand receipts from scratch and paid the cost the cache was built to remove. The sidecar now records the SHA-256 of each receipt's bytes and each correction source, means the same thing on every machine, and is committed with the vault alongside the publication cache (already content-keyed). A fresh clone hashes each receipt once and reuses everything whose bytes did not move; inside one process the stat signature still vouches first. Contract vault-contract-v19: both caches tracked:true; fold cache schema 2 (1 still recognised, and simply refolded once). No prompt, rule or output change — byte identity with a full fold remains a test.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
