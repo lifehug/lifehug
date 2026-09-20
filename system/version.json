@@ -1,7 +1,7 @@
 {
-  "version": 320,
-  "released": "2026-09-19",
-  "changelog": "v320: Newest information first. The bounded classification refresh now drains its backlog in order of what the information is — a filed correction, then a story the person just told or edited, then the classifier's own rule upgrades, then the ambient context moving under an unchanged story — instead of alphabetically by path. On a vault with a few hundred context refreshes pending, a memory appended to an answer was the last thing the loop would have read; it is now the first, so a new story is classified, resolved and placed on the next pass rather than after the backlog. No prompt, schema or rule-version change.",
+  "version": 321,
+  "released": "2026-09-20",
+  "changelog": "v321: The hosted refresh reads the newest words first too. v320 taught the local refresh planner to drain its backlog by what the information is; the canonical archive batch planner the hosted worker calls (`classify-story --batch-plan`) still sorted stale-first and then alphabetically by path, so on a vault with a few hundred context refreshes pending a story appended to an answer was still the last thing read. Both planners now share one order: a filed correction, then a story just told or edited, then the classifier's own rule upgrades, then the ambient context moving under an unchanged story. No prompt, schema or rule-version change.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
