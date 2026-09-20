@@ -309,6 +309,27 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         self.assertEqual(second["remaining_count"], 0)
         self.assertEqual(second["items"][0]["source_path"], "sources/manual/bravo.md")
 
+    def test_just_told_words_outrank_the_alphabetical_context_backlog(self) -> None:
+        """lifehug#371 (hosted leg): the bounded plan selects a source whose
+        words changed before an earlier-by-path source whose context moved."""
+        current_a, current_b = snapshot(self.a), snapshot(self.b)
+        self.existing(self.a, {**current_a, "context_digest": "sha256:" + "0" * 64})
+        self.existing(self.b, {**current_b, "source_revision": "sha256:" + "1" * 64})
+        load, build = self.catalogs({self.a: current_a, self.b: current_b})
+        with load, build:
+            plan = cs.build_batch_plan(limit=1, skip_candidates=True)
+        self.assertEqual(plan["pending_count"], 2)
+        self.assertEqual(
+            [(item["source_path"], item["reason"]) for item in plan["items"]],
+            [("sources/manual/bravo.md", "source_changed")],
+        )
+        load, build = self.catalogs({self.a: current_a, self.b: current_b})
+        with load, build:
+            both = cs.build_batch_plan(limit=2, skip_candidates=True)
+        self.assertEqual(
+            [item["reason"] for item in both["items"]], ["source_changed", "context_changed"]
+        )
+
     def test_changed_snapshot_does_not_match_an_old_exclusion(self) -> None:
         before = snapshot(self.a, "before")
         exclusion = [{

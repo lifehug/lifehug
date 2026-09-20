@@ -1927,7 +1927,17 @@ def build_batch_plan(
             "snapshot": classifier_ctx.snapshot_metadata(snapshot),
             "context_snapshot": snapshot,
         })
-    pending.sort(key=lambda row: (row["reason"] != "stale", row["source_path"]))
+    # lifehug#371: the bounded plan drains in order of what the information
+    # is (a correction, then new words, then our own rule moves, then the
+    # ambient context) — the same order `select_refresh_targets` uses — so a
+    # story the person just told is never queued behind an alphabetical
+    # backlog of context refreshes.
+    pending.sort(key=lambda row: (
+        classifier_ctx.REFRESH_REASON_PRIORITY.get(
+            row["reason"], len(classifier_ctx.REFRESH_REASON_PRIORITY)
+        ),
+        row["source_path"],
+    ))
     excluded_count = sum(
         _pending_identity(row) in excluded_identities for row in pending
     )
