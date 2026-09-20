@@ -835,15 +835,29 @@ def rebuild_coverage() -> dict:
     return coverage
 
 
-def mark_answered_in_bank(question_id: str, answered_date: str | None = None) -> bool:
+def mark_answered_in_bank(question_id: str, answered_date: str | None = None,
+                          note: str | None = None) -> bool:
+    """Check a bank row off, in place — the ONE writer of that mark.
+
+    ``note`` rides inside the same trailing annotation the date already uses
+    (`*(2026-09-19 — retired: …)*`), which is how a row that closed WITHOUT an
+    answer says so in the bank itself rather than in a second ledger: v319's
+    stale-mint retirement (ADR 0037) closes a question the resolver already
+    placed, and the person reading their own bank should be able to see why
+    the row is checked when they never answered it. Nothing is ever deleted.
+    """
     md = QUESTIONS_FILE.read_text()
     date_text = answered_date or datetime.now().date().isoformat()
+    annotation = f"{date_text} — {note}".strip() if str(note or "").strip() else date_text
     qid = re.escape(question_id)
     pattern = re.compile(
         rf"^(- \[) \] ({qid}: .+?)(?:\s+\*\(.+\)\*)?\s*$",
         re.MULTILINE,
     )
-    new_md, count = pattern.subn(rf"\1x] \2 *({date_text})*", md, count=1)
+    # A callable replacement, not a template: an annotation is free text and a
+    # backslash or a `\1` in it must never be read as a group reference.
+    new_md, count = pattern.subn(
+        lambda m: f"{m.group(1)}x] {m.group(2)} *({annotation})*", md, count=1)
     if count:
         write_text(QUESTIONS_FILE, new_md)
         return True

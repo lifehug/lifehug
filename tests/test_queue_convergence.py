@@ -44,6 +44,7 @@ import temporal_publication as pub  # noqa: E402
 import timeline_candidates as tcand  # noqa: E402
 import timeline_interaction as ti  # noqa: E402
 
+from tempdirs import root_parent_tmp  # noqa: E402
 from test_landmark_opportunities import BAR, MesaVault, year  # noqa: E402
 
 
@@ -671,6 +672,253 @@ class TheOneWriterIsHookedTests(unittest.TestCase):
         ])
         matched = tcand.identities_for_landmark("military", {"none": True}, view=block)
         self.assertEqual(matched, ["lo:" + "7" * 24])
+
+
+# --------------------------------------------------------------------------
+# The OTHER closure: the projection stopped carrying the gap (v319, #368)
+# --------------------------------------------------------------------------
+
+
+def mint_into(bank: str, rows, *, published=()) -> tuple:
+    """`(bank text, {published id: bank id})` — the rows minted, in order.
+
+    The real mint, through the real seam: `work_items` -> `mint_work_item_
+    question` -> `insert_keystone_question`, which is what weekly maintenance
+    runs. Nothing is written; the bank is a string all the way through.
+    """
+    text = bank
+    minted: dict = {}
+    for offset, item in enumerate(tcand.work_items(rows, published=published, now=NOW), 1):
+        row = qp.mint_work_item_question(
+            item, next_question_id=lambda category, n=offset: f"{category}{n}",
+            minted_at=NOW)
+        assert row is not None
+        text = ti.insert_keystone_question(text, row)
+        minted[str(item.get("timeline_candidate_id") or "")] = row["id"]
+    return text, minted
+
+
+class RetiringWhatTheResolverAlreadyPlacedTests(unittest.TestCase):
+    """Issue #368: a minted row whose work item has left the projection.
+
+    Retire-on-answer closes a row when its identity is ANSWERED. Under ADR
+    0037 that is no longer how a keystone usually closes — the resolver reads
+    the story against the spine, places the moment, and the next publication
+    simply does not carry the keystone. The row stayed pending, and the person
+    was asked "When was move to Yucaipa?" about a move the vault had placed.
+    """
+
+    def setUp(self):
+        self.opportunity = opportunity()
+        self.keystone = keystone()
+        self.before = view(opportunities=[self.opportunity], keystones=[self.keystone])
+        self.bank, self.ids = mint_into(EMPTY_BANK, [self.opportunity, self.keystone])
+        self.opportunity_row = self.ids[self.opportunity["id"]]
+        self.keystone_row = self.ids[self.keystone["id"]]
+        # The resolver placed the kitchen fire; the Mesa stay is still open.
+        self.after = view(opportunities=[self.opportunity])
+
+    def test_the_mint_put_both_questions_in_the_bank(self):
+        self.assertIn(f"- [ ] {self.opportunity_row}:", self.bank)
+        self.assertIn(f"- [ ] {self.keystone_row}:", self.bank)
+
+    def test_nothing_is_stale_while_the_projection_still_carries_it(self):
+        self.assertEqual(
+            tcand.stale_bank_rows(self.before, question_bank_text=self.bank), [])
+
+    def test_a_row_whose_gap_left_the_projection_is_named_stale(self):
+        [row] = tcand.stale_bank_rows(self.after, question_bank_text=self.bank)
+        self.assertEqual(row["bank_id"], self.keystone_row)
+        self.assertEqual(row["question_id"], self.keystone["id"])
+
+    def test_the_live_row_beside_it_is_untouched(self):
+        stale = tcand.stale_bank_rows(self.after, question_bank_text=self.bank)
+        self.assertNotIn(self.opportunity_row, [row["bank_id"] for row in stale])
+        self.assertEqual(tcand.retire_stale(self.after, question_bank_text=self.bank),
+                         [self.keystone_row])
+
+    def test_the_work_item_identity_alone_keeps_a_row_live(self):
+        """The projection re-keyed the question but still holds the gap."""
+        same_gap = view(opportunities=[self.opportunity],
+                        work_items=[{"work_item_id": qp.timeline_work_item_id(
+                            anchor=self.keystone["anchor"])}])
+        self.assertEqual(
+            tcand.stale_bank_rows(same_gap, question_bank_text=self.bank), [])
+
+    def test_a_row_under_a_legacy_work_item_id_is_still_live(self):
+        """O-E6: the projection re-keyed the item; the bank row still asks it."""
+        legacy = qp.timeline_work_item_id(anchor=self.keystone["anchor"])
+        rekeyed = view(opportunities=[self.opportunity],
+                       work_items=[{"work_item_id": "work:canonical"}])
+        rekeyed["work_item_aliases"] = {legacy: "work:canonical"}
+        self.assertEqual(
+            tcand.stale_bank_rows(rekeyed, question_bank_text=self.bank), [])
+
+    def test_an_answered_row_is_never_retired_a_second_time(self):
+        answered = self.bank.replace(f"- [ ] {self.keystone_row}:",
+                                     f"- [x] {self.keystone_row}:")
+        self.assertEqual(
+            tcand.stale_bank_rows(self.after, question_bank_text=answered), [])
+
+    def test_a_vault_with_no_projection_retires_nothing(self):
+        """Absence of evidence is never evidence of absence."""
+        unread = ({}, {"published": False}, dict(pub.EMPTY_VIEW), None)
+        for empty in unread:
+            with self.subTest(view=empty):
+                self.assertFalse(tcand.projection_was_read(empty))
+                self.assertEqual(
+                    tcand.stale_bank_rows(empty, question_bank_text=self.bank), [])
+                self.assertEqual(
+                    tcand.retire_stale(empty, question_bank_text=self.bank), [])
+
+    def test_a_projection_that_placed_everything_retires_every_pending_row(self):
+        """An EMPTY published generation is an answer, not a failed read."""
+        placed = view()   # published, and the graph it published is empty
+        self.assertTrue(tcand.projection_was_read(placed))
+        self.assertEqual(
+            sorted(tcand.retire_stale(placed, question_bank_text=self.bank)),
+            sorted([self.opportunity_row, self.keystone_row]))
+
+    def test_the_owners_dismissal_ledger_is_never_touched(self):
+        """A human negative is durable state; this pass only reads the bank."""
+        import tempfile  # noqa: PLC0415
+
+        path = Path(tempfile.mkdtemp(prefix="lifehug-stale-dismissals-")) / "d.json"
+        tcand.dismiss(self.keystone["id"], reason="not this one", path=path)
+        before = path.read_text(encoding="utf-8")
+        self.assertEqual(tcand.retire_stale(self.after, question_bank_text=self.bank),
+                         [self.keystone_row])
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
+        self.assertIn(self.keystone["id"], tcand.dismissed_ids(path=path))
+
+    def test_the_reason_names_what_happened(self):
+        self.assertEqual(
+            tcand.STALE_RETIREMENT_REASON,
+            "retired: placed by the resolver (work item gone from the projection)")
+
+    def test_an_injected_bank_is_never_written(self):
+        """Pure with a bank text, exactly as `retire_identities` is."""
+        before = self.bank
+        tcand.retire_stale(self.after, question_bank_text=self.bank)
+        self.assertEqual(self.bank, before)
+
+
+class TheRetiredRowSaysWhyTests(unittest.TestCase):
+    """The annotation, written through the ONE bank writer, on a temp bank."""
+
+    def setUp(self):
+        import lifehug_core  # noqa: PLC0415
+
+        self.core = lifehug_core
+        self.tmp = root_parent_tmp(self, ROOT, prefix="lifehug-stale-bank-")
+        self.opportunity = opportunity()
+        self.keystone = keystone()
+        bank, self.ids = mint_into(EMPTY_BANK, [self.opportunity, self.keystone])
+        self.path = self.tmp / "question-bank.md"
+        self.path.write_text(bank, encoding="utf-8")
+        for module in (lifehug_core, tcand, qp):
+            self.addCleanup(setattr, module, "QUESTIONS_FILE", module.QUESTIONS_FILE)
+            module.QUESTIONS_FILE = self.path
+        self.after = view(opportunities=[self.opportunity])
+        self.row = self.ids[self.keystone["id"]]
+
+    def text(self) -> str:
+        return self.path.read_text(encoding="utf-8")
+
+    def test_the_row_is_checked_off_with_the_reason_beside_it(self):
+        self.assertEqual(tcand.retire_stale(self.after, answered_date="2026-09-19"),
+                         [self.row])
+        line = [ln for ln in self.text().splitlines()
+                if ln.startswith(f"- [x] {self.row}:")][0]
+        self.assertIn("*(2026-09-19 — retired: placed by the resolver "
+                      "(work item gone from the projection))*", line)
+
+    def test_the_question_text_and_its_provenance_survive_the_retirement(self):
+        tcand.retire_stale(self.after, answered_date="2026-09-19")
+        self.assertIn(self.keystone["question"], self.text())
+        self.assertIn(f"timeline_probe: {self.keystone['id']};", self.text())
+
+    def test_the_live_question_is_still_pending_on_disk(self):
+        tcand.retire_stale(self.after, answered_date="2026-09-19")
+        other = self.ids[self.opportunity["id"]]
+        self.assertIn(f"- [ ] {other}:", self.text())
+
+    def test_a_second_pass_retires_nothing_and_rewrites_nothing(self):
+        tcand.retire_stale(self.after, answered_date="2026-09-19")
+        before = self.text()
+        self.assertEqual(tcand.retire_stale(self.after, answered_date="2026-09-20"), [])
+        self.assertEqual(self.text(), before)
+
+    def test_the_retired_row_is_not_minted_again_on_the_next_build(self):
+        tcand.retire_stale(self.after, answered_date="2026-09-19")
+        back = view(opportunities=[self.opportunity], keystones=[self.keystone])
+        self.assertEqual([row["id"] for row in tcand.candidates_from_view(
+            back, question_bank_text=self.text(), dismissed=())], [])
+
+    def test_the_queue_reads_the_retired_item_as_answered(self):
+        tcand.retire_stale(self.after, answered_date="2026-09-19")
+        states = qp.work_item_states_from_bank(self.text())
+        identity = qp.timeline_work_item_id(anchor=self.keystone["anchor"])
+        self.assertEqual(states.get(identity), "answered")
+
+    def test_the_daily_queue_no_longer_offers_it(self):
+        tcand.retire_stale(self.after, answered_date="2026-09-19")
+        probes = qp.current_timeline_probes()
+        self.assertTrue(probes[self.row]["answered"])
+        built = {"queue": [{"question_id": self.row}, {"question_id": "A1"}]}
+        self.assertEqual(qp.drop_retired_from_queue(built, [self.row])["queue"],
+                         [{"question_id": "A1"}])
+
+
+class TheRetirementPassRunsOnEveryBuildTests(unittest.TestCase):
+    """Where the pass is wired: the planner queue, and every publication."""
+
+    def test_planner_queue_retires_before_it_mints_and_before_it_builds(self):
+        source = (SYSTEM / "question_planner.py").read_text(encoding="utf-8")
+        body = source[source.index("    if args.write_queue:"):]
+        body = body[:body.index("\n    return report(")]
+        self.assertLess(body.index("retire_stale_timeline_questions()"),
+                        body.index("mint_keystone_questions()"))
+        self.assertIn("drop_retired_from_queue(data, retired)", body)
+
+    def test_the_planner_hook_is_guarded_like_every_other_timeline_read(self):
+        self.assertEqual(qp.drop_retired_from_queue(None, ["T1"]), {})
+        self.assertEqual(qp.drop_retired_from_queue({"queue": []}, None), {"queue": []})
+
+    def test_publish_runs_the_pass_when_the_work_item_set_moved(self):
+        source = (SYSTEM / "temporal_publication.py").read_text(encoding="utf-8")
+        self.assertIn("_retire_stale_bank_questions(vault_root,", source)
+        self.assertEqual(
+            pub._work_item_identities({"work_items": [{"work_item_id": "work:a"}]}),
+            {"work:a"})
+
+    def test_an_unchanged_work_item_set_costs_one_comparison_and_no_bank_read(self):
+        same = {"work_items": [{"work_item_id": "work:a"}]}
+        self.assertEqual(
+            pub._retire_stale_bank_questions("/nonexistent", previous=same,
+                                             published=dict(same)), [])
+
+    def test_publishing_another_vault_never_reaches_this_processs_bank(self):
+        """The half-and-half split `_projection_vault_root` was written to end."""
+        self.assertEqual(
+            pub._retire_stale_bank_questions(
+                "/nonexistent-vault",
+                previous={"work_items": [{"work_item_id": "work:a"}]},
+                published={"work_items": []}), [])
+
+    def test_the_operator_can_run_the_pass_by_hand(self):
+        cli = (SYSTEM / "lifehug.py").read_text(encoding="utf-8")
+        self.assertIn('p.add_argument("--retire-stale"', cli)
+        self.assertIn('flags.append("--retire-stale")', cli)
+        module = (SYSTEM / "timeline_candidates.py").read_text(encoding="utf-8")
+        self.assertIn('parser.add_argument("--retire-stale"', module)
+
+    def test_the_hand_run_verb_is_classified_as_a_mutation(self):
+        source = (SYSTEM / "lifehug.py").read_text(encoding="utf-8")
+        head = source[:source.index("READ_ONLY_COMMANDS = ")] if False else source
+        block = head[head.index("DIRECT_MUTATION_COMMANDS = frozenset({"):]
+        block = block[:block.index("})")]
+        self.assertIn('"timeline-candidates",', block)
 
 
 class TheOwnerCanSayNoTests(unittest.TestCase):

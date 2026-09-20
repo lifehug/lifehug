@@ -554,6 +554,28 @@ filing end, `timeline-place` refuses an explicit `--placement-key` that no live
 moment mints (`placement_key_not_live`) rather than writing a pin that is dead
 on arrival.
 
+**A minted question retires when its gap leaves the projection (v319).** A
+timeline question is minted from one week's projection and lives in the bank
+until something closes it, and until v319 the only thing that closed it was an
+ANSWER. Under the spine-and-resolver loop (ADR 0037) that is no longer how a
+keystone usually ends: the resolver reads a story against the spine, places the
+moment itself, and the next publication simply does not carry that keystone,
+that landmark opportunity or that work item any more — so the row stayed
+pending and the person was asked *"When was move to Yucaipa?"* about moves the
+vault had already placed (lifehug#368; 22 stale rows on the founder's vault).
+Now every `timeline_candidates` build compares each pending row's
+`timeline_probe:` identity — the `tl:`/`lo:` id, the `work_item:` marker, and
+the anchor — against the identities the CURRENT projection still carries, and
+checks off the ones that are gone with the reason beside them: `*(2026-09-19 —
+retired: placed by the resolver (work item gone from the projection))*`. Nothing
+is deleted, an answered row and the owner's own dismissals are never touched,
+and a vault with no published projection retires nothing at all, because absence
+of evidence is not evidence of absence. The pass runs where the bank is already
+being read — `planner-queue` (before the mint, and the rebuilt
+`state/question_queue.json` drops the rows it just retired) and the end of a
+publication whose work-item set actually moved — and an operator can run it by
+hand with `lifehug.py timeline-candidates --retire-stale`.
+
 Weekly too, `arc-plan` reads `place_no_stories` off the same assembled
 payload and plans a **place aside** onto a card whose gap slot the whisper
 left empty (v200). Nothing is written: a place stops being a gap the moment a

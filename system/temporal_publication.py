@@ -743,9 +743,54 @@ def publish(
             receipt = {**receipt, "correction_ref": text_ref}
     trcpt.write_receipt(vault_root, receipt)
 
+    # v319 (ADR 0037, issue #368): the work-item set just moved, so a question
+    # minted from the PREVIOUS generation may have lost the gap it was asking
+    # about — the resolver placed the moment and the keystone is simply not
+    # here any more. One cheap set comparison decides whether the pass is worth
+    # running at all; everything after it is guarded and best effort.
+    _retire_stale_bank_questions(vault_root, previous=previous_projection,
+                                 published=payloads[PROJECTION_FILE])
+
     return _summary(result, generation=generation, unchanged=False,
                     published_at=published_at, digest=digest, timings=timings,
                     paths=written, receipt=receipt)
+
+
+def _work_item_identities(payload: object) -> set:
+    """The ids in one projection payload's ``work_items`` block."""
+    row = payload if isinstance(payload, dict) else {}
+    return {str(item.get("work_item_id") or "")
+            for item in (row.get("work_items") or ())
+            if isinstance(item, dict) and item.get("work_item_id")}
+
+
+def _retire_stale_bank_questions(vault_root: str | Path, *, previous: object,
+                                 published: object) -> list:
+    """Retire the minted bank rows this generation left behind — GUARDED.
+
+    Two refusals before anything is written:
+
+    * the work-item set has to have actually MOVED. A publish that changes only
+      dates has nothing to retire, and this is the cheap way to know that
+      without reading the bank at all.
+    * the vault being published has to be the one this process is BOUND to.
+      `timeline_candidates` writes through `lifehug_core.QUESTIONS_FILE`, which
+      is the process binding, so publishing a fixture vault must never reach a
+      real bank — the same half-and-half split `timeline._projection_vault_
+      root`'s docstring was written to make impossible.
+    """
+    try:
+        if _work_item_identities(previous) == _work_item_identities(published):
+            return []
+        import lifehug_core  # noqa: PLC0415
+        import timeline_candidates  # noqa: PLC0415
+
+        bound = Path(str(lifehug_core.REPO_DIR)).expanduser().resolve()
+        if Path(vault_root).expanduser().resolve() != bound:
+            return []
+        return timeline_candidates.retire_stale(dict(published))
+    except Exception:  # noqa: BLE001 — a bank problem never breaks a publish
+        return []
 
 
 def _rule_identity() -> dict:
