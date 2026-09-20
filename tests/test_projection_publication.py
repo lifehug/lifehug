@@ -231,6 +231,10 @@ class AtomicityTests(VaultTestCase):
         a failure in the second one is not half a publication."""
         pub.publish(self.vault, now=NOW)
         before = pub.projection_path(self.vault).read_text(encoding="utf-8")
+        # v318: a republish whose inputs digest to the standing generation's
+        # does not render a payload at all, so the substrate has to move for
+        # this to be a test about rendering both halves before writing either.
+        self.file_claims(disagreeing())
         with mock.patch.object(pub, "work_items_payload", side_effect=RuntimeError("boom")), \
                 self.assertRaises(RuntimeError):
             pub.publish(self.vault, now=NOW)

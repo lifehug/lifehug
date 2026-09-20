@@ -205,6 +205,13 @@ CLASSIFY_CURSOR_FILE = _data("classify_cursor")
 TEMPORAL_CLAIMS_DIR = _data("temporal_claims_state")
 TEMPORAL_RECEIPTS_DIR = _data("temporal_receipts")
 TEMPORAL_ACTIVE_INDEX_FILE = _data("temporal_active_index")
+# v318: the fold's machine-local input cache, beside the index it describes.
+# Named here so the contract has exactly one reader, as every other durable
+# path does; nothing outside `temporal_store` writes or reads it.
+TEMPORAL_FOLD_CACHE_FILE = _data("temporal_fold_cache")
+# v318: what the standing published generation was derived from, so a compile
+# over an unchanged vault can decline to derive it again.
+TEMPORAL_PUBLICATION_CACHE_FILE = _data("temporal_publication_cache")
 # E3 (eras): event resolution records — which era a claim's `event_mention`
 # names. A resolution is a SEPARATE record, never an edit of the immutable
 # claim, so a re-binding supersedes rather than rewrites
