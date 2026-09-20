@@ -1517,6 +1517,23 @@ def refresh_reason(snapshot: dict, classification: object) -> str | None:
     return None
 
 
+#: The order a bounded refresh drains its backlog in: what a person just
+#: told or corrected first, the classifier's own upgrades next, the ambient
+#: context last. `stale` is a filed correction; `unclassified` and
+#: `source_changed` are new words; `legacy_snapshot` / `classifier_changed`
+#: are our own rule moves; `relationship_changed` / `context_changed` are
+#: the spine moving under an unchanged story.
+REFRESH_REASON_PRIORITY: dict[str, int] = {
+    "stale": 0,
+    "unclassified": 1,
+    "source_changed": 1,
+    "legacy_snapshot": 2,
+    "classifier_changed": 3,
+    "relationship_changed": 4,
+    "context_changed": 5,
+}
+
+
 def select_refresh_targets(
     vault_root: str | Path,
     source_paths: object,
@@ -1554,7 +1571,13 @@ def select_refresh_targets(
         reason = refresh_reason(snapshot, records.get(relative))
         if reason:
             pending.append({"source_path": relative, "reason": reason, "snapshot": snapshot_metadata(snapshot)})
-    pending.sort(key=lambda row: (row["reason"] != "stale", row["source_path"]))
+    # Newest information first (issue lifehug#371). A story the person just
+    # told or corrected outranks a backlog of context refreshes: without this
+    # a vault with hundreds of `context_changed` rows starved a just-edited
+    # answer behind them for a week. Within one reason, path order keeps the
+    # selection a pure function of the vault.
+    pending.sort(key=lambda row: (REFRESH_REASON_PRIORITY.get(row["reason"], len(REFRESH_REASON_PRIORITY)),
+                                  row["source_path"]))
     targets = pending[:cap]
     return {
         "targets": targets,
