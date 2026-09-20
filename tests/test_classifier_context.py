@@ -370,6 +370,46 @@ class StableFreshnessTests(ContextCase):
         self.assertEqual(report["remaining_count"], 1)
         self.assertFalse(report["complete"])
 
+    def test_new_words_outrank_the_context_backlog(self):
+        """lifehug#371: a just-edited story is selected before a context refresh
+        that merely sorts earlier by path."""
+        early = self.root / "sources" / "manual" / "a-backlog.md"
+        early.write_text("An older synthetic story in Cedarport.", encoding="utf-8")
+        late = self.root / "sources" / "manual" / "z-just-told.md"
+        late.write_text("A synthetic story the author just told.", encoding="utf-8")
+        current = {
+            cc._relative_source(self.root, source): cc.snapshot_metadata(
+                cc.build_context_snapshot(self.root, source)
+            )
+            for source in (early, late)
+        }
+        records = {
+            cc._relative_source(self.root, early): {
+                "classification_snapshot": {
+                    **current[cc._relative_source(self.root, early)],
+                    "context_digest": "sha256:" + "0" * 64,
+                }
+            },
+            cc._relative_source(self.root, late): {
+                "classification_snapshot": {
+                    **current[cc._relative_source(self.root, late)],
+                    "source_revision": "sha256:" + "1" * 64,
+                }
+            },
+        }
+        report = cc.select_refresh_targets(
+            self.root, [early, late], classifications=records, limit=1
+        )
+        self.assertEqual(
+            [(row["source_path"], row["reason"]) for row in report["targets"]],
+            [(cc._relative_source(self.root, late), "source_changed")],
+        )
+        self.assertEqual(report["remaining_count"], 1)
+        full = cc.select_refresh_targets(
+            self.root, [early, late], classifications=records, limit=2
+        )
+        self.assertEqual([row["reason"] for row in full["targets"]], ["source_changed", "context_changed"])
+
     def test_target_selection_loads_canonical_catalog_once_for_many_sources(self):
         sources = []
         for index in range(100):
