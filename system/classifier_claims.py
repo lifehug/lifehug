@@ -206,9 +206,14 @@ OCCURRENCE_CLAIM_CONFIDENCE = 0.9
 OWNER_SUBJECT_REF = twi.OWNER_SUBJECT_REF
 
 #: Event-level keys a classification may carry that name WHO the event
-#: happened to. The current classify prompt has none of them — people are
-#: document-level — and older/hand-edited classifications do, so they are read
-#: tolerantly and their absence simply means "the owner's own moment".
+#: happened to. The current classify prompt asks for `subject` per event
+#: ("who or what experienced this event", `classify_story.py`'s event schema);
+#: `subject_mention` and `who` are older and hand-edited spellings of the same
+#: thing. All three are read tolerantly, and an event that names none of them
+#: is the owner's own moment. The mention is kept RAW — who that is is
+#: identity resolution's question, and since `timeline-rules:9` a mention the
+#: roster cannot place is not the owner merely because it is unplaced
+#: (`temporal_timeline._mention_names_another_person`).
 EVENT_SUBJECT_KEYS = ("subject", "subject_mention", "who")
 EVENT_PEOPLE_KEYS = ("people", "persons")
 #: Event-level and document-level place lists, in the order they are preferred.

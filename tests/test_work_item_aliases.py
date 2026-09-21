@@ -35,6 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "system"))
 
+import identity_resolution as ident  # noqa: E402
 import mirror_work as mw  # noqa: E402
 import question_planner as qp  # noqa: E402
 import temporal_projection as tp  # noqa: E402
@@ -142,8 +143,74 @@ class Convergence(unittest.TestCase):
         self.assertEqual(twi.canonical_work_item_id(kind="missing_anchor"), "")
 
 
+HANDLE_TEXT = "move to Orderville"
+CANONICAL_HANDLE_ID = tp.derive_work_item_id(
+    kind="missing_anchor", subject_ref=twi.anchor_handle_ref(HANDLE_TEXT),
+    event_ref=None, requested_field="date",
+)
+#: The pre-v324 spelling: the same question under the unresolved-PERSON
+#: prefix. Written out rather than derived from the new constant, because a
+#: test that derives the thing it is proving migrated proves nothing.
+LEGACY_HANDLE_ID = tp.derive_work_item_id(
+    kind="missing_anchor", subject_ref="unresolved:move to orderville",
+    event_ref=None, requested_field="date",
+)
+
+
+def a_handle_item() -> dict:
+    """The fold's own row for an anchor handle that names an event."""
+    return tp.validate_temporal_work_item(
+        {
+            "kind": "missing_anchor",
+            "state": "open",
+            "subject_ref": twi.anchor_handle_ref(HANDLE_TEXT),
+            "requested_field": "date",
+            "prompt_intent": ("You mentioned the move to Orderville \u2014 "
+                              "whose move was that, and when?"),
+            "allowed_surfaces": ["timeline", "whisper", "daily_question"],
+            "created_at": "2026-09-21T00:00:00Z",
+            "system_value": 0.2,
+            "work_item_id": CANONICAL_HANDLE_ID,
+        }
+    )
+
+
 class TheAliasMap(unittest.TestCase):
     """T-Q-07 — derived, published in one generation, never a guess."""
+
+    def test_the_two_prefixes_name_one_handle_space(self):
+        """`timeline-rules:9` split one prefix into two meanings. The second
+        one must key identically, or the alias below cannot be derived."""
+        self.assertEqual(twi.UNRESOLVED_HANDLE_PREFIX, ident.UNRESOLVED_REF_PREFIX)
+        self.assertEqual(
+            twi.anchor_handle_ref(HANDLE_TEXT).split(":", 1)[1],
+            ident.unresolved_subject_ref(HANDLE_TEXT).split(":", 1)[1],
+        )
+        self.assertFalse(ident.is_unresolved_ref(twi.anchor_handle_ref(HANDLE_TEXT)))
+        self.assertTrue(twi.is_anchor_handle_ref(twi.anchor_handle_ref(HANDLE_TEXT)))
+
+    def test_an_anchor_handles_old_unresolved_id_still_resolves(self):
+        """The founder's own card, `work:ee40d627…`: minted under
+        `unresolved:` before v324 and already on his page."""
+        aliases = twi.work_item_aliases([a_handle_item()])
+        self.assertNotEqual(LEGACY_HANDLE_ID, CANONICAL_HANDLE_ID)
+        self.assertEqual(aliases.get(LEGACY_HANDLE_ID), CANONICAL_HANDLE_ID)
+        self.assertEqual(
+            twi.resolve_work_item_id(LEGACY_HANDLE_ID, aliases=aliases),
+            CANONICAL_HANDLE_ID,
+        )
+
+    def test_the_handle_alias_obeys_both_alias_rules(self):
+        aliases = twi.work_item_aliases([a_handle_item()])
+        self.assertNotIn(CANONICAL_HANDLE_ID, aliases)
+        for legacy, canonical in aliases.items():
+            with self.subTest(legacy=legacy):
+                self.assertEqual(canonical, CANONICAL_HANDLE_ID)
+        crossed = tp.derive_work_item_id(
+            kind="identity_uncertain", subject_ref="unresolved:move to orderville",
+            event_ref=None, requested_field="identity",
+        )
+        self.assertNotIn(crossed, aliases)
 
     def test_the_legacy_id_maps_onto_the_canonical_one(self):
         aliases = twi.work_item_aliases([a_birth_item()])

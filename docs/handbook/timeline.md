@@ -395,6 +395,17 @@ calculating placement against a spine**:
   citations and — only when the vault cannot tell — the one question that
   would settle it. Bare age handles resolve from the age table without a
   model call.
+- **Whose moments it plans** (v324): the ones on the owner's axis —
+  `occurrence_subject_scope == "owner"`, or any relation in
+  `temporal_projection.AXIS_RELATIONS`, which is how a grandparent's death
+  told as *"when I was in 9th grade"* (`other_person` / `lived_effect`) is
+  dated from the owner's own school spine. A `contextual_only` node — a
+  relative's own milestone, family history from before the owner was born —
+  is never planned: nothing in this vault dates it. **The owner's age table
+  is never applied to another person's age.** It answers how old the OWNER
+  was, and an answer that reads somebody else's age off it is refused
+  mechanically (`subject_age_not_owner`), in the model lane and in the
+  bare-age arithmetic lane alike.
 - **Verification is mechanical**: every cited quote must occur in the cited
   passage, every date must parse, ranges must be ordered, a `derived` answer
   must cite the spine fact it came from. What fails files nothing.

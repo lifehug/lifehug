@@ -131,7 +131,9 @@ Two different kinds of period, kept as two different facts (ADR 0030,
   happened to, and why it belongs on the owner's own axis
   (`participated`, `lived_effect`, `contextual_only`, …), each with its own
   evidence. A stated relationship never by itself pulls a relative's
-  unrelated history onto the axis. **Design decided, not yet built.**
+  unrelated history onto the axis, and since `timeline-rules:9` a name the
+  roster does not know is not the owner just because it is unknown.
+  **Merged**, O-E2 + v324/`timeline-rules:9`.
 - **Correction role** — the difference between a correction saying a source
   got something wrong (`content`, which marks the classification stale) and
   one saying only when an accepted moment happened (`placement`, which must
@@ -148,8 +150,8 @@ Two different kinds of period, kept as two different facts (ADR 0030,
   answering "why is this here": which rung, what evidence, which frame or
   era, whether stale was excluded. **Design decided, not yet built.**
 - **`life_view`** — the reading a node gets once placed against the life
-  clip: lived history, `contradictory`, `future_plan`, or
-  `subject_uncertain`. **Merged**, v238/lifehug#259.
+  clip: lived history, `contradictory`, `future_plan`, or `unresolved`.
+  **Merged**, v238/lifehug#259.
 - **`reached_frame_epoch`** — the `(reached-frame count, current band)` pair
   the publisher's signature tracks instead of the wall clock, so
   re-publishing inside one epoch is a true no-op. **Merged**,

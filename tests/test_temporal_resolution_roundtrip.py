@@ -125,7 +125,7 @@ class ResolutionPublicationTests(unittest.TestCase):
         self.assertEqual(node["timeline_resolution_status"], "linked")
         self.assertIsNone(node["best_temporal_value"])
         self.assertTrue(any(row["kind"] == "missing_anchor"
-                            and row["subject_ref"] == "unresolved:launching acorn"
+                            and row["subject_ref"] == "anchor:launching acorn"
                             for row in pub.read_work_items(root)["work_items"]))
 
     def test_legacy_absent_status_receipt_and_active_claim_stay_identical(self):

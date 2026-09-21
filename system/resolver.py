@@ -373,9 +373,24 @@ def _classification_events(root: Path) -> dict[str, tuple[str, dict]]:
 
 
 def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",)) -> dict[str, list[dict]]:
-    """``source_path -> [target]`` for every unplaced node of the given scopes."""
+    """``source_path -> [target]`` for every unplaced node ON THE OWNER'S AXIS.
+
+    Two ways to be on it and the second one is why this is not a scope test
+    (`timeline-rules:9`): the owner's own occurrences, and an occurrence that
+    happened to somebody ELSE which the owner lived through — a grandparent's
+    death told as "when I was in 9th grade" is `other_person` /
+    `lived_effect`, and it is dated from the owner's own spine because the
+    owner's own telling is what dates it. `temporal_projection.AXIS_RELATIONS`
+    is the same tuple the fold and the page read, so "is this on the
+    timeline?" has one answer everywhere.
+
+    A `contextual_only` node — a relative's own milestone, family history from
+    before the owner's life — is never planned. Nothing in this vault dates
+    it, and the spine here belongs to one person.
+    """
     import classifier_claims as ccl  # noqa: PLC0415
     import event_identity as ei  # noqa: PLC0415
+    import temporal_projection as tp  # noqa: PLC0415
 
     claims = {row.get("claim_id"): row for row in index.get("claims") or ()}
     events = _classification_events(root)
@@ -384,7 +399,8 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",)) -> 
     for node in projection.get("nodes") or ():
         if node.get("usable_placement") or node.get("node_kind") == "period":
             continue
-        if node.get("occurrence_subject_scope") not in scopes:
+        if node.get("occurrence_subject_scope") not in scopes and \
+                collapsed_text(node.get("owner_timeline_relation")) not in tp.AXIS_RELATIONS:
             continue
         if node.get("node_kind") == "episode" and collapsed_text(node.get("event_kind")) == "residence":
             # A residence is dated by the ladder in the person's own words or is
@@ -618,8 +634,69 @@ def _record(answer: dict):
     return record
 
 
-def verify(item: dict, *, story: str, passages: dict[str, dict], sp: dict, story_path: str = "") -> tuple[dict | None, str]:
-    """``(normalized answer, reason)``; the answer is ``None`` when it did not verify."""
+#: The refusal `timeline-rules:9` added. The owner's age table answers "how
+#: old was the OWNER in year X"; it says nothing whatever about how old
+#: anybody else was, and the arithmetic that reads "mom got married young, at
+#: 21" off the owner's birthday produces a date for the mother's wedding from
+#: a fact about her son. Mechanical, like every other verification here.
+SUBJECT_AGE_NOT_OWNER = "subject_age_not_owner"
+
+
+def _subject_is_owner(subject: object, sp: dict) -> bool:
+    """Is this target's subject the vault's owner, under any spelling?"""
+    from temporal_timeline import is_owner_reference_only  # noqa: PLC0415
+
+    text = collapsed_text(subject)
+    if not text or text == "self" or is_owner_reference_only(text):
+        return True
+    owner = _norm(sp.get("owner_name"))
+    names = {owner} | ({owner.split()[0]} if owner else set())
+    return bool(owner) and _norm(text) in names
+
+
+def _is_age_of_subject(item: dict, target: object) -> bool:
+    """Does this answer rest on HOW OLD THE SUBJECT WAS?
+
+    Two mechanical signals, both of them the model's or the classifier's own
+    words: a `fact_key` the model itself named `age_*`, and an age field the
+    extractor wrote on the moment (including a bare age sitting where an
+    anchor should be).
+    """
+    if collapsed_text(item.get("fact_key")).lower().startswith("age"):
+        return True
+    row = target if isinstance(target, dict) else {}
+    date = (row.get("event") or {}).get("date") or {}
+    if collapsed_text(date.get("age")):
+        return True
+    return any(
+        age_from_handle(anchor) is not None
+        for handle in row.get("handles") or ()
+        for anchor in (handle.get("anchors") or ())
+    )
+
+
+def _cites_owner_age_table(citations, sp: dict) -> bool:
+    """Does any verified citation quote the owner's birth or his age table?"""
+    lines = [f"Born: {sp['birth']}"] if sp.get("birth") else []
+    lines.extend(sp.get("ages") or ())
+    if not lines:
+        return False
+    text = "\n".join(lines)
+    return any(
+        collapsed_text(row.get("doc")) == "spine" and _quote_in(str(row.get("quote") or ""), text)
+        for row in citations
+    )
+
+
+def verify(item: dict, *, story: str, passages: dict[str, dict], sp: dict, story_path: str = "",
+           target: object = None) -> tuple[dict | None, str]:
+    """``(normalized answer, reason)``; the answer is ``None`` when it did not verify.
+
+    ``target`` is the planned moment this answer is for. It is optional so the
+    eval lane (which has no vault node) still calls this the same way, and
+    when it IS given it carries the one thing the citations cannot say for
+    themselves: whose occurrence this is. See :data:`SUBJECT_AGE_NOT_OWNER`.
+    """
     answer = item.get("answer")
     if not isinstance(answer, dict):
         return None, "no_answer"
@@ -654,6 +731,14 @@ def verify(item: dict, *, story: str, passages: dict[str, dict], sp: dict, story
     if basis == "derived" and sp["birth"] and not any(c["doc"] == "spine" or c["doc"].startswith("fact:") for c in valid):
         # arithmetic must name the fact it was done against
         valid.append({"doc": "spine", "quote": f"Born: {sp['birth']}"})
+    if target is not None and not _subject_is_owner((target or {}).get("subject"), sp) \
+            and _is_age_of_subject(item, target) and _cites_owner_age_table(valid, sp):
+        # Somebody else's age, answered off the owner's birthday. The reading
+        # may even be right — but nothing in this vault says so, and a date
+        # filed on that arithmetic is the owner's life drawn over his
+        # mother's. It stays in the ledger as unverified, which is what keeps
+        # the moment askable.
+        return None, SUBJECT_AGE_NOT_OWNER
     confidence = item.get("confidence")
     try:
         confidence = max(0.0, min(1.0, float(confidence)))
@@ -1054,7 +1139,12 @@ def _pending(read: _Read, *, only_sources=None, retry_failed: bool = False, forc
             aged = [(age_from_handle(a), h.get("relation"))
                     for h in target["handles"] for a in (h.get("anchors") or ())]
             aged = [(a, rel) for a, rel in aged if a is not None]
-            if aged and birth and len({a for a, _ in aged}) == 1 and age_range(birth, aged[0][0], aged[0][1]):
+            # The same rule `verify` applies, at the lane that never reaches
+            # it: a bare age is arithmetic off the OWNER's birthday, so it is
+            # arithmetic only when the moment is the owner's. Somebody else's
+            # "at 21" goes to the model with the rest of its story.
+            if aged and birth and _subject_is_owner(target.get("subject"), read.spine) \
+                    and len({a for a, _ in aged}) == 1 and age_range(birth, aged[0][0], aged[0][1]):
                 deterministic.append((source_path, target, aged[0]))
             else:
                 rows.append(target)
@@ -1203,7 +1293,7 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
             # on the reading, not a reason to throw it away.
             entry["spine_changed"] = True
         resolved, why = verify(item, story=story, passages=passages, sp=read.spine,
-                               story_path=source_path)
+                               story_path=source_path, target=target)
         verdict, _verdict_why = verify_not_an_event(item)
         if resolved is not None:
             entry.update({"answer": resolved["record"], "basis": resolved["basis"],

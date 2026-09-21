@@ -56,6 +56,17 @@ class OwnerNameSubjectTests(unittest.TestCase):
         self.assertEqual(scopes["Pat's promotion"], "owner")
         self.assertEqual(scopes["Robin's promotion"], "other_person")
 
+    def test_a_spelling_of_his_own_name_the_roster_lacks_is_still_him(self):
+        """`timeline-rules:9` re-reads a mention the roster cannot place. It
+        must not re-read THIS one: a name is not third-party evidence, and a
+        capitalisation heuristic would have made every spelling of the owner's
+        own name somebody else. Only relation words move a subject."""
+        index = {"claims": [claim("Patrick Q. Example", "the promotion", "s3")]}
+        result = tt.derive_calculated_timeline(index, roster_snapshot=ROSTER, now=NOW)
+        row = next(r for r in result.nodes if r["label"] == "the promotion")
+        self.assertEqual(row["occurrence_subject_scope"], "owner")
+        self.assertEqual(row["owner_timeline_relation"], "participated")
+
     def test_the_rule_is_a_reversible_resolution_record(self):
         refs = ident.owner_name_refs(ROSTER, ("Pat Q. Example",))
         self.assertEqual(refs, frozenset({"person/pat"}))

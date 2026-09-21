@@ -94,6 +94,42 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(resolver.verify(self.item(answer={"earliest": "1999", "latest": "1996"}),
                                          story="", passages=self.passages, sp=spine())[1], "range_reversed")
 
+    def age_item(self, **overrides) -> dict:
+        row = self.item(basis="derived", fact_key="age_21",
+                        answer={"earliest": "2005-03-09", "latest": "2006-03-08"},
+                        citations=[{"doc": "spine", "quote": "21 -> 2005-03-09 to 2006-03-08"}])
+        row.update(overrides)
+        return row
+
+    def test_the_owners_age_table_never_answers_another_persons_age(self):
+        """v324, `subject_age_not_owner`. "mom got married young, at 21" was
+        dated 1979/1981 off the OWNER's birthday — a date for his mother's
+        wedding computed from a fact about her son."""
+        mom = {"subject": "Mom", "event": {}, "handles": []}
+        self.assertEqual(
+            resolver.verify(self.age_item(), story="", passages={}, sp=spine(), target=mom)[1],
+            resolver.SUBJECT_AGE_NOT_OWNER)
+
+    def test_the_owners_own_age_still_verifies(self):
+        for subject in ("self", "narrator", "Pat Example"):
+            with self.subTest(subject=subject):
+                row = {"subject": subject, "event": {}, "handles": []}
+                self.assertEqual(
+                    resolver.verify(self.age_item(), story="", passages={}, sp=spine(), target=row)[1],
+                    "ok")
+
+    def test_a_relatives_moment_dated_from_the_story_is_untouched(self):
+        """The refusal is about the age table, not about whose moment it is —
+        a lived-through scene dated from the owner's own words still files."""
+        row = {"subject": "Grandpa", "event": {}, "handles": []}
+        resolved, why = resolver.verify(self.item(), story="", passages=self.passages,
+                                        sp=spine(), target=row)
+        self.assertEqual(why, "ok")
+        self.assertIsNotNone(resolved)
+
+    def test_a_target_is_optional_so_the_eval_lane_is_unchanged(self):
+        self.assertEqual(resolver.verify(self.age_item(), story="", passages={}, sp=spine())[1], "ok")
+
     def test_an_abstention_is_not_an_answer(self):
         self.assertEqual(resolver.verify(self.item(answer=None), story="", passages={}, sp=spine())[1], "no_answer")
 
@@ -192,16 +228,22 @@ class LegsTests(unittest.TestCase):
         self.nodes: dict[str, str] = {}
         self.handles: dict[str, str] = {}
 
-    def story(self, stem: str, body: str, moments: list[tuple[str, str, list[str]]]) -> None:
-        """One story file plus one raw handle claim per unplaced moment."""
+    def story(self, stem: str, body: str, moments: list[tuple[str, str, list[str]]],
+              *, subject: str = "self", event_kind: str = "moment") -> None:
+        """One story file plus one raw handle claim per unplaced moment.
+
+        `subject`/`event_kind` are how the scope tests below get a node that
+        is somebody else's: the fold decides the scope from the mention, so
+        these tests read the same answer the page does.
+        """
         (self.root / "answers" / f"{stem}.md").write_text(
             f"---\ntitle: {stem}\ntype: prompted_answer\n---\n\n{body}\n", "utf-8")
         for label, relation, anchors in moments:
-            node_id = tp.derive_node_id(node_kind="event", event_kind="moment",
-                                        subject_refs=["self"], discriminator=f"{stem}-{label}")
+            node_id = tp.derive_node_id(node_kind="event", event_kind=event_kind,
+                                        subject_refs=[subject], discriminator=f"{stem}-{label}")
             claim = tc.validate_temporal_claim({
-                "source_kind": "import", "claim_type": "relative_order", "subject_mention": "self",
-                "event_kind": "moment", "event_ref": node_id, "event_mention": label,
+                "source_kind": "import", "claim_type": "relative_order", "subject_mention": subject,
+                "event_kind": event_kind, "event_ref": node_id, "event_mention": label,
                 "temporal_value": {"relation": relation, "anchors": list(anchors)},
                 "evidence": [{"quote": anchors[0]}], "basis": "explicit", "confidence": 0.8,
                 "extractor_version": "classifier-claims/rule:4",
@@ -219,6 +261,11 @@ class LegsTests(unittest.TestCase):
         import temporal_publication as pub
 
         return pub.publish(self.root, now=NOW)
+
+    def projection(self) -> dict:
+        import temporal_publication as pub
+
+        return pub.read_projection(self.root) or {}
 
     def answer_text(self, *labels: str, question: str = "") -> str:
         rows = []
@@ -300,6 +347,34 @@ class LegsTests(unittest.TestCase):
         # it and the model must: the handle is planned, not deterministic.
         self.assertEqual(plan["deterministic_pending"], 0)
         self.assertEqual(plan["pending_events"], 1)
+
+    def test_a_lived_effect_scene_about_a_relative_is_planned(self):
+        """v324: "Grandpa died right around the move" is `other_person` /
+        `lived_effect` — the owner's own scene, dated from the owner's own
+        spine, so the resolver plans it exactly like his own moments."""
+        self.story("a1", "Grandpa died right around the move to Orderville.",
+                   [("grandpa", "within", ["the move to Orderville"])],
+                   subject="Grandpa")
+        self.publish()
+        node = next(row for row in self.projection()["nodes"]
+                    if row.get("event_kind") == "moment")
+        self.assertEqual(node["occurrence_subject_scope"], "other_person")
+        self.assertEqual(node["owner_timeline_relation"], "lived_effect")
+        self.assertEqual(resolver.plan_items(self.root, limit=5)["pending_events"], 1)
+
+    def test_a_contextual_only_node_is_never_planned(self):
+        """A relative's own milestone is not on this vault's axis and nothing
+        here dates it. Planning it would date her move from his birthday."""
+        self.story("a1", "My grandma moved to Orderville sometime after the war.",
+                   [("grandma-move", "after", ["the war"])],
+                   subject="my grandma", event_kind="move")
+        self.publish()
+        node = next(row for row in self.projection()["nodes"]
+                    if row.get("event_kind") == "move")
+        self.assertEqual(node["owner_timeline_relation"], "contextual_only")
+        plan = resolver.plan_items(self.root, limit=5)
+        self.assertEqual(plan["pending_events"], 0)
+        self.assertEqual(plan["items"], [])
 
     def test_unanswered_rows_are_replanned_in_chunks_of_four(self):
         self.story("a1", "Five moments, none of them dated.",
