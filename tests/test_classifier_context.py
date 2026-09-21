@@ -1601,13 +1601,16 @@ class TemporalShapeTests(ContextCase):
 class SalvageValidationTests(ContextCase):
     """Under salvage one bad event field falls to its conservative state; the response survives."""
 
-    def test_the_batch_filer_salvages_only_when_the_local_loop_asks(self):
+    def test_the_batch_filer_salvages_by_default_on_every_path(self):
+        """v323: one filing rule for the local loop and for hosts. The local
+        loop still says so explicitly; a host that calls the CLI gets the same
+        answer without asking."""
         import inspect
 
         import classification_refresh as cr
         import classify_story as cs
 
-        self.assertIs(inspect.signature(cs.file_batch_response).parameters["salvage"].default, False)
+        self.assertIs(inspect.signature(cs.file_batch_response).parameters["salvage"].default, True)
         self.assertIn("file_batch_response(envelope, model=selected_model, salvage=True)",
                       inspect.getsource(cr.run_batch))
 

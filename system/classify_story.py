@@ -2206,14 +2206,21 @@ def validate_batch_receipt(envelope: object, receipt: object) -> dict:
     return receipt
 
 
-def file_batch_response(payload: object, *, model: str = "external-agent", salvage: bool = False) -> dict:
+def file_batch_response(payload: object, *, model: str = "external-agent", salvage: bool = True) -> dict:
     """Validate one envelope, apply valid siblings, then publish its receipt.
 
-    ``salvage`` is the local loop's setting (`classification_refresh.run_batch`):
-    one event's bad relation or grounding falls to its conservative state and
-    the resolver dates it afterwards. A host that files envelopes without a
-    resolver keeps the default and receives the refusal its own repair loop
-    re-asks the model about.
+    ``salvage`` is the default for every filing path since v323: one event's
+    bad relation or grounding falls to its conservative state (a null link, an
+    abstaining resolution) and the resolver dates it afterwards; the reading's
+    other events are filed. v315 withheld this from hosts on the grounds that a
+    host without a resolver needed the whole-reading refusal its repair loop
+    re-asks about — hosts run the resolver since v316, and the measured cost of
+    the refusal was one story with several moments being thrown away whenever
+    any one moment tripped a per-event check (staging, 2026-09-20: 55 of 98
+    readings refused; 79 accepted on replay with salvage, no bad link filed).
+    Structural failures and snapshot mismatches still refuse the response, and
+    the host's repair loop still re-asks about those. ``salvage=False`` remains
+    for callers that want the strict verdict.
     """
     binding = _batch_envelope_identity(payload)
     batch_id = binding["batch_id"]
