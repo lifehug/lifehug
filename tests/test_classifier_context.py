@@ -1601,13 +1601,16 @@ class TemporalShapeTests(ContextCase):
 class SalvageValidationTests(ContextCase):
     """Under salvage one bad event field falls to its conservative state; the response survives."""
 
-    def test_the_batch_filer_salvages_only_when_the_local_loop_asks(self):
+    def test_the_batch_filer_salvages_by_default_on_every_path(self):
+        """v323: one filing rule for the local loop and for hosts. The local
+        loop still says so explicitly; a host that calls the CLI gets the same
+        answer without asking."""
         import inspect
 
         import classification_refresh as cr
         import classify_story as cs
 
-        self.assertIs(inspect.signature(cs.file_batch_response).parameters["salvage"].default, False)
+        self.assertIs(inspect.signature(cs.file_batch_response).parameters["salvage"].default, True)
         self.assertIn("file_batch_response(envelope, model=selected_model, salvage=True)",
                       inspect.getsource(cr.run_batch))
 
@@ -1661,17 +1664,16 @@ class SalvageValidationTests(ContextCase):
         result["events"][0]["timeline_resolution"] = {
             "status": "missing_evidence", "candidate_ids": ["node:stay"], "reason": "Only one considered.",
         }
-        with self.assertRaises(cc.ClassifierContextError):
-            cc.validate_response(
-                deepcopy(result), snapshot, self.source.read_text(), require_event_contract=True,
+        # v323: the echoed list is completed with or without salvage — an
+        # abstention over a partial echo asserts nothing about the rest.
+        for salvage in (False, True):
+            out = cc.validate_response(
+                deepcopy(result), snapshot, self.source.read_text(),
+                require_event_contract=True, salvage=salvage,
             )
-        out = cc.validate_response(
-            deepcopy(result), snapshot, self.source.read_text(),
-            require_event_contract=True, salvage=True,
-        )
-        self.assertEqual(
-            out["events"][0]["timeline_resolution"]["candidate_ids"], ["node:second", "node:stay"]
-        )
+            self.assertEqual(
+                out["events"][0]["timeline_resolution"]["candidate_ids"], ["node:second", "node:stay"]
+            )
 
     def test_a_stale_echo_list_is_replaced_by_the_supplied_set(self):
         snapshot = self.snapshot()
@@ -1679,10 +1681,11 @@ class SalvageValidationTests(ContextCase):
         result["events"][0]["timeline_resolution"] = {
             "status": "linked", "candidate_ids": ["node:stay", "node:stale"], "reason": "Linked.",
         }
-        with self.assertRaises(cc.ClassifierContextError):
-            cc.validate_response(
-                deepcopy(result), snapshot, self.source.read_text(), require_event_contract=True,
-            )
+        strict = cc.validate_response(
+            deepcopy(result), snapshot, self.source.read_text(), require_event_contract=True,
+            salvage=False,
+        )
+        self.assertEqual(strict["events"][0]["timeline_resolution"]["candidate_ids"], ["node:stay"])
         downgrades: list = []
         out = cc.validate_response(
             deepcopy(result), snapshot, self.source.read_text(),

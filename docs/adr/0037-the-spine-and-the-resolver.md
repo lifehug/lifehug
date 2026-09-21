@@ -170,8 +170,15 @@ that never happened — and on the owner's own vault at v316 both drew cards
   lost. v313 made per-event salvage available so one bad relation does not
   refuse a whole batch; v315 made that the local loop's explicit choice
   (`file_batch_response(salvage=True)` from `run_batch` only), because a host
-  that files envelopes without a resolver still needs the refusal its own
-  repair loop re-asks the model about.
+  that files envelopes without a resolver still needed the refusal its own
+  repair loop re-asks the model about. v323 makes salvage the default for
+  every filing path: hosts have run the resolver since v316, and the
+  whole-reading refusal was measured throwing away a story with several
+  moments whenever any one moment tripped a per-event check (staging,
+  2026-09-20: 55 of 98 refresh readings refused, 79 accepted on replay with
+  salvage, 25 fully validated placements recovered, no bad link filed). The
+  repair loop keeps its job for what salvage cannot mend — structural
+  failures and snapshot mismatches.
 - Shape follows the role, never the precision (v315): only weddings, births,
   deaths and graduations are points; a founding dated to the day still has a
   week inside it, so `within` it is a legitimate relation.

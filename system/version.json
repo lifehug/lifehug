@@ -1,7 +1,7 @@
 {
-  "version": 322,
+  "version": 323,
   "released": "2026-09-20",
-  "changelog": "v322: The fold cache travels with the vault. v318's incremental fold kept its input cache as a machine-local sidecar (stat signatures: inode and mtime), declared tracked:false, so every fresh checkout — which is every hosted job — refolded all nine thousand receipts from scratch and paid the cost the cache was built to remove. The sidecar now records the SHA-256 of each receipt's bytes and each correction source, means the same thing on every machine, and is committed with the vault alongside the publication cache (already content-keyed). A fresh clone hashes each receipt once and reuses everything whose bytes did not move; inside one process the stat signature still vouches first. Contract vault-contract-v19: both caches tracked:true; fold cache schema 2 (1 still recognised, and simply refolded once). No prompt, rule or output change — byte identity with a full fold remains a test.",
+  "changelog": "v323: One filing rule everywhere. Per-event salvage — one moment's bad link or grounding falls to its conservative state and the resolver dates it later, while the story's other moments are filed — is now the default for every filing path, hosted included; v315 had reserved it for the local loop on the theory that a host without a resolver needed the whole-story refusal, and hosts have run the resolver since v316. Measured on the staging refresh of 2026-09-20: 55 of 98 readings refused whole, 79 accepted on replay with salvage, 25 fully validated placements recovered, zero bad links filed. The candidate-list echo is also reconciled with or without salvage. No prompt, schema or rule-version change; strict callers keep salvage=False.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
