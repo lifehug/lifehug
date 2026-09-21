@@ -1664,16 +1664,17 @@ class SalvageValidationTests(ContextCase):
         result["events"][0]["timeline_resolution"] = {
             "status": "missing_evidence", "candidate_ids": ["node:stay"], "reason": "Only one considered.",
         }
-        # v323: the echoed list is completed with or without salvage — an
-        # abstention over a partial echo asserts nothing about the rest.
-        for salvage in (False, True):
-            out = cc.validate_response(
-                deepcopy(result), snapshot, self.source.read_text(),
-                require_event_contract=True, salvage=salvage,
+        with self.assertRaises(cc.ClassifierContextError):
+            cc.validate_response(
+                deepcopy(result), snapshot, self.source.read_text(), require_event_contract=True,
             )
-            self.assertEqual(
-                out["events"][0]["timeline_resolution"]["candidate_ids"], ["node:second", "node:stay"]
-            )
+        out = cc.validate_response(
+            deepcopy(result), snapshot, self.source.read_text(),
+            require_event_contract=True, salvage=True,
+        )
+        self.assertEqual(
+            out["events"][0]["timeline_resolution"]["candidate_ids"], ["node:second", "node:stay"]
+        )
 
     def test_a_stale_echo_list_is_replaced_by_the_supplied_set(self):
         snapshot = self.snapshot()
@@ -1681,11 +1682,10 @@ class SalvageValidationTests(ContextCase):
         result["events"][0]["timeline_resolution"] = {
             "status": "linked", "candidate_ids": ["node:stay", "node:stale"], "reason": "Linked.",
         }
-        strict = cc.validate_response(
-            deepcopy(result), snapshot, self.source.read_text(), require_event_contract=True,
-            salvage=False,
-        )
-        self.assertEqual(strict["events"][0]["timeline_resolution"]["candidate_ids"], ["node:stay"])
+        with self.assertRaises(cc.ClassifierContextError):
+            cc.validate_response(
+                deepcopy(result), snapshot, self.source.read_text(), require_event_contract=True,
+            )
         downgrades: list = []
         out = cc.validate_response(
             deepcopy(result), snapshot, self.source.read_text(),

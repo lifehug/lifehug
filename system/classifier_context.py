@@ -1432,15 +1432,13 @@ def validate_response(
                 grounding_input = None
                 if downgrades is not None:
                     downgrades.append({"event_key": key, "field": "source_grounding", "code": exc.code})
-        if (isinstance(raw_resolution, dict)
+        if (salvage and isinstance(raw_resolution, dict)
                 and isinstance(raw_resolution.get("candidate_ids"), list)
                 and sorted(map(str, raw_resolution["candidate_ids"])) != sorted(candidate_ids)):
             # The echoed list is bookkeeping the validator recomputes: a link is
             # checked against the supplied set above, and an abstention over a
             # partial or stale echo asserts nothing about the rest. The supplied
-            # set is the honest list either way — with or without salvage
-            # (v323: this was gated behind salvage, and a 62-of-63 echo refused
-            # a reading whose link had already been checked against all 63).
+            # set is the honest list either way.
             raw_resolution = {**raw_resolution, "candidate_ids": list(candidate_ids)}
             if downgrades is not None:
                 downgrades.append({"event_key": key, "field": "timeline_resolution", "code": "resolution_candidates_completed"})
