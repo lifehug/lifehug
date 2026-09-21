@@ -271,14 +271,29 @@ _BIRTH_SELF_RES = (
 #: `grandfather` join the list here (eras design O-E2, §5.1's own example,
 #: "Grandma was 30 years old in 1951") — the pre-E2 birth veto never needed
 #: them because nobody states "grandma was born" about anyone but grandma.
-_THIRD_PARTY_RELATION_WORDS = (
+#: Public since `timeline-rules:9`: `temporal_timeline._owner_relevance` asks
+#: the SAME question of a subject mention that the two vetoes below ask of a
+#: sentence — "does this name somebody other than the owner?" — and a second
+#: vocabulary would be the recurring defect this list was promoted to prevent.
+#: `parents`/`grandparents` join it there: "my parents married in 1979" names
+#: two people and neither of them is the owner.
+THIRD_PARTY_RELATION_WORDS = (
     "brother", "sister", "sibling", "son", "daughter", "mom", "mother",
     "grandma", "grandmother", "dad", "father", "grandpa", "grandfather",
     "wife", "husband", "partner", "child", "children", "baby", "twin",
     "cousin", "nephew", "niece", "grandson", "granddaughter", "grandchild",
-    "uncle", "aunt", "friend", "dog", "cat",
+    "uncle", "aunt", "friend", "dog", "cat", "parents", "grandparents",
 )
-_THIRD_PARTY_RELATION_FRAGMENT = "|".join(_THIRD_PARTY_RELATION_WORDS)
+#: The alias this module's own readers use; there is no second tuple.
+_THIRD_PARTY_RELATION_WORDS = THIRD_PARTY_RELATION_WORDS
+_THIRD_PARTY_RELATION_FRAGMENT = "|".join(THIRD_PARTY_RELATION_WORDS)
+
+#: One relation word, as a WHOLE WORD. "grandmother" is a relation; "grand"
+#: in "Grand Junction" and "Cat" in "Cathy" are not, which is the whole reason
+#: this is a compiled boundary match rather than a substring test.
+THIRD_PARTY_RELATION_RE = re.compile(
+    rf"(?<!\w)(?:{_THIRD_PARTY_RELATION_FRAGMENT})(?!\w)", re.IGNORECASE
+)
 
 #: The veto. Somebody ELSE's birth in the same moment kills the join outright —
 #: a miss is fine, a wrong join is not.

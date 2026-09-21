@@ -685,6 +685,276 @@ class OwnerRelevanceTests(VaultTestCase):
         self.assertTrue(findings)
         self.assertIn(node["node_id"], findings[0]["node_ids"])
 
+    # -- `timeline-rules:9`: the zero-candidate default reads the words -----
+
+    def test_a_relation_word_with_no_candidate_is_never_the_owner(self) -> None:
+        """The founder's own defect: the roster does not know his mother, so
+        "Mom married dad at 21" was filed as HIS marriage. A name the roster
+        cannot place is not him merely because it is unplaced."""
+        self.file_claims([owner_birth(), dated("Mom", "1979-06-01", event_kind="married")])
+        result = self.fold()
+        node = self.node(result, event_kind="married")
+        self.assertEqual(node["occurrence_subject_scope"], "other_person")
+
+    def test_negative_under_the_old_default_mom_was_the_owner(self) -> None:
+        """Seen failing first: strip the words out of the mention and the same
+        claim is the owner's own marriage — the relation word is the whole
+        difference, not the absence of a candidate."""
+        self.file_claims([owner_birth(), dated("Rosalind", "1979-06-01", event_kind="married")])
+        result = self.fold()
+        node = self.node(result, event_kind="married")
+        self.assertEqual(node["occurrence_subject_scope"], "owner")
+        self.assertEqual(node["owner_timeline_relation"], "participated")
+
+    def test_a_scene_he_told_about_a_relative_stays_on_his_axis(self) -> None:
+        """Owner decision 2026-09-21: "Grandpa died when I was in 9th grade" is
+        HIS moment about somebody else's death. It stays on the axis as
+        `lived_effect`, and the evidence is the telling itself."""
+        self.file_claims([owner_birth(), dated("Grandpa", "1995-10-04", event_kind="moment")])
+        result = self.fold()
+        node = self.node(result, event_kind="moment")
+        self.assertEqual(node["occurrence_subject_scope"], "other_person")
+        self.assertEqual(node["owner_timeline_relation"], "lived_effect")
+        self.assertEqual(node["relation_evidence_refs"], ["src-Grandpa"])
+        member_ids = {m["member_node_id"] for m in result.memberships}
+        self.assertIn(node["node_id"], member_ids)
+
+    def test_a_relatives_own_milestone_needs_evidence_and_leaves_the_axis(self) -> None:
+        """A kinded life event of theirs is THEIR milestone: with no landmark
+        entry granting it, `contextual_only` and no membership at all."""
+        self.file_claims([owner_birth(), dated("my grandma", "1995-10-04", event_kind="move")])
+        result = self.fold()
+        node = self.node(result, event_kind="move")
+        self.assertEqual(node["occurrence_subject_scope"], "other_person")
+        self.assertEqual(node["owner_timeline_relation"], "contextual_only")
+        member_ids = {m["member_node_id"] for m in result.memberships}
+        self.assertNotIn(node["node_id"], member_ids)
+
+    def test_an_owner_headed_mention_is_still_the_owner(self) -> None:
+        """"narrator's family" names relatives and is about the OWNER — the
+        owner is the phrase's head, which `owner_rewrite` already knows."""
+        self.file_claims([owner_birth(), dated("narrator's family", "1995-10-04", event_kind="move")])
+        result = self.fold()
+        node = self.node(result, event_kind="move")
+        self.assertEqual(node["occurrence_subject_scope"], "owner")
+        self.assertEqual(node["owner_timeline_relation"], "participated")
+
+    def test_a_mention_that_names_no_person_stays_the_owner(self) -> None:
+        """"the reunion" is the ordinary shape of the owner's own narration.
+        No relation word, no re-scoping — and no capitalisation heuristic,
+        which is why "Orderville" would not move it either."""
+        self.file_claims([owner_birth(), dated("the reunion", "1995-10-04", event_kind="moment")])
+        result = self.fold()
+        node = self.node(result, event_kind="moment")
+        self.assertEqual(node["occurrence_subject_scope"], "owner")
+
+    def test_a_relation_in_apposition_in_the_events_own_words_names_somebody_else(self) -> None:
+        """The subject mention is only a name; the event's own words say who he
+        is — "Grandpa James Edwin Taylor Sr.'s death". It is a death, so it is
+        also a loss the owner lived (the founder's own `node:59031241…`)."""
+        self.file_claims([owner_birth(), claim(
+            claim_type="date", subject_mention="James Edwin Taylor Sr.",
+            event_kind="death", event_mention="Grandpa James Edwin Taylor Sr.'s death",
+            temporal_value=chrono.DateRecord(
+                best="1995-10-04", earliest="1995-10-04", latest="1995-10-04",
+                granularity="day", confidence="certain", basis="stated",
+            ).to_dict(), source="src-grandpa-death", seed="grandpa-death",
+        )])
+        result = self.fold()
+        node = self.node(result, event_kind="death")
+        self.assertEqual(node["occurrence_subject_scope"], "other_person")
+        self.assertEqual(node["owner_timeline_relation"], "lived_effect")
+
+    def test_a_relatives_marriage_straddling_his_birth_is_never_inside_childhood(self) -> None:
+        """"Mom married dad at 21 · 1979-1981" drawn under "Childhood · ages
+        0-12" was the second half of the founder's report. It is family
+        history: off the axis, and in no frame."""
+        self.file_claims([owner_birth(), claim(
+            claim_type="date", subject_mention="Mom", event_kind="married",
+            temporal_value=chrono.DateRecord(
+                best="1979", earliest="1979", latest="1981", granularity="year",
+                confidence="approximate", basis="age",
+            ).to_dict(), source="src-mom-married", seed="mom-married",
+        )])
+        result = self.fold()
+        node = self.node(result, event_kind="married")
+        self.assertEqual(node["owner_timeline_relation"], "contextual_only")
+        rows = [m for m in result.memberships if m["member_node_id"] == node["node_id"]]
+        self.assertEqual(rows, [])
+
+    def test_a_scene_wholly_before_his_birth_is_family_history(self) -> None:
+        """Nobody lives through what happened before they existed, however the
+        scene is told. `_before_birth` still decides it, unchanged."""
+        self.file_claims([owner_birth(), dated("Grandma", "1975-06-01", event_kind="moment")])
+        result = self.fold()
+        node = self.node(result, event_kind="moment")
+        self.assertEqual(node["occurrence_subject_scope"], "other_person")
+        self.assertEqual(node["owner_timeline_relation"], "contextual_only")
+
+    NODE = "node:mothers-wedding"
+
+    def mothers_wedding(self, *, subject: str = "Mom", best: str = "1990-06-01") -> dict:
+        return claim(
+            claim_type="date", subject_mention=subject, event_kind="moment",
+            event_ref=self.NODE, event_mention=f"{subject} married dad at 21",
+            temporal_value=chrono.DateRecord(
+                best=best, earliest=best, latest=best, granularity="day",
+                confidence="certain", basis="stated",
+            ).to_dict(), source="src-mom-wedding", seed="mom-wedding",
+        )
+
+    def her_age(self, *, subject: str = "Mom") -> dict:
+        return claim(
+            claim_type="age", subject_mention=subject, event_kind="moment",
+            event_ref=self.NODE, event_mention=f"{subject} married dad at 21",
+            temporal_value="21", source="src-mom-21", seed="mom-21",
+        )
+
+    def test_a_relatives_own_age_makes_the_moment_her_milestone(self) -> None:
+        """"Mom married dad at 21" is dated by HER age — measured from her
+        birth, in her life. An unkinded `moment` carrying that age is her
+        milestone, not a scene he lived, so it takes the ordinary evidence
+        rules and gets no frame."""
+        self.file_claims([owner_birth(), self.mothers_wedding(), self.her_age()])
+        result = self.fold()
+        node = next(row for row in result.nodes if row["node_id"] == self.NODE)
+        self.assertEqual(node["occurrence_subject_scope"], "other_person")
+        self.assertEqual(node["owner_timeline_relation"], "contextual_only")
+        rows = [m for m in result.memberships if m["member_node_id"] == self.NODE]
+        self.assertEqual(rows, [])
+
+    def test_negative_the_same_moment_with_a_date_only_is_a_scene_he_lived(self) -> None:
+        """Seen failing first: the AGE claim is the whole difference. Dated and
+        nothing more, the same subject and the same kind stay on his axis —
+        which is the owner's ruling this refinement must not overrun."""
+        self.file_claims([owner_birth(), self.mothers_wedding()])
+        result = self.fold()
+        node = next(row for row in result.nodes if row["node_id"] == self.NODE)
+        self.assertEqual(node["owner_timeline_relation"], "lived_effect")
+        member_ids = {m["member_node_id"] for m in result.memberships}
+        self.assertIn(self.NODE, member_ids)
+
+    def test_a_relative_aged_under_another_spelling_is_still_the_same_person(self) -> None:
+        """The subject is "mother" and the age claim says "Mom". A mention is
+        raw text; the shared relation word is what joins them."""
+        self.file_claims([owner_birth(), self.mothers_wedding(subject="mother"),
+                          self.her_age(subject="Mom")])
+        result = self.fold()
+        node = next(row for row in result.nodes if row["node_id"] == self.NODE)
+        self.assertEqual(node["owner_timeline_relation"], "contextual_only")
+
+    def test_the_owners_own_age_on_a_relatives_scene_keeps_it_on_his_axis(self) -> None:
+        """"Grandpa died when I was in 9th grade" is anchored in HIS life. An
+        age claim about the owner is exactly the evidence that he lived it."""
+        self.file_claims([owner_birth(), self.mothers_wedding(subject="Grandpa"),
+                          claim(claim_type="age", subject_mention="self",
+                                event_kind="moment", event_ref=self.NODE,
+                                event_mention="Grandpa died when I was 14",
+                                temporal_value="14", source="src-own-age", seed="own-age")])
+        result = self.fold()
+        node = next(row for row in result.nodes if row["node_id"] == self.NODE)
+        self.assertEqual(node["owner_timeline_relation"], "lived_effect")
+
+    def aged_moment(self, *, words: str, subject: str, age: str = "66",
+                    best: str = "1995-10-04") -> list[dict]:
+        """One moment carrying a date and the SUBJECT'S own age — the shape
+        "Grandpa died at 66" and "Mom married dad at 21" both arrive in."""
+        return [
+            claim(claim_type="date", subject_mention=subject, event_kind="moment",
+                  event_ref=self.NODE, event_mention=words,
+                  temporal_value=chrono.DateRecord(
+                      best=best, earliest=best, latest=best, granularity="day",
+                      confidence="certain", basis="stated",
+                  ).to_dict(), source="src-aged-moment", seed="aged-moment"),
+            claim(claim_type="age", subject_mention=subject, event_kind="moment",
+                  event_ref=self.NODE, event_mention=words,
+                  temporal_value=age, source="src-aged-age", seed="aged-age"),
+        ]
+
+    def test_a_relatives_death_is_lived_however_it_is_dated(self) -> None:
+        """A LOSS IS LIVED (owner's rule). "Grandpa died at 66" is dated by the
+        dead man's age because that is how a family tells it — not because the
+        owner was absent from it. Decision 7 already reads a `losses` entry as
+        `lived_effect`; a death nobody has recorded yet is the same loss."""
+        self.file_claims([owner_birth(),
+                          *self.aged_moment(words="Grandpa died at 66", subject="Grandpa")])
+        result = self.fold()
+        node = next(row for row in result.nodes if row["node_id"] == self.NODE)
+        self.assertEqual(node["occurrence_subject_scope"], "other_person")
+        self.assertEqual(node["owner_timeline_relation"], "lived_effect")
+        member_ids = {m["member_node_id"] for m in result.memberships}
+        self.assertIn(self.NODE, member_ids)
+
+    def test_negative_the_same_shape_that_is_not_a_death_is_her_milestone(self) -> None:
+        """Seen failing first: only the WORDS differ. "Grandpa retired at 66"
+        is his own milestone, dated in his own life, and leaves the axis."""
+        self.file_claims([owner_birth(),
+                          *self.aged_moment(words="Grandpa retired at 66", subject="Grandpa")])
+        result = self.fold()
+        node = next(row for row in result.nodes if row["node_id"] == self.NODE)
+        self.assertEqual(node["owner_timeline_relation"], "contextual_only")
+        member_ids = {m["member_node_id"] for m in result.memberships}
+        self.assertNotIn(self.NODE, member_ids)
+
+    def test_a_death_before_he_was_born_is_still_family_history(self) -> None:
+        """The one exemption from the exemption: nobody lives through a loss
+        that happened before they existed."""
+        self.file_claims([owner_birth(),
+                          *self.aged_moment(words="Grandpa died at 66", subject="Grandpa",
+                                            best="1975-06-01")])
+        result = self.fold()
+        node = next(row for row in result.nodes if row["node_id"] == self.NODE)
+        self.assertEqual(node["owner_timeline_relation"], "contextual_only")
+
+    def test_a_death_kinded_relative_node_with_no_entry_is_lived_too(self) -> None:
+        """The kinded path, said explicitly: a `death` node with no landmark
+        entry behind it used to fall to rule 4's `contextual_only`. It is the
+        same loss as the unkinded one and lands `lived_effect`. A death WITH
+        an entry never reaches this fallback and keeps rules 3 and 4."""
+        self.file_claims([owner_birth(), dated("Grandma", "1995-10-04", event_kind="death")])
+        result = self.fold()
+        node = self.node(result, event_kind="death")
+        self.assertEqual(node["occurrence_subject_scope"], "other_person")
+        self.assertEqual(node["owner_timeline_relation"], "lived_effect")
+
+    def test_a_loss_entry_still_grants_through_rule_three(self) -> None:
+        """The entry-backed path is untouched: it never reaches the fallback,
+        and its evidence is still the ENTRY rather than the telling."""
+        loss = self.file_landmark("losses", {
+            "domain": "losses", "label": "Grandma", "who": "Grandma",
+            "date": {"best": "1995-10-04", "earliest": "1995-10-04", "latest": "1995-10-04",
+                     "granularity": "day", "confidence": "certain", "basis": "stated"},
+        })
+        self.file_claims([owner_birth()])
+        result = self.fold()
+        node = self.node(result, event_kind="death")
+        self.assertEqual(node["owner_timeline_relation"], "lived_effect")
+        self.assertEqual(node["relation_evidence_refs"],
+                         [loss["source_ref"].to_dict()["source_id"]])
+
+    def test_the_relation_word_must_be_what_the_phrase_is_about(self) -> None:
+        """The head, or the head's possessor — never a word loose inside a
+        longer phrase. "Big Brother dynamic flip" is a name for a sibling
+        dynamic the owner lived inside; reading it as his brother took his own
+        company off his timeline."""
+        other = ["Mom", "Dave's mother", "the narrator's father", "A.J. (brother)",
+                 "aunt's family", "Author's wife", "my grandma", "mother"]
+        owner = ["Big Brother dynamic flip", "the brother-in-law's company picnic",
+                 "the reunion", "Dave Taylor", "narrator (as a child)",
+                 "narrator's family", "Orderville"]
+        for mention in other:
+            with self.subTest(mention=mention):
+                self.assertEqual(
+                    tt._mention_names_another_person({"subject": mention, "claims": []}),  # noqa: SLF001
+                    "relation_word")
+        for mention in owner:
+            with self.subTest(mention=mention):
+                self.assertIsNone(
+                    tt._mention_names_another_person({"subject": mention, "claims": []}))  # noqa: SLF001
+
+    def test_the_rule_version_is_nine(self) -> None:
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:9")
+
     def test_the_owners_own_life_domains_never_reach_the_subject_question(self) -> None:
         """residences/schools/work/military/birth are the owner's own life —
         their entries are `owner`/`participated` whatever their raw mention

@@ -159,7 +159,18 @@ from temporal_claims import (  # noqa: E402
 #: ``input_fingerprint`` moves with this bump whether or not that node is
 #: bound — which is the honest signal, since a stale projection calculated by
 #: :4 rules is stale everywhere, not only where a binding landed.
-CALCULATION_RULE_VERSION = "timeline-rules:8"
+#:
+#: ``timeline-rules:9`` (owner decision 2026-09-21): AN UNKNOWN NAME IS NOT
+#: THE OWNER. A subject mention the roster cannot place used to fall to the
+#: owner; it now falls to the owner only when nothing in the words says
+#: otherwise (:func:`_mention_names_another_person`). The same claims
+#: calculate to a projection where a relative's own milestone is
+#: `other_person`/`contextual_only` and OFF the axis, while a scene the owner
+#: told about a relative stays on it as `lived_effect` — so both the axis and
+#: the "about someone else" bucket change for claims nobody edited. The
+#: subject-less anchor handle moves with it: it is minted under `anchor:`
+#: instead of `unresolved:` and asks whose event it was.
+CALCULATION_RULE_VERSION = "timeline-rules:9"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -1352,10 +1363,25 @@ def compose_anchor_question(text: object) -> str | None:
     correctly for arbitrary English is grammar this module has no business
     inventing — and a wrong conjugation is exactly the not-a-sentence defect
     the whole contract is about.
+
+    One shape gets a sentence of its own: a handle that names an EVENT and no
+    person ("move to Orderville") is asked as *"You mentioned the move to
+    Orderville — whose move was that, and when?"*. A date question alone would
+    be read as the owner's own move, because a question on the owner's
+    timeline is in the owner's voice by default.
     """
     body = owner_rewrite(text)
     if not body or is_owner_reference_only(body) or _is_bare_kind_word(body):
         return None
+    noun = _anchor_leading_noun(body)
+    if noun:
+        # An event with nobody in it. Asking "When was the move to
+        # Orderville?" on the owner's own timeline states that it was HIS
+        # move, which is the thing nobody knows yet — so the sentence asks
+        # both halves, in that order (owner decision 2026-09-21).
+        phrase = body if body.lower().startswith("the ") else f"the {body}"
+        question = f"You mentioned {phrase} \u2014 whose {noun} was that, and when?"
+        return None if cl.lint_question(question) else question
     words = body.split()
     clause = len(words) >= 3 and bool(_CLAUSE_VERB_RE.search(body))
     question = (
@@ -2220,6 +2246,14 @@ def _anchor_index(groups: dict, displays: dict) -> dict:
         add(words, node_id)
         for claim in group["claims"]:
             add(claim.get("subject_mention"), node_id)
+            # `timeline-rules:9`: the event's OWN words, under the same
+            # uniqueness gate. A handle is free text somebody said, and the
+            # thing it names is usually filed later under the same words ("the
+            # move to Orderville" answered by a dated "Grandma — move to
+            # Orderville" claim). Without this, the two never met and the
+            # handle stayed a question after it had been answered.
+            add(claim.get("event_mention"), node_id)
+        add(_node_what(group, display), node_id)
     return {key: tuple(value) for key, value in index.items()}
 
 
@@ -2813,15 +2847,149 @@ def _mention_is_ambiguous(group: dict) -> bool:
     This — not "no `subject_ref` landed" — is what "an unresolved mention"
     means (eras design §2.5): a mention with **zero** roster candidates
     (`"no_candidate"`) is not ambiguous, it simply names nobody the roster
-    knows, which is the ordinary shape of the owner's OWN narration ("the
-    reunion", "the wedding") and defaults to the owner below — never to
-    `unresolved`, which is reserved for a genuine standoff between candidates.
+    knows. Since `timeline-rules:9` that is still not `unresolved` — which
+    stays reserved for a genuine standoff between candidates — but it is no
+    longer the owner by default either: :func:`_mention_names_another_person`
+    reads the words themselves, and only a mention with no relation word in it
+    ("the reunion", "the wedding") falls to the owner.
     """
     for claim in group.get("claims") or ():
         resolution = claim.get("subject_resolution")
         if isinstance(resolution, dict) and resolution.get("reason") == "ambiguous_candidates":
             return True
     return False
+
+
+#: A relation word followed immediately by a name — "Grandpa James", "my aunt
+#: Ruth". The name is captured so the caller can check it is THIS subject's
+#: name rather than somebody else's mentioned in the same breath.
+_RELATION_APPOSITION_RE = re.compile(
+    rf"(?<!\w)(?:{'|'.join(cd.THIRD_PARTY_RELATION_WORDS)})\s+"
+    r"([A-Za-z][\w'\u2019.-]*)",
+    re.IGNORECASE,
+)
+
+#: The relation word is the mention's HEAD — its last token, with a trailing
+#: possessive or parenthetical ignored: "Mom", "Dave's mother", "A.J.
+#: (brother)", "Author's wife".
+_RELATION_HEAD_RE = re.compile(
+    rf"(?<!\w)(?:{'|'.join(cd.THIRD_PARTY_RELATION_WORDS)})"
+    r"(?:['\u2019]s)?[^\w]*$",
+    re.IGNORECASE,
+)
+
+#: The relation word is the POSSESSOR of the head — "aunt's family", "mom's
+#: friend". One more token and no further: a phrase that runs on past that is
+#: prose about a scene, not a name for a person.
+_RELATION_POSSESSOR_RE = re.compile(
+    rf"(?<!\w)(?:{'|'.join(cd.THIRD_PARTY_RELATION_WORDS)})"
+    r"['\u2019]s\s+[\w'\u2019.-]+[^\w]*$",
+    re.IGNORECASE,
+)
+
+#: The mention is the owner's when the owner is its HEAD — "narrator (as a
+#: child)", "narrator's family", "I". `owner_rewrite` already knows every
+#: third-person handle the vault has for its owner; this only asks whether the
+#: rewrite comes out in the second person.
+_OWNER_HEADED_RE = re.compile(r"^you(?!\w)", re.IGNORECASE)
+
+
+def _mention_names_another_person(group: dict) -> str | None:
+    """Do these words name somebody OTHER than the owner, and on what grounds?
+
+    ``None`` means "not decided against the owner", which is the caller's
+    default. The three grounds, in order, are deliberately all LEXICAL — this
+    runs only where identity resolution found nothing at all, so there is
+    nothing to look up and a guess dressed as a lookup would be worse than the
+    words:
+
+    1. the owner is the mention's HEAD (`_OWNER_HEADED_RE` over
+       :func:`owner_rewrite`) — ``None``, however many other people the phrase
+       goes on to name ("narrator's family");
+    2. a relation word that is the mention's HEAD, or the possessor of its
+       head — ``"relation_word"``. "Mom", "my grandma", "Dave's mother",
+       "A.J. (brother)", "aunt's family". It must be the thing the phrase is
+       ABOUT: "Big Brother dynamic flip" is a name for a sibling dynamic the
+       owner lived inside, not a name for his brother, and re-scoping every
+       phrase with a relation word loose in it took the owner's own company
+       off his timeline;
+    3. a relation word in APPOSITION in front of this subject's own name, in
+       any claim's `event_mention` — ``"relation_apposition"``. "Grandpa James
+       Edwin Taylor Sr.'s death" says who James is even though the subject
+       mention is only his name.
+
+    There is deliberately NO capitalisation heuristic. "Dave Taylor" is the
+    owner under a spelling the roster lacks, "the reunion" and "Orderville"
+    are not people at all, and a rule that read initial capitals as
+    third-party evidence would re-scope all three.
+    """
+    mention = collapsed_text(group.get("subject"))
+    if not mention:
+        return None
+    if _OWNER_HEADED_RE.match(owner_rewrite(mention)):
+        return None
+    if _RELATION_HEAD_RE.search(mention) or _RELATION_POSSESSOR_RE.search(mention):
+        return "relation_word"
+    tokens = mention.split()
+    first = normalized_mention_key(tokens[0]) if tokens else ""
+    if not first:
+        return None
+    for claim in group.get("claims") or ():
+        text = collapsed_text(claim.get("event_mention"))
+        if not text:
+            continue
+        for match in _RELATION_APPOSITION_RE.finditer(text):
+            if normalized_mention_key(match.group(1)) == first:
+                return "relation_apposition"
+    return None
+
+
+def _age_is_the_subjects_own(group: dict) -> bool:
+    """Does a claim here state THIS subject's own age?
+
+    "Mom married dad at 21" carries an `age` claim whose subject is the
+    mother. That age places the event in HER life — it is measured from her
+    birth, and it is the only thing dating the moment. A scene the owner lived
+    is anchored in HIS life instead: his own age, a date, an order against
+    something of his. So an age of the subject's own makes even an unkinded
+    `moment` the relative's milestone rather than the owner's scene, and it
+    takes the ordinary evidence rules (owner refinement, 2026-09-21).
+
+    Two ways to be the same person, because a mention is raw text: the same
+    normalized mention key, or the same relation word in both mentions
+    ("mother" dated as "Mom", "my grandma" as "grandma").
+    """
+    subject = collapsed_text(group.get("subject"))
+    subject_key = normalized_mention_key(subject)
+    subject_words = {word.lower() for word in cd.THIRD_PARTY_RELATION_RE.findall(subject)}
+    for claim in group.get("claims") or ():
+        if collapsed_text(claim.get("claim_type")) != "age":
+            continue
+        mention = collapsed_text(claim.get("subject_mention"))
+        if not mention:
+            continue
+        if normalized_mention_key(mention) == subject_key:
+            return True
+        if subject_words & {word.lower() for word in cd.THIRD_PARTY_RELATION_RE.findall(mention)}:
+            return True
+    return False
+
+
+def _telling_refs(group: dict) -> tuple[str, ...]:
+    """The sources this group's claims were told in, in claim order.
+
+    The evidence a lived-through SCENE cites is the telling itself: the owner
+    said it happened to them, which is the whole grant. A landmark entry's
+    `source_id` is what rule 3 cites, and this is the same shape of ref from
+    the other lane, so `relation_evidence_refs` stays one kind of thing.
+    """
+    refs: list[str] = []
+    for claim in group.get("claims") or ():
+        ref = claim.get("source_ref")
+        source_id = collapsed_text(ref.get("source_id")) if isinstance(ref, dict) else ""
+        if source_id and source_id not in refs:
+            refs.append(source_id)
+    return tuple(refs)
 
 
 def _owner_relevance(group: dict, *, best: object, entry_index: dict, owner: str,
@@ -2851,6 +3019,33 @@ def _owner_relevance(group: dict, *, best: object, entry_index: dict, owner: str
        not the owner's. Rule 4 also swallows rule 3 when the occurrence is
        wholly before the owner's birth: a grandmother's birth is family
        history, not something the owner lived through.
+
+    Rule 1's zero-candidate fallback is where `timeline-rules:9` changed
+    (owner decision 2026-09-21, "lived-through scenes stay on my axis"). A
+    name the roster does not know is not the owner just because it is unknown:
+    :func:`_mention_names_another_person` asks whether the words name somebody
+    else, and when they do the SCENE-VS-MILESTONE rule decides the relation —
+
+    * an unkinded ``moment`` is a scene out of the owner's own telling
+      ("Grandpa died when I was in 9th grade"), so it is something the owner
+      LIVED: ``lived_effect``, citing the telling the claim came from — unless
+      it is wholly before the owner's birth, which nobody lives through, or
+      what dates it is the SUBJECT'S OWN AGE ("Mom married dad at 21"), which
+      measures the moment in her life rather than his
+      (:func:`_age_is_the_subjects_own`);
+    * a DEATH is always one of those scenes (:func:`_is_a_death`), by kind or
+      by its own words, and the age short-circuit does not reach it: a loss is
+      lived, which is what decision 7 already says about a `losses` entry, and
+      a death nobody has recorded as an entry yet is the same loss earlier.
+      Only a death wholly before the owner's birth is family history. This is
+      also why a `death`-KINDED relative node with no entry behind it lands
+      ``lived_effect`` here rather than falling to rule 4's
+      ``contextual_only``; a death WITH an entry never reaches this fallback
+      at all and keeps rules 3 and 4 exactly as they were;
+    * a kinded life event of the relative's own (their birth, death, marriage,
+      graduation, move, job, school) is THEIR milestone and needs evidence —
+      it takes rules 3 and 4 exactly as a roster-resolved relative would, so
+      with no landmark entry behind it, ``contextual_only``.
 
     The occurrence subject is never rewritten to the owner in any of them.
     """
@@ -2888,11 +3083,30 @@ def _owner_relevance(group: dict, *, best: object, entry_index: dict, owner: str
         if entry["source_id"] not in refs:
             refs.append(entry["source_id"])
     if relation is None and not entries and not group.get("resolved"):
-        # No landmark entry at all, and no roster candidate either — an
-        # ordinary, self-narrated claim naming nobody the roster knows. Rule
-        # 2's veto is for a genuine standoff between candidates; the absence
-        # of any candidate is the ordinary shape of the owner's own life.
-        return owner_row
+        # No landmark entry at all, and no roster candidate either. Rule 2's
+        # veto is for a genuine standoff between candidates; the absence of
+        # any candidate is usually the ordinary shape of the owner's own life
+        # ("the reunion", "the wedding") — but not when the words themselves
+        # name somebody else. `timeline-rules:9`:
+        if _mention_names_another_person(group) is None:
+            return owner_row
+        death = _is_a_death(group)
+        if (event_kind == "moment" or death) and not _before_birth(best, birth) \
+                and (death or not _age_is_the_subjects_own(group)):
+            # A scene from the owner's own telling about a relative. He lived
+            # it; the telling is the evidence that he did. A DEATH is one of
+            # these whatever its kind and whatever clock is on it (`_is_a_death`):
+            # ADR 0030 already reads a `losses` entry as `lived_effect`, and a
+            # relative's death with no entry behind it yet is the same loss
+            # before it was recorded. Only a death before he was born is not
+            # his to have lived.
+            return {
+                "occurrence_subject_scope": "other_person",
+                "owner_timeline_relation": "lived_effect",
+                "relation_evidence_refs": _telling_refs(group),
+            }
+        # Their own milestone, or family history from before his life began.
+        # Rules 3 and 4 below, with no entry to grant anything: contextual.
     if relation is not None and _before_birth(best, birth):
         # Family history the owner was not alive for. The relationship is
         # stated and the evidence stands; what it does not support is a row on
@@ -4547,6 +4761,31 @@ _ANCHOR_EVENT_NOUN_RE = re.compile(
 )
 _TRAILING_POSSESSIVE_RE = re.compile(r"['\u2019]s$|s['\u2019]$")
 
+#: The OTHER shape a handle takes: the event noun in front, a place or a thing
+#: behind it — "move to Orderville", "the graduation from BYU". It names no
+#: person at all, which used to make the whole phrase a "name" the roster was
+#: then asked about, found nothing, and the handle became "When was move to
+#: Orderville?" — the owner's own move, in his own voice, about his
+#: grandmother (2026-09-21). Recognising the shape is what lets the question
+#: ask WHOSE instead.
+_ANCHOR_LEADING_NOUN_RE = re.compile(
+    r"^(?:the\s+)?(" + "|".join(
+        re.escape(word) for word in sorted(ANCHOR_EVENT_NOUNS, key=len, reverse=True)
+    ) + r")\s+(?:back to|to|into|from|of|at|in)\s+(.+)$",
+    re.IGNORECASE,
+)
+
+
+def _anchor_leading_noun(text: object) -> str:
+    """``"the move to Orderville"`` → ``"move"``; anything else → ``""``.
+
+    The noun in the person's OWN words, not its event kind — the question says
+    "whose move was that", never "whose married was that".
+    """
+    match = _ANCHOR_LEADING_NOUN_RE.match(collapsed_text(text))
+    return match.group(1).lower() if match else ""
+
+
 #: The event kind each trailing noun names, so "James's birth" can be checked
 #: against the James—birth node rather than against any James node at all.
 ANCHOR_NOUN_EVENT_KINDS = {
@@ -4558,16 +4797,66 @@ ANCHOR_NOUN_EVENT_KINDS = {
 }
 
 
+#: The words a DEATH goes by, derived from the table above plus the two verb
+#: forms a person actually writes ("Grandpa died at 66", "she passed away that
+#: spring"). One vocabulary, not two: a reader who changes what counts as a
+#: death changes it for the anchor handles and for `_owner_relevance` at once.
+DEATH_WORDS = tuple(sorted(
+    {noun for noun, kind in ANCHOR_NOUN_EVENT_KINDS.items() if kind == "death"}
+    | {"died", "passed away"}
+))
+_DEATH_WORDS_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(
+        re.escape(word).replace(r"\ ", r"\s+")
+        for word in sorted(DEATH_WORDS, key=len, reverse=True)
+    ) + r")(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def _is_a_death(group: dict) -> bool:
+    """Is this node somebody's death, by its kind or by its own words?
+
+    A LOSS IS LIVED (owner's rule, 2026-09-21; ADR 0030 decision 7 already
+    reads a `losses` entry as `lived_effect`). A close relative's death is a
+    moment of the owner's life whatever clock happens to be on it — "Grandpa
+    died at 66" is dated by the dead man's age because that is how the family
+    tells it, not because the owner was absent from it. So the death test is
+    what exempts a death from :func:`_age_is_the_subjects_own`, and it reads
+    the kind OR the person's own words, because the classifier leaves most of
+    these as bare moments.
+    """
+    if collapsed_text(group.get("event_kind")) == "death":
+        return True
+    for claim in group.get("claims") or ():
+        if _DEATH_WORDS_RE.search(collapsed_text(claim.get("event_mention"))):
+            return True
+    return bool(_DEATH_WORDS_RE.search(collapsed_text(group.get("era_label"))))
+
+
 def _anchor_handle_subject(text: object) -> tuple[str, str]:
     """``"James's birth"`` → ``("James", "birth")``; a bare name keeps ``""``.
 
     Deterministic and deliberately shallow: one trailing event noun from
     :data:`ANCHOR_EVENT_NOUNS`, one possessive. Anything richer is a clause,
     and a clause is not a name.
+
+    Since `timeline-rules:9` the noun may also come FIRST — "move to
+    Orderville" → ``("", "move")``. An empty subject with a kind is the honest
+    reading of a handle that names an event and nobody in particular, and it
+    is what `_derive_work_items` turns into a whose-and-when question instead
+    of a date question in the owner's voice.
     """
     body = collapsed_text(text)
     if not body:
         return "", ""
+    leading = _anchor_leading_noun(body)
+    if leading:
+        # An event with a tail and no person in it. The subject is EMPTY
+        # rather than the phrase itself: there is nobody here to look up, and
+        # calling "move to Orderville" a name is how the roster was asked
+        # about a place and the question came back in the owner's voice.
+        return "", ANCHOR_NOUN_EVENT_KINDS.get(leading, leading)
     match = _ANCHOR_EVENT_NOUN_RE.search(body)
     if not match:
         return body, ""
@@ -4743,7 +5032,10 @@ def _derive_work_items(
             if item_id:
                 reach[item_id] = raw
             continue
-        handle_ref = ident.unresolved_subject_ref(text)
+        # `anchor:`, never `unresolved:` — the handle names an EVENT, and a
+        # host that reads the prefix as an open identity question refuses a
+        # card that nothing can ever settle (`twi.ANCHOR_HANDLE_PREFIX`).
+        handle_ref = twi.anchor_handle_ref(text)
         item_id = _mint_work_item(
             items,
             components,

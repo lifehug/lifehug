@@ -60,7 +60,7 @@ if str(SYSTEM_DIR) not in sys.path:
 import chronology as chrono  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
-from temporal_claims import collapsed_text  # noqa: E402
+from temporal_claims import collapsed_text, normalized_mention_key  # noqa: E402
 
 # --------------------------------------------------------------------------
 # Who and how much
@@ -121,6 +121,49 @@ BIRTH_ANCHOR_KEYS = (
 
 #: The work-item kind the birth origin is asked as.
 BIRTH_ORIGIN_KIND = "missing_anchor"
+
+#: The prefix an ANCHOR HANDLE's subject ref carries (`timeline-rules:9`).
+#:
+#: A handle is free text somebody said that names an event rather than a
+#: person — "the move to Orderville". Until v324 it was minted under
+#: `identity_resolution.UNRESOLVED_REF_PREFIX`, the same prefix an unresolved
+#: PERSON mention carries, and the hosted side reasonably read the prefix as
+#: "who this is about has not been settled" and refused to open the card. That
+#: refusal can never be satisfied, because settling an identity needs at least
+#: two roster candidates and a handle has none — a deadlock by construction
+#: (the founder's "move to Orderville" card, 2026-09-21).
+#:
+#: So the two meanings get two prefixes. `unresolved:` still means a person
+#: nobody has picked yet; `anchor:` means an event nobody has attached to a
+#: person yet, which is an ordinary question with an ordinary answer. Nothing
+#: reads `anchor:` as an identity refusal, and
+#: `identity_resolution.is_unresolved_ref` is false for it.
+ANCHOR_HANDLE_PREFIX = "anchor"
+
+#: The prefix an anchor handle used to be minted under. Named here — and
+#: ONLY here — so `legacy_work_item_ids` can re-mint the old id without
+#: this module importing `identity_resolution`, whose own constant it
+#: mirrors (`tests/test_work_item_aliases.py` holds the two equal).
+UNRESOLVED_HANDLE_PREFIX = "unresolved"
+
+
+def anchor_handle_ref(text: object) -> str:
+    """``anchor:<mention key>`` — a handle for an EVENT nobody has placed.
+
+    Deterministic in the text, exactly as
+    `identity_resolution.unresolved_subject_ref` is in a mention, and keyed by
+    the same normalisation, so the two prefixes name the same handle-space and
+    the alias map below can carry a stored reference across from one to the
+    other. It carries no ``/`` so it is a legal document id hosted-side.
+    """
+    key = normalized_mention_key(text)
+    return f"{ANCHOR_HANDLE_PREFIX}:{key}" if key else ANCHOR_HANDLE_PREFIX
+
+
+def is_anchor_handle_ref(value: object) -> bool:
+    """Is this ref an anchor handle rather than a person or an entity?"""
+    text = collapsed_text(value)
+    return text == ANCHOR_HANDLE_PREFIX or text.startswith(f"{ANCHOR_HANDLE_PREFIX}:")
 
 # --------------------------------------------------------------------------
 # The birth origin's own score (design §7, rule `temporal-score:2`)
@@ -345,6 +388,17 @@ def legacy_work_item_ids(item: object) -> tuple[str, ...]:
     spellings: list[tuple[str | None, str | None, str]] = [
         (subject, event, LEGACY_REQUESTED_FIELD),
     ]
+    if subject and is_anchor_handle_ref(subject):
+        # The **legacy prefix** twin (`timeline-rules:9`): every anchor handle
+        # ever minted before v324 carried `unresolved:` where it now carries
+        # `anchor:`. Same kind, same key, same question — so a card the person
+        # already has open, a bank ledger row and a stored session target all
+        # still resolve. Both fields, because the handle lane minted `date`
+        # and the keystone lane minted the legacy one.
+        legacy_subject = f"{UNRESOLVED_HANDLE_PREFIX}:{subject.split(':', 1)[1]}" \
+            if ":" in subject else UNRESOLVED_HANDLE_PREFIX
+        for field in (LEGACY_REQUESTED_FIELD, REQUESTED_FIELD_DATE):
+            spellings.append((legacy_subject, event, field))
     if canonical and canonical == birth_origin_work_item_id():
         for anchor in BIRTH_ANCHOR_KEYS:
             spellings.append((anchor, None, LEGACY_REQUESTED_FIELD))
@@ -469,6 +523,7 @@ def dangling_anchor_reason(item: object) -> str | None:
 
 
 __all__ = [
+    "ANCHOR_HANDLE_PREFIX",
     "ANCHOR_RESOLVES_NOTHING",
     "ANCHOR_WITHOUT_QUESTION",
     "BIRTH_ANCHOR_KEYS",
@@ -488,6 +543,8 @@ __all__ = [
     "REQUESTED_FIELD_ORDER",
     "REQUESTED_FIELD_START_DATE",
     "SCORE_FORMULA_VERSION",
+    "UNRESOLVED_HANDLE_PREFIX",
+    "anchor_handle_ref",
     "birth_origin_system_value",
     "birth_origin_work_item_id",
     "canonical_ask",
@@ -495,6 +552,7 @@ __all__ = [
     "canonical_work_item_id",
     "clamp_unit",
     "dangling_anchor_reason",
+    "is_anchor_handle_ref",
     "is_birth_anchor",
     "is_explicit_origin",
     "legacy_work_item_ids",

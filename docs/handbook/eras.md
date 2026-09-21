@@ -136,12 +136,17 @@ that asks for one rather than silently filing five-sixths of the act.
   a landmark `who`/`relation` answer, a roster edge — establishes *who*
   someone is to you; it is never by itself evidence that *this* event of
   theirs belongs on your Timeline. A child's birth does; an unrelated event
-  in that child's life years later does not. **(design decided, not yet
-  built — design §2.5/§2.6, ADR 0030 decision 7)**
+  in that child's life years later does not. Since `timeline-rules:9` a
+  subject the roster cannot place is read from the words: a relation word
+  ("Mom", "Grandpa") means somebody else, a scene you told about them is
+  yours to have lived (`lived_effect`), their own milestone needs evidence,
+  and anything wholly before your birth is family history. **Merged** —
+  design §2.5/§2.6, ADR 0030 decision 7 and its 2026-09-21 amendment,
+  `temporal_timeline._owner_relevance`, `tests/test_eras_e2.py`.
 - **`life_view`** — the reading a node gets once it is placed against the
   life clip: lived history inside the clip, `contradictory` when it falls
   wholly before the supported birth interval (with a Mirror row citing the
-  birth claim), `future_plan` after `as_of`, or `subject_uncertain` when the
+  birth claim), `future_plan` after `as_of`, or `unresolved` when the
   subject itself is unresolved. Never a censorship of what was claimed —
   only how it reads. **Merged** (`system/temporal_timeline.py::_life_view`,
   OSS v238/lifehug#259).
@@ -331,8 +336,10 @@ ladder, and whose refusal E-L2b (v277) completed with the rung's own condition
 container, no rebuild, sweep or rule bump puts it back — and event identity I1 took
 `timeline-rules:5` when grouping learned to read the identity layer, so the
 version in force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:8 -->
-`timeline-rules:8`, where usable placement also governs generic work items.
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:9 -->
+`timeline-rules:9`, where a subject mention the roster cannot place is no
+longer the owner by default — a relative's own milestone leaves the axis and a
+scene the owner told about them stays on it as `lived_effect`.
 
 **Legacy identity, never legacy authority.** A roster row whose name is a
 canonical band spelling (`My 20s`, `Childhood`, …) contributes *aliases*

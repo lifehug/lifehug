@@ -45,8 +45,12 @@ class TheGolden(unittest.TestCase):
         self.payload = json.loads(GOLDEN.read_text(encoding="utf-8"))
         self.rows = self.payload["rows"]
 
-    def test_the_golden_covers_all_nine_live_items(self):
-        self.assertEqual(len(self.rows), 9)
+    def test_the_golden_covers_every_live_item_it_records(self):
+        """Nine from 2026-08-29, and since v324 the founder's tenth card of
+        2026-09-21 — the same defect class, one prefix further on. A row is
+        added only when a real page showed the string it quotes."""
+        self.assertEqual(len([row for row in self.rows if not row.get("seen")]), 9)
+        self.assertEqual(len(self.rows), 10)
         for row in self.rows:
             self.assertTrue(row["live"])
             self.assertTrue(row["defect"])

@@ -32,7 +32,9 @@ sys.path.insert(0, str(ROOT / "system"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 import conversation_delivery as cd  # noqa: E402
+import identity_resolution as ident  # noqa: E402
 import mirror_work as mw  # noqa: E402
+import temporal_work_items as twi  # noqa: E402
 import timeline_interaction as ti  # noqa: E402
 from test_conversation_delivery import EngineTestCase  # noqa: E402
 from test_mirror_work import MirrorWorkTestCase  # noqa: E402
@@ -248,6 +250,21 @@ class ProbeTests(unittest.TestCase):
                                       anchors=only_birth),
                                anchors=only_birth)["step"],
             "content")
+
+    def test_a_handle_target_is_never_an_identity_refusal(self):
+        """`timeline-rules:9`. The founder's "move to Orderville" card could
+        not be opened: its `subject_ref` began `unresolved:`, a host read that
+        as "who this is about is unsettled", and settling a person needs two
+        roster candidates — which a handle naming an EVENT can never have. The
+        handle now carries `anchor:`, which nothing reads that way."""
+        ref = twi.anchor_handle_ref("move to Orderville")
+        self.assertFalse(ident.is_unresolved_ref(ref))
+        row = target(item_kind="missing_anchor", label="the move to Orderville",
+                     subject_ref=ref, alternatives=[])
+        normalized = ti.work_item_target(row)
+        self.assertIsNotNone(normalized)
+        self.assertEqual(ti.work_item_probe(row)["step"], "sequence")
+        self.assertFalse(mw._uncertain_identity({"subject_ref": ref}))  # noqa: SLF001
 
     def test_an_unusable_target_is_a_named_refusal(self):
         with self.assertRaises(ti.TimelineInteractionError):

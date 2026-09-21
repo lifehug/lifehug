@@ -28,6 +28,8 @@ sys.path.insert(0, str(ROOT / "system"))
 
 import chronology as chrono  # noqa: E402
 import classifier_claims  # noqa: E402
+import conversation_lints as cl  # noqa: E402
+import mirror_work as mw  # noqa: E402
 import identity_resolution as ident  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
@@ -35,6 +37,7 @@ import temporal_publication as pub  # noqa: E402
 import temporal_store as ts  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
 import temporal_work_items as twi  # noqa: E402
+import timeline_gain as tg  # noqa: E402
 
 
 def revision(seed: str) -> str:
@@ -145,7 +148,10 @@ class RelativeAndInferredTime(unittest.TestCase):
         self.assertEqual(len(anchors), 1)
         item = anchors[0]
         self.assertEqual(item["requested_field"], "date")
-        self.assertTrue(ident.is_unresolved_ref(item["subject_ref"]))
+        # `timeline-rules:9`: a handle names an EVENT, so it is minted under
+        # `anchor:` and is never read as an open identity question.
+        self.assertTrue(twi.is_anchor_handle_ref(item["subject_ref"]))
+        self.assertFalse(ident.is_unresolved_ref(item["subject_ref"]))
         self.assertEqual(result.reach[item["work_item_id"]], 1)
         self.assertAlmostEqual(item["system_value"], 1 / tt.REACH_SATURATION)
 
@@ -844,7 +850,7 @@ class WorkItems(unittest.TestCase):
 
         without_canonical_anchor = derive(*emitted)
         self.assertTrue(any(
-            row["subject_ref"] == "unresolved:launching northstar"
+            row["subject_ref"] == "anchor:launching northstar"
             for row in items_of(without_canonical_anchor, "missing_anchor")
         ))
 
@@ -994,6 +1000,84 @@ def _scale_claims(subjects: int, *, relatives: bool = True) -> list[dict]:
                 )
             )
     return rows
+
+
+class AnchorHandlesThatNameAnEvent(unittest.TestCase):
+    """`timeline-rules:9` — "the move to Orderville" is an EVENT, not a name.
+
+    The founder's card: a `relative_order` claim about his grandfather's death
+    anchored on "move to Orderville" — his grandmother's move. The handle was
+    parsed as a person's name, found nobody, and asked "When was move to
+    Orderville?" in his own voice, on a card the host then refused to open
+    because the subject ref said an identity was unsettled.
+    """
+
+    HANDLE = "move to Orderville"
+
+    def death(self):
+        return claim(
+            claim_type="relative_order",
+            subject_mention="Grandpa",
+            event_kind="moment",
+            temporal_value={"relation": "within", "anchors": [self.HANDLE]},
+            quote="grandpa died right around the move to Orderville",
+            seed="grandpa-death",
+        )
+
+    def test_the_leading_noun_form_parses_to_a_kind_and_no_person(self):
+        self.assertEqual(tt._anchor_handle_subject(self.HANDLE), ("", "move"))  # noqa: SLF001
+        self.assertEqual(tt._anchor_handle_subject("the move to Orderville"), ("", "move"))  # noqa: SLF001
+        self.assertEqual(tt._anchor_handle_subject("move back to Irvine"), ("", "move"))  # noqa: SLF001
+
+    def test_a_persons_handle_is_untouched(self):
+        self.assertEqual(tt._anchor_handle_subject("James's birth"), ("James", "birth"))  # noqa: SLF001
+        self.assertEqual(tt._anchor_handle_subject("the Switzerland mission"),  # noqa: SLF001
+                         ("the Switzerland mission", ""))
+
+    def test_the_question_asks_whose_and_when(self):
+        self.assertEqual(
+            tt.compose_anchor_question(self.HANDLE),
+            "You mentioned the move to Orderville \u2014 whose move was that, and when?",
+        )
+        self.assertEqual(cl.lint_question(tt.compose_anchor_question(self.HANDLE)), [])
+
+    def test_person_handles_and_clauses_keep_their_own_sentences(self):
+        self.assertEqual(tt.compose_anchor_question("James's birth"), "When was James's birth?")
+        self.assertEqual(tt.compose_anchor_question("my dad graduated from college"),
+                         "You mentioned your dad graduated from college \u2014 when was that?")
+
+    def test_the_item_is_minted_under_anchor_not_unresolved(self):
+        item = items_of(derive(self.death()), "missing_anchor")[0]
+        self.assertEqual(item["subject_ref"], twi.anchor_handle_ref(self.HANDLE))
+        self.assertTrue(twi.is_anchor_handle_ref(item["subject_ref"]))
+        self.assertFalse(ident.is_unresolved_ref(item["subject_ref"]))
+        self.assertEqual(item["prompt_intent"],
+                         "You mentioned the move to Orderville \u2014 whose move was that, and when?")
+
+    def test_the_dated_answer_binds_the_handle_through_the_events_own_words(self):
+        """The answer arrives as a dated claim whose `event_mention` is what
+        he said. Before `timeline-rules:9` the anchor index held only subject
+        mentions, so the two never met and the question stayed open."""
+        answer = claim(
+            claim_type="date",
+            subject_mention="Grandma",
+            event_kind="move",
+            event_mention=self.HANDLE,
+            temporal_value="1994-07",
+            quote="grandma moved to Orderville in July 1994",
+            seed="grandma-move",
+        )
+        result = derive(self.death(), answer)
+        self.assertEqual(items_of(result, "missing_anchor"), [])
+        death = node_for(result, "moment")
+        self.assertIsNotNone(death["best_temporal_value"])
+
+    def test_a_handle_is_never_an_identity_refusal_downstream(self):
+        """`timeline_gain` keys leverage on the handle's own ref, and nothing
+        in the interaction lane reads it as an unsettled person."""
+        item = items_of(derive(self.death()), "missing_anchor")[0]
+        self.assertEqual(tg.anchor_ref(item), item["subject_ref"])
+        self.assertFalse(mw._uncertain_identity({"subject_ref": item["subject_ref"]}))  # noqa: SLF001
 
 
 class RebuildIsTheOracle(unittest.TestCase):
