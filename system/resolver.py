@@ -1411,6 +1411,12 @@ def revisit_targets(read: "_Read") -> dict[str, dict]:
 
     A moment is re-asked ONCE per trigger (``revisited_by`` on the ledger row),
     and at most :data:`MAX_REVISITS` are re-opened by retrieval per plan.
+
+    A REFINE (a wide reading the resolver itself filed, re-asked to sharpen
+    it) by retrieval needs the new story to carry a date at all
+    (`chronology.YEAR_RE`): a broad life story that merely mentions the same
+    words cannot sharpen anything, and on the owner's vault one such story
+    bought three re-asks that all kept the standing answer (v326).
     """
     if not read.triggers:
         return {}
@@ -1428,6 +1434,8 @@ def revisit_targets(read: "_Read") -> dict[str, dict]:
             return  # asked once with this story already
         out[node_id] = {"trigger": trigger, "why": why}
 
+    dated_triggers = {t for t in read.triggers
+                      if (read.root / t).is_file() and chrono.YEAR_RE.search(_read(read.root / t))}
     items = [row for row in (read.work_items.get("work_items") or ()) if isinstance(row, dict)]
     aliases = read.work_items.get("work_item_aliases") if isinstance(read.work_items.get("work_item_aliases"), dict) else {}
     for trigger in sorted(read.triggers):
@@ -1464,11 +1472,14 @@ def revisit_targets(read: "_Read") -> dict[str, dict]:
         if status not in ("unknown", "unverified") and not refine:
             continue
         for doc in read.fts.search(_query(target), exclude_path=source):
-            if doc.get("path") in read.triggers:
-                before = len(out)
-                add(node_id, doc["path"], "refine" if refine else "retrieval")
-                by_retrieval += len(out) - before
-                break
+            if doc.get("path") not in read.triggers:
+                continue
+            if refine and doc["path"] not in dated_triggers:
+                continue  # nothing to sharpen with: the story names no date
+            before = len(out)
+            add(node_id, doc["path"], "refine" if refine else "retrieval")
+            by_retrieval += len(out) - before
+            break
     return out
 
 

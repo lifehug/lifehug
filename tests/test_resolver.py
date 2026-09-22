@@ -1100,9 +1100,16 @@ class RefineAndBackfillTests(LegsTests):
         nodes = {n["node_id"]: n for n in (pub.read_projection(self.root) or {})["nodes"]}
         self.assertEqual(nodes[self.nodes["shop"]]["best_temporal_value"]["best"], "1997-06-12")
 
-    def test_a_refine_that_finds_nothing_sharper_keeps_the_standing_answer(self):
+    def test_a_story_with_no_date_in_it_refines_nothing(self):
         self.file_wide()
         self.story("a2", "I think the shop in Cedarport did well; the move was hard on everyone.", [])
+        self.publish()
+        # Same words, no year anywhere: a refine would only buy the same answer.
+        self.assertEqual(resolver._Read(self.root, triggers={"answers/a2.md"}).revisit, {})
+
+    def test_a_refine_that_finds_nothing_sharper_keeps_the_standing_answer(self):
+        self.file_wide()
+        self.story("a2", "I think the shop in Cedarport did well by 1998; the move was hard on everyone.", [])
         self.publish()
         read = resolver._Read(self.root, triggers={"answers/a2.md"})
         self.assertIn(self.nodes["shop"], read.revisit)
