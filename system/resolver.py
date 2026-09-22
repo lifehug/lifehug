@@ -230,16 +230,15 @@ def spine(root: Path, projection: dict) -> dict:
     intervals, dated points, people. Generic at first (a birthday alone fills
     the age table); the person's landmarks and keystone answers make it theirs.
     """
-    profile = {}
-    try:
-        from lifehug_core import load_config  # noqa: PLC0415
-        profile = load_config() or {}
-    except Exception:  # noqa: BLE001
-        profile = {}
+    import temporal_publication as pub  # noqa: PLC0415
     from temporal_timeline import is_owner_reference_only  # noqa: PLC0415
 
-    owner_names = {_norm(profile.get(k)) for k in ("name", "full_name") if profile.get(k)}
-    owner_names |= {n.split()[0] for n in list(owner_names) if n}
+    # v328: the ONE definition of the owner's spellings (`temporal_publication.
+    # owner_names_from_profile`, read from this vault) — plus each one's first
+    # word, which only the resolver wants (`owner_name_variants`).
+    profile = pub.owner_profile(root)
+    whole = pub.owner_names_from_profile(profile)
+    owner_names = {_norm(n) for n in pub.owner_name_variants(whole)}
 
     def _is_owner(refs) -> bool:
         refs = [collapsed_text(r) for r in (refs or ()) if collapsed_text(r)]
@@ -270,6 +269,8 @@ def spine(root: Path, projection: dict) -> dict:
         # v325: every spelling the profile gives the owner — `name` AND `full_name`
         # and each one's first word ("Dave", "David") — so the refusal that
         # protects other people's ages never fires on the owner's own nickname.
+        # v328: derived from the same definition the fold uses; the first words
+        # are the resolver's own addition and never reach the fold.
         "owner_names": sorted(n for n in owner_names if n),
         "birth": birth,
         "stays": stays[:60],

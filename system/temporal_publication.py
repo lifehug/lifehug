@@ -91,6 +91,7 @@ import episode_fold_contract as efc  # noqa: E402
 import era_identity as ei  # noqa: E402
 import era_memberships as era  # noqa: E402
 import event_binding as eb  # noqa: E402
+import identity_resolution as ident  # noqa: E402
 import landmark_projection as lp  # noqa: E402
 import temporal_placement as tpl  # noqa: E402
 import temporal_projection as tp  # noqa: E402
@@ -112,7 +113,10 @@ from vault_paths import atomic_write_vault_text  # noqa: E402
 #: ``vault_contract.json`` validates both files against. It is NOT
 #: :data:`~temporal_claims.SCHEMA_VERSION`: the records inside are frozen by
 #: that one, while this covers the wrapper the publisher adds around them.
-PUBLICATION_VERSION = 1
+#: v328: 2 — the envelope gained ``owner_identity_digest``. `_rule_identity`
+#: folds this number, so the bump itself is what re-derives every standing
+#: generation once and stamps the digest on it.
+PUBLICATION_VERSION = 2
 
 #: The projection, whole. `temporal_timeline.CalculatedTimeline.to_dict()`
 #: inside a publication envelope.
@@ -312,8 +316,8 @@ def reached_frame_epoch(result: object) -> dict:
 
 
 def _envelope(result: tt.CalculatedTimeline, *, published_at: str, input_digest: str,
-              timings: dict) -> dict:
-    return {
+              timings: dict, owner_identity_digest: str | None = None) -> dict:
+    envelope = {
         "version": PUBLICATION_VERSION,
         "schema_version": SCHEMA_VERSION,
         "projection_schema_version": tp.projection_schema_version(),
@@ -325,14 +329,27 @@ def _envelope(result: tt.CalculatedTimeline, *, published_at: str, input_digest:
         "input_digest": input_digest,
         "timings": {key: round(float(value), 9) for key, value in sorted(timings.items())},
     }
+    if owner_identity_digest is not None:
+        # v328: WHICH owner identity folded this generation (see
+        # :func:`owner_identity_digest`). Derived from the fold's inputs, so it
+        # is part of the rebuild signature, never excluded runtime metadata.
+        envelope["owner_identity_digest"] = str(owner_identity_digest)
+    return envelope
 
 
 def projection_payload(result: tt.CalculatedTimeline, *, published_at: str,
-                       input_digest: str, timings: dict) -> dict:
-    """The whole projection, enveloped. §7's *whole materialized projection*."""
+                       input_digest: str, timings: dict,
+                       owner_identity_digest: str | None = None) -> dict:
+    """The whole projection, enveloped. §7's *whole materialized projection*.
+
+    ``owner_identity_digest`` (v328) is stamped when given; :func:`publish` and
+    :func:`verify` always give it. A caller building a payload from a fold it
+    made itself passes the digest of the inputs IT used, or nothing at all —
+    never a guess.
+    """
     body = result.to_dict()
     payload = _envelope(result, published_at=published_at, input_digest=input_digest,
-                        timings=timings)
+                        timings=timings, owner_identity_digest=owner_identity_digest)
     payload.update(body)
     # PR342: one explicit host-facing answer, derived from the same predicate
     # that owns work items and counts. Clients must not reconstruct this from
@@ -572,6 +589,127 @@ def rebuild_signature(payload: object) -> dict:
 
 
 # --------------------------------------------------------------------------
+# Owner identity — ONE definition, every seat (v328)
+# --------------------------------------------------------------------------
+
+#: The profile keys that spell the owner's own name, in the order the fold is
+#: handed them. WHOLE spellings only: a middle name is not the owner
+#: (`tests/test_owner_name_subject.py`), so no key here is ever tokenized.
+OWNER_NAME_PROFILE_KEYS = ("name", "full_name")
+
+
+def _spelling(value: object) -> str:
+    return " ".join(str(value or "").split())
+
+
+def owner_profile(vault_root: str | Path) -> dict:
+    """The owner's profile as THIS vault spells it.
+
+    ``profile.yaml`` (committed: name, full_name) under ``config.yaml`` (local,
+    wins on conflict) — the same two files and the same precedence as
+    `lifehug_core.load_config`, read from the vault being published rather
+    than from the process binding. A vault without either is ``{}``.
+    """
+    try:
+        from lifehug_core import load_config  # noqa: PLC0415
+        from vault_paths import vault_data_path  # noqa: PLC0415
+
+        root = Path(str(vault_root))
+        merged: dict = {}
+        for name in ("profile", "config"):
+            merged.update(load_config(vault_data_path(name, vault_root=root)) or {})
+        return merged
+    except Exception:  # noqa: BLE001 — no readable profile is simply no profile
+        return {}
+
+
+def owner_names_from_profile(profile: object) -> tuple[str, ...]:
+    """The owner's own spellings: ``name`` and ``full_name``, whole, deduplicated.
+
+    This is the set `temporal_timeline` folds with (`timeline-rules:8`, via
+    `identity_resolution.owner_name_refs`): a roster entity answering to one of
+    these WHOLE spellings is the owner. Interior tokens never enter — "Pat
+    Quincy Example" puts "Pat Quincy Example" in, not "Quincy".
+    """
+    row = profile if isinstance(profile, dict) else {}
+    names: list[str] = []
+    for key in OWNER_NAME_PROFILE_KEYS:
+        text = _spelling(row.get(key))
+        if text and text not in names:
+            names.append(text)
+    return tuple(names)
+
+
+def owner_name_variants(owner_names: object) -> tuple[str, ...]:
+    """The whole spellings PLUS each one's first word ("Dave", "David").
+
+    For the RESOLVER only (`resolver.spine`'s ``owner_names``, v325): the
+    `subject_age_not_owner` refusal must not fire on the owner's own nickname.
+    Never an input to the fold — a first name alone would make every namesake
+    in the roster the owner, which is exactly the leak `timeline-rules:8`
+    refuses. Order: the whole spellings first, then the new first words.
+    """
+    out: list[str] = []
+    for name in owner_names or ():
+        text = _spelling(name)
+        if text and text not in out:
+            out.append(text)
+    for text in list(out):
+        first = text.split()[0]
+        if first not in out:
+            out.append(first)
+    return tuple(out)
+
+
+def owner_identity_inputs(vault_root: str | Path) -> tuple[object, tuple[str, ...]]:
+    """``(roster_snapshot, owner_names)`` for a fold of ``vault_root``.
+
+    The one definition behind every publish seat (ADR 0021's "one definition,
+    many hosts"): `timeline.publish_calculated_timeline`, a Mirror resolution's
+    republish, the frame-display command, the CLI, `verify` — and
+    `resolver.spine`, through :func:`owner_names_from_profile`. Before v328 each
+    seat spelled its own inputs, and a vault whose roster listed the owner
+    changed its mind about whose nodes they were according to which seat had
+    republished last.
+
+    * the roster is this vault's ``person`` roster (`entity_roster.load_roster`
+      with ``vault_root``), an unreadable one being no roster (``()``);
+    * the names are :func:`owner_names_from_profile` over :func:`owner_profile`.
+
+    Both are read from the vault being published, never from the process
+    binding, so the roster and the substrate can never come from two vaults
+    (the split `timeline._projection_vault_root` exists to make impossible).
+    """
+    root = Path(str(vault_root))
+    roster: object
+    try:
+        import entity_roster  # noqa: PLC0415
+
+        roster = entity_roster.load_roster("person", vault_root=root)
+    except Exception:  # noqa: BLE001 — a roster problem is "no roster"
+        roster = ()
+    return roster, owner_names_from_profile(owner_profile(root))
+
+
+def owner_identity_digest(roster_snapshot: object, owner_names: object) -> str:
+    """sha256 over the owner identity a fold was handed.
+
+    The sorted whole spellings, plus the roster refs those spellings resolve
+    to (`identity_resolution.owner_name_refs`) — which is exactly what
+    `timeline-rules:8` acts on. Stamped into the projection envelope as
+    ``owner_identity_digest`` so a reader can tell which definition folded a
+    generation; two seats that fold with the same identity stamp the same
+    digest, and a seat that folded with none stamps the digest of ``()``.
+    """
+    names = sorted({_spelling(name) for name in (owner_names or ()) if _spelling(name)})
+    try:
+        refs = sorted(ident.owner_name_refs(roster_snapshot, names))
+    except Exception:  # noqa: BLE001 — an unreadable roster resolves nothing
+        refs = []
+    return store.payload_sha256(_canonical({"owner_names": names, "owner_refs": refs}))
+
+
+# --------------------------------------------------------------------------
 # The publication
 # --------------------------------------------------------------------------
 
@@ -621,6 +759,18 @@ def load_derivation_inputs(
     }
 
 
+def _resolved_owner_identity(vault_root: str | Path, *, roster_snapshot: object,
+                             owner_names: object) -> tuple[object, object]:
+    """Fill whichever of the two the caller left as ``None`` from the vault."""
+    if roster_snapshot is None or owner_names is None:
+        loaded_roster, loaded_names = owner_identity_inputs(vault_root)
+        if roster_snapshot is None:
+            roster_snapshot = loaded_roster
+        if owner_names is None:
+            owner_names = loaded_names
+    return roster_snapshot, owner_names
+
+
 def publish(
     vault_root: str | Path,
     *,
@@ -629,7 +779,7 @@ def publish(
     event_resolution_records: object = None,
     episode_records: object = None,
     era_views: object = None,
-    roster_snapshot: object = (),
+    roster_snapshot: object = None,
     constraints: object = None,
     membership_assertions: object = None,
     display_decisions: object = None,
@@ -637,7 +787,7 @@ def publish(
     landmark_entries: object = None,
     birth_date: object = None,
     owner_ref: object = None,
-    owner_names: object = (),
+    owner_names: object = None,
     now: object = None,
     correction_ref: object = None,
     full: bool = False,
@@ -674,9 +824,19 @@ def publish(
     (eras E2) follow exactly that convention, and for exactly that reason: a
     drag that files a membership receipt republishes in the same job, and the
     receipt it just wrote has to be in the projection it just published.
+
+    ``roster_snapshot`` and ``owner_names`` (v328) follow the same convention:
+    ``None`` is "read them" — :func:`owner_identity_inputs` over this vault —
+    an explicit value is "use exactly this", and ``()`` is "none". Every seat
+    that calls this function without naming them therefore folds with the ONE
+    owner identity, and the envelope's ``owner_identity_digest`` says which.
     """
     started = time.perf_counter()
     timings: dict[str, float] = {}
+    roster_snapshot, owner_names = _resolved_owner_identity(
+        vault_root, roster_snapshot=roster_snapshot, owner_names=owner_names
+    )
+    identity_digest = owner_identity_digest(roster_snapshot, owner_names)
 
     # Cut 4c: read BEFORE anything is written — the receipt's "before" half
     # is what a reader could see up to this instant, never a value this same
@@ -755,7 +915,8 @@ def publish(
     mark = time.perf_counter()
     payloads = {
         PROJECTION_FILE: projection_payload(
-            result, published_at=published_at, input_digest=digest, timings=timings
+            result, published_at=published_at, input_digest=digest, timings=timings,
+            owner_identity_digest=identity_digest,
         ),
         WORK_ITEMS_FILE: work_items_payload(
             result, published_at=published_at, input_digest=digest, timings=timings
@@ -1197,6 +1358,13 @@ PUBLISHED_KEYS_NOT_SERVED = {
         "rendering input."
     ),
     "timings": "§7's explicitly excluded runtime metadata.",
+    "owner_identity_digest": (
+        "v328: WHICH owner identity folded this generation — sha256 over the "
+        "owner's whole spellings and the roster refs they resolve to "
+        "(`owner_identity_digest`). An audit key like `input_digest`: a "
+        "maintainer compares it across two seats' publishes to prove they "
+        "folded with one definition; a page has no reason to show it."
+    ),
     "score_components": (
         "the QUEUE's explanation of its own scores, published in the "
         "work-items file and read there (§8.5)."
@@ -1355,7 +1523,7 @@ def verify(
     event_resolution_records: object = None,
     episode_records: object = None,
     era_views: object = None,
-    roster_snapshot: object = (),
+    roster_snapshot: object = None,
     constraints: object = None,
     membership_assertions: object = None,
     display_decisions: object = None,
@@ -1363,7 +1531,7 @@ def verify(
     landmark_entries: object = None,
     birth_date: object = None,
     owner_ref: object = None,
-    owner_names: object = (),
+    owner_names: object = None,
     now: object = None,
 ) -> dict:
     """Does the published projection still reproduce from the substrate?
@@ -1381,6 +1549,12 @@ def verify(
     published = read_projection(vault_root)
     if published is None:
         return {"published": False, "identical": False, "generation": 0}
+    # v328: the oracle folds with the same owner identity `publish` would, so a
+    # generation published by any seat reproduces here — and one published
+    # under another definition shows up as `owner_identity_digest`.
+    roster_snapshot, owner_names = _resolved_owner_identity(
+        vault_root, roster_snapshot=roster_snapshot, owner_names=owner_names
+    )
     # The oracle reads every receipt: an answer that trusted a cache would be
     # asserting the cache rather than checking the substrate.
     index = store.rebuild_active_index(vault_root, full=True)
@@ -1410,6 +1584,7 @@ def verify(
         published_at=str(published.get("published_at") or ""),
         input_digest=str(published.get("input_digest") or ""),
         timings=dict(result.timings or {}),
+        owner_identity_digest=owner_identity_digest(roster_snapshot, owner_names),
     )
     want, have = rebuild_signature(fresh), rebuild_signature(published)
     return {
@@ -1490,6 +1665,11 @@ __all__ = [
     "TemporalPublicationError",
     "calculated_view",
     "next_generation",
+    "owner_identity_digest",
+    "owner_identity_inputs",
+    "owner_name_variants",
+    "owner_names_from_profile",
+    "owner_profile",
     "projection_path",
     "projection_payload",
     "publication_report_line",

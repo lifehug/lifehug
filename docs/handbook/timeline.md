@@ -639,6 +639,7 @@ in Cuts 2–5 and this table is rewritten at Cut 7b.
 | The claim substrate and its fold | `system/temporal_store.py` (`write_receipt`, `fold_active_index`, `rebuild_active_index`) |
 | What the fold reads, and what it skips re-reading | `system/temporal_store.py` (`fold_inputs`, `FOLD_CACHE_FILE` → `state/temporal_claims/fold-cache.json`) |
 | What the standing publication was derived from | `system/temporal_publication.py` (`derivation_fingerprint`, `PUBLICATION_CACHE_FILE` → `state/temporal_claims/publication-cache.json`) |
+| Whose timeline this is — the roster and the owner's own spellings every publish seat folds with (v328) | `system/temporal_publication.py` (`owner_identity_inputs`, `owner_names_from_profile`, `owner_name_variants`, `owner_identity_digest`) |
 | Research basis | `system/research/chronology.md`, `system/research/chronology-vis.md`, `system/research.md` §4a |
 | Guard tests | `tests/test_temporal_fold_cache.py`, `tests/test_chronology.py`, `tests/test_timeline_dates.py`, `tests/test_timeline_unknowns.py`, `tests/test_timeline_interaction.py`, `tests/test_timeline_evals.py`, `tests/test_cross_dating.py`, `tests/test_placement_score.py`, `tests/test_timeline_place_filing.py` |
 
@@ -696,6 +697,35 @@ full read. The explicit repair paths never consult them: `python3
 system/temporal_publication.py --rebuild`, `--check` (the rebuild oracle), and
 `LIFEHUG_TEMPORAL_FOLD_CACHE=0` in the environment all fold from the receipts
 themselves.
+
+### One owner identity, every seat (v328)
+
+Several acts republish the calculated projection — a landmark write
+(`timeline.publish_calculated_timeline`), closing a Mirror row
+(`mirror_work`), the frame-display command, `python3
+system/temporal_publication.py`, and the upgrade seat in `update.py`. The fold
+needs two host inputs none of the receipts carry: the `person` roster and the
+owner's own spellings, so that a roster entity bearing the owner's name is the
+owner (`timeline-rules:8`). Until v328 only the landmark seat supplied them, so a
+Mirror republish quietly turned the owner's own moments into somebody else's,
+and the file did not say which definition had folded it.
+
+`temporal_publication.publish` now reads both itself when a caller does not name
+them — `owner_identity_inputs(vault_root)`: the vault's own roster
+(`entity_roster.load_roster("person", vault_root=…)`) and
+`owner_names_from_profile`, the profile's whole `name` and `full_name` under the
+vault's `config.yaml`, nothing tokenized (a middle name is not the owner). `None`
+reads, an explicit value is used exactly, `()` is still "none" — the same
+convention every other fold authority follows. Both are read from the vault being
+published, never from the process binding, so roster and substrate cannot come
+from two vaults. `resolver.spine` derives its `owner_names` from the same helper
+and adds each spelling's first word (`owner_name_variants`) for its own
+`subject_age_not_owner` refusal; that widening never reaches the fold. The
+envelope carries `owner_identity_digest` — sha256 over the sorted spellings and
+the roster refs they resolve to — so two seats that agree stamp the same digest
+and a generation folded with no identity is visibly one. It is derived, so
+`rebuild_signature` keeps it; `--check` on a pre-v328 file names it as the one
+difference until the next publish. Guard: `tests/test_owner_identity_inputs.py`.
 
 ## 7. Decisions
 

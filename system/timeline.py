@@ -64,7 +64,6 @@ from lifehug_core import (  # noqa: E402
     ENTITY_ROSTERS_DIR,
     LANDMARKS_FILE,
     MANUAL_SOURCES_DIR,
-    REPO_DIR,
     STATE_DIR,
     TIMELINE_PLACEMENTS_FILE,
     WIKI_DIR,
@@ -1119,14 +1118,17 @@ def publish_calculated_timeline(vault_root: object = None) -> dict:
     upgrade so an existing vault does not wait for its next landmark write, and
     every write after that comes through here.
 
-    The roster is host context, not substrate, and it is read from the process
-    binding — so it is supplied ONLY when the projection's vault IS the
-    process's vault. `_projection_vault_root`'s docstring names this hazard
-    exactly: a root read from one place and a store read from another puts the
-    drawing in one vault and its evidence in another. A rebound store (every
-    test, and any host holding two vaults) therefore derives from the substrate
-    alone, which is honest — unresolved mentions mint `identity_uncertain` work
-    items rather than borrowing another vault's roster.
+    The roster and the owner's own names are host context, not substrate, and
+    they are NOT spelled here (v328). `temporal_publication.publish` reads them
+    itself through `temporal_publication.owner_identity_inputs` — from the
+    vault being published, never from the process binding — so this seat, a
+    Mirror resolution's republish and the frame-display command all fold with
+    the one owner identity, and the envelope's `owner_identity_digest` says so.
+    Before v328 this function alone supplied them (and only when the vault was
+    the process's), so which act republished last decided whether the owner's
+    own nodes were his. `_projection_vault_root`'s docstring names the hazard
+    that guard was for — a root read from one place and a store read from
+    another — and reading both from ``root`` is what makes it unexpressible.
 
     A publication failure RAISES. The projection is a materialized view and its
     repair path is "delete the files and publish again" (plan §7), which only
@@ -1136,25 +1138,7 @@ def publish_calculated_timeline(vault_root: object = None) -> dict:
     publication is atomic per file.
     """
     root = Path(str(vault_root)) if vault_root is not None else _projection_vault_root()
-    roster: object = ()
-    owner_names: tuple = ()
-    if root == REPO_DIR:
-        try:
-            import entity_roster as _entity_roster  # noqa: PLC0415
-
-            roster = _entity_roster.load_roster("person")
-        except Exception:  # noqa: BLE001 — a roster problem is "no roster"
-            roster = ()
-        try:
-            from lifehug_core import load_config  # noqa: PLC0415
-
-            profile = load_config()
-            owner_names = tuple(
-                str(profile.get(key)) for key in ("name", "full_name") if profile.get(key)
-            )
-        except Exception:  # noqa: BLE001 — no profile is simply no owner names
-            owner_names = ()
-    return temporal_publication.publish(root, roster_snapshot=roster, owner_names=owner_names)
+    return temporal_publication.publish(root)
 
 
 def flip_landmarks_if_needed() -> dict | None:
