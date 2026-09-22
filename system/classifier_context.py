@@ -1205,8 +1205,10 @@ def candidate_identity_is_resolved(candidate: dict) -> bool:
 #: Per-event failures that, under ``salvage``, downgrade the one event to the
 #: conservative state the prompt itself asks for (null grounding, or a null
 #: relation with an abstaining resolution) instead of refusing the whole
-#: response. Structural failures never salvage: they mean the response is not
-#: an answer to this snapshot at all.
+#: response. A ``timeline_resolution`` that fails its own contract is salvaged
+#: the same way in ``validate_response`` (v326, ``_salvaged_resolution``).
+#: Structural failures never salvage: they mean the response is not an answer
+#: to this snapshot at all.
 SALVAGE_RELATION_CODES = {
     ContextFailureCode.RELATION_INVALID: "missing_evidence",
     ContextFailureCode.CANDIDATE_UNKNOWN: "missing_evidence",
@@ -1289,15 +1291,51 @@ def _validate_relation(
     return candidate
 
 
-def _abstaining_resolution(raw: object, *, status: str, candidate_ids: list[str], code: ContextFailureCode) -> dict:
-    """The resolution an event keeps once its relation was downgraded."""
+def _abstaining_resolution(raw: object, *, status: str, candidate_ids: list[str], code: str) -> dict:
+    """The resolution an event keeps once its relation was downgraded.
+
+    ``code`` is the operational label the note carries: a
+    ``ContextFailureCode`` value for a relation downgrade, or the
+    ``timeline_evidence`` code for a resolution the validator rebuilt.
+    """
     reason = ""
     if isinstance(raw, dict) and isinstance(raw.get("reason"), str):
         reason = raw["reason"].strip()
-    note = f"[validator downgrade: {code.value}]"
+    note = f"[validator downgrade: {code}]"
     limit = timeline_evidence.MAX_RESOLUTION_REASON_CHARS - len(note) - 1
     reason = (reason[:limit].rstrip() + " " + note).strip() if limit > 0 else note[:timeline_evidence.MAX_RESOLUTION_REASON_CHARS]
     return {"status": status, "candidate_ids": list(candidate_ids), "reason": reason}
+
+
+def _salvaged_resolution(
+    raw: object, *, relation: object, candidate_ids: list[str], complete: bool, code: str,
+) -> dict:
+    """The bookkeeping an event keeps when its own ``timeline_resolution`` failed.
+
+    The resolution is the model's account of the link decision, not the
+    event: a status that contradicts the context's coverage, an echoed
+    candidate list the validator recomputes anyway, a reason past its length,
+    a stray key. None of that is evidence about the moment, so under salvage
+    the validator rebuilds the account from what it verified itself. A
+    relation that already passed ``_validate_relation`` is kept and reported
+    as ``linked``; otherwise the model's own non-link status stands when it
+    agrees with coverage, and the coverage rule decides when it does not
+    (``incomplete`` for a truncated context, ``missing_evidence`` for a
+    complete one). Nothing here resolves a place or invents a candidate: the
+    event's ``places`` stay the words the source used.
+    """
+    if relation is not None:
+        status = "linked"
+    else:
+        status = "incomplete" if not complete else "missing_evidence"
+        echoed = ""
+        if isinstance(raw, dict):
+            echoed = timeline_evidence.collapsed_text(raw.get("status"))
+        if (echoed in timeline_evidence.RESOLUTION_STATUSES
+                and echoed != "linked"
+                and (echoed == "incomplete") == (not complete)):
+            status = echoed
+    return _abstaining_resolution(raw, status=status, candidate_ids=candidate_ids, code=code)
 
 
 def validate_response(
@@ -1411,7 +1449,7 @@ def validate_response(
             relation = None
             event["timeline_relation"] = None
             raw_resolution = _abstaining_resolution(
-                raw_resolution, status=status, candidate_ids=candidate_ids, code=exc.code,
+                raw_resolution, status=status, candidate_ids=candidate_ids, code=exc.code.value,
             )
             if downgrades is not None:
                 downgrades.append({"event_key": key, "field": "timeline_relation", "code": exc.code.value})
@@ -1472,11 +1510,41 @@ def validate_response(
                 relation=relation,
             )
         except timeline_evidence.TimelineEvidenceError as exc:
-            code = (
-                ContextFailureCode.GROUNDING_INVALID
-                if exc.code.startswith("grounding_") else ContextFailureCode.RESOLUTION_INVALID
+            if not (salvage and exc.code.startswith("resolution_")):
+                code = (
+                    ContextFailureCode.GROUNDING_INVALID
+                    if exc.code.startswith("grounding_") else ContextFailureCode.RESOLUTION_INVALID
+                )
+                raise ClassifierContextError(str(exc), code=code) from None
+            # v326: a resolution that fails its own contract is bookkeeping
+            # about the link, not the event. Rebuild it from what was verified
+            # and file the event; the place words and stated date are kept
+            # as the source gave them (owner's pasted vital records,
+            # 2026-09-22: three readings refused in a row, no event filed).
+            raw_resolution = _salvaged_resolution(
+                raw_resolution,
+                relation=relation,
+                candidate_ids=candidate_ids,
+                complete=bool(context.get("complete")),
+                code=exc.code,
             )
-            raise ClassifierContextError(str(exc), code=code) from None
+            try:
+                resolution = timeline_evidence.normalize_resolution(
+                    raw_resolution,
+                    event_key_value=key,
+                    candidate_ids=candidate_ids,
+                    context_complete=bool(context.get("complete")),
+                    source_revision=str(snapshot.get("source_revision") or ""),
+                    prompt_version=str(snapshot.get("prompt_version") or ""),
+                    input_fingerprint=str(context.get("input_fingerprint") or ""),
+                    relation=relation,
+                )
+            except timeline_evidence.TimelineEvidenceError as again:
+                raise ClassifierContextError(
+                    str(again), code=ContextFailureCode.RESOLUTION_INVALID,
+                ) from None
+            if downgrades is not None:
+                downgrades.append({"event_key": key, "field": "timeline_resolution", "code": exc.code})
         event["source_grounding"] = grounding
         event["timeline_resolution"] = resolution
         normalized_events.append(event)

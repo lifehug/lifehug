@@ -6,7 +6,8 @@ Extends: ADR 0024 (chronology with basis), ADR 0026 (cross-dating),
 ADR 0028 (the landmark recorder), ADR 0031 (event identity)
 Shipped: v314 (`system/resolver.py`, lifehug#362); v315 amends the shape rule;
 v316 adds the two legs for hosts; v317 adds the not-a-landmark and
-not-an-event rules (lifehug#365)
+not-an-event rules (lifehug#365); v325 revisits, aims and estimates; v326
+salvages a failed resolution and the CLI path
 
 ## Context
 
@@ -237,6 +238,69 @@ a stored graph of affected items (three signals computed per filing cannot
 go stale), and not person-anchored event identity (the three grandfather
 nodes are three tellings of two deaths; merging them by person is its own
 version).
+
+## Amendment (v326, 2026-09-22): a resolution is bookkeeping, and the CLI salvages too
+
+**What happened.** The same evening the owner pasted two FamilySearch cards
+(Name / Birth / Death / Burial lines about each grandfather) and one bare
+correction ("That was my grandma and Grandpa Jim, not me — I just visited")
+into a Timeline conversation. All three promoted messages were refused by
+`classify-story --classify`, three times out of three, with
+`failure=ClassifierContextError status=context_resolution_invalid`: no event
+and no claim was filed, and the exact death dates the owner had just supplied
+reached the vault only where v325's revisit happened to re-open a question
+that named the man. The code is raised when
+`timeline_evidence.normalize_resolution` rejects an event's
+`timeline_resolution` — the model's ACCOUNT of its link decision — for
+contradicting the coverage the validator computed (`incomplete` for a
+complete context, which is what a model says when the vault does not know
+Apple Valley), for echoing a `candidate_ids` list that is not the validator's
+own recomputed event-local set, for a reason past its length or a stray key.
+Two gaps let that refuse a whole reading: the v323 salvage was never asked
+for on the single-source CLI path (`classify_file` called
+`prepare_classification` without `salvage`), and a resolution failure was not
+in the salvageable set on any path.
+
+**Decision.**
+
+13. **A resolution that fails its own contract is salvaged like a bad
+    relation.** Under salvage the validator rebuilds the account from what it
+    verified itself (`classifier_context._salvaged_resolution`): a relation
+    that already passed `_validate_relation` is kept and reported `linked`; a
+    model's own non-link status stands when it agrees with coverage; and the
+    coverage rule decides when it does not (`incomplete` for a truncated
+    context, `missing_evidence` for a complete one). The event, its `subject`,
+    its stated date and its `places` are filed exactly as the source wrote
+    them — an unresolved place stays text, and nothing here resolves a place
+    or invents a candidate. The downgrade is recorded on the classification
+    (`validation_downgrades`, field `timeline_resolution`, the
+    `timeline_evidence` code) and named on the CLI summary (`kept : N
+    event(s) filed without the model's link or proof`), so a dropped link is
+    something the person can read rather than a reading that vanished.
+14. **Every filing path salvages.** `classify_file` — `classify-story
+    --classify` and `--from-response` — now takes the v323 default
+    (`salvage=True`); `salvage=False` keeps the strict verdict for a caller
+    that asks. Structural failures (not a mapping, a stale snapshot, events
+    not a list, a tampered event key) refuse either way, before any write.
+15. **The prompt names the two shapes that tripped it,** without moving
+    `PROMPT_VERSION` (a wording repair, as the diagnostics spec ruled): an
+    unfamiliar place is still the event's place and never makes a complete
+    context `incomplete`; a pasted record about a named person is one event
+    per dated line with that person as `subject`; a message that only
+    corrects whose an already-told moment was narrates no new moment and
+    leaves `events` empty. If the model does read a moment out of such a
+    correction, the words carry the subject (`timeline-rules:9` reads "my
+    grandma" as somebody else) and the reading files as theirs; a durable
+    re-scope of the EARLIER story's node from a later correction message is a
+    separate, not-yet-built seam.
+
+**Considered and deferred.** Routing a vital-record-shaped paste to the
+people/landmark recorder so `born`/`died` land on the roster person directly
+would give the record a home beside the person rather than a `moment` node
+with an other-person subject. It is the better destination for a record, but
+it is a router in front of the model — the shape this ADR's complexity budget
+says to avoid — and the general fix above already files the dates; it stays
+a possible refinement.
 
 ## Consequences
 

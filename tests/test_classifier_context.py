@@ -963,18 +963,34 @@ class ContextDiagnosticsTests(ContextCase):
             "provider=ai operation=classify-schema failure=ValueError status=failed",
         )
 
+    #: The codes that mean "this is not an answer to this snapshot": the CLI
+    #: still refuses the whole reading on them, salvage or not.
+    STRUCTURAL_CODES = frozenset({
+        cc.ContextFailureCode.RESPONSE_NOT_MAPPING,
+        cc.ContextFailureCode.SNAPSHOT_MISMATCH,
+        cc.ContextFailureCode.EVENTS_NOT_LIST,
+        cc.ContextFailureCode.EVENT_NOT_MAPPING,
+        cc.ContextFailureCode.EVENT_KEYS_INVALID,
+    })
+
     def test_all_failures_surface_on_stderr_before_any_persistence(self):
+        """Structural failures refuse before any write; per-event failures
+        file the reading with the one event downgraded (v326: the CLI path
+        salvages like every other filing path). Either way the canary never
+        reaches stderr or stdout."""
         classifications = self.root / "state" / "classifications"
         classifications.mkdir()
         prior = classifications / "sources-manual-story.json"
-        prior.write_text(json.dumps({
+        prior_bytes = json.dumps({
             "stale": True,
             "events": [{"description": "Prior accepted reading"}],
-        }))
+        }).encode()
         candidates = self.root / "state" / "question_candidates.json"
         candidates.write_text(json.dumps({"candidates": [{"id": "synthetic-prior"}]}))
-        before = prior.read_bytes(), candidates.read_bytes()
+        candidates_before = candidates.read_bytes()
+        salvaged = set()
         for name, code, data in self.failure_cases():
+            prior.write_bytes(prior_bytes)
             with self.subTest(case=name), \
                     mock.patch.object(classify_story, "REPO_DIR", self.root), \
                     mock.patch.object(classify_story, "CLASSIFICATIONS_DIR", classifications), \
@@ -983,20 +999,36 @@ class ContextDiagnosticsTests(ContextCase):
                                       return_value=({}, data["story"])), \
                     mock.patch.object(cc, "build_context_snapshot", return_value=data["snapshot"]), \
                     redirect_stderr(io.StringIO()) as err, redirect_stdout(io.StringIO()) as out:
-                self.assertEqual(classify_story.classify_file(
+                rc = classify_story.classify_file(
                     self.source, "synthetic-recorded", precomputed_result=data["response"],
-                ), 1)
-                self.assertEqual(out.getvalue(), "")
-                self.assertEqual(
-                    err.getvalue(),
-                    "Error: AI classification schema failed: provider=ai "
-                    "operation=classify-schema failure=ClassifierContextError "
-                    f"status={code.value}\n",
                 )
-                self.assertEqual((prior.read_bytes(), candidates.read_bytes()), before)
+                self.assertNotIn(self.CANARY, err.getvalue())
+                self.assertNotIn(self.CANARY, out.getvalue())
+                self.assertEqual(candidates.read_bytes(), candidates_before)
                 self.assertEqual(list(classifications.iterdir()), [prior])
+                if code in self.STRUCTURAL_CODES:
+                    self.assertEqual(rc, 1)
+                    self.assertEqual(out.getvalue(), "")
+                    self.assertEqual(
+                        err.getvalue(),
+                        "Error: AI classification schema failed: provider=ai "
+                        "operation=classify-schema failure=ClassifierContextError "
+                        f"status={code.value}\n",
+                    )
+                    self.assertEqual(prior.read_bytes(), prior_bytes)
+                else:
+                    self.assertEqual(rc, 0, err.getvalue())
+                    self.assertEqual(err.getvalue(), "")
+                    saved = json.loads(prior.read_text())
+                    self.assertTrue(saved["validation_downgrades"], name)
+                    self.assertEqual(saved["events"][0]["description"], self.CANARY)
+                    self.assertIn("kept    : 1 event(s)", out.getvalue())
+                    salvaged.add(code)
+        self.assertEqual(salvaged, set(cc.ContextFailureCode) - self.STRUCTURAL_CODES)
 
-    def test_valid_then_invalid_event_does_not_partially_file_or_drop_relation(self):
+    def test_the_strict_verdict_stays_available_on_request(self):
+        """``salvage=False`` keeps the whole-reading refusal for a caller that
+        wants it: a valid event beside an invalid one files nothing."""
         response = self.response()
         invalid = deepcopy(response["events"][0])
         invalid["timeline_relation"]["entity_refs"] = []
@@ -1009,7 +1041,7 @@ class ContextDiagnosticsTests(ContextCase):
                 mock.patch.object(classify_story, "save_candidate_store") as save_candidates, \
                 redirect_stderr(io.StringIO()) as err:
             self.assertEqual(classify_story.classify_file(
-                self.source, "synthetic-recorded", precomputed_result=response,
+                self.source, "synthetic-recorded", precomputed_result=response, salvage=False,
             ), 1)
         self.assertIn("status=context_entity_refs_invalid", err.getvalue())
         self.assertEqual(prior.read_bytes(), before)
@@ -1017,6 +1049,37 @@ class ContextDiagnosticsTests(ContextCase):
         self.assertEqual(response["events"][1]["timeline_relation"]["entity_refs"], [])
         self.assertEqual(response["events"][1]["timeline_relation"]["candidate_id"], "node:stay")
         save_candidates.assert_not_called()
+
+    def test_valid_then_invalid_event_files_both_and_downgrades_only_the_bad_link(self):
+        """v326 default: the CLI files the reading; the one event whose link
+        failed keeps its words and abstains, the valid event keeps its link."""
+        response = self.response()
+        invalid = deepcopy(response["events"][0])
+        invalid["title"] = "Second finding"
+        invalid["timeline_relation"]["entity_refs"] = []
+        response["events"].append(invalid)
+        classifications = self.root / "state" / "classifications"
+        candidates = self.root / "state" / "question_candidates.json"
+        with mock.patch.object(classify_story, "REPO_DIR", self.root), \
+                mock.patch.object(classify_story, "CLASSIFICATIONS_DIR", classifications), \
+                mock.patch.object(classify_story, "QUESTION_CANDIDATES_FILE", candidates), \
+                redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(classify_story.classify_file(
+                self.source, "synthetic-recorded", precomputed_result=response,
+            ), 0)
+            saved = json.loads(classify_story.classification_path(self.source).read_text())
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual(len(saved["events"]), 2)
+        self.assertEqual(saved["events"][0]["timeline_relation"]["candidate_id"], "node:stay")
+        self.assertEqual(saved["events"][0]["timeline_resolution"]["status"], "linked")
+        self.assertIsNone(saved["events"][1]["timeline_relation"])
+        self.assertEqual(saved["events"][1]["timeline_resolution"]["status"], "missing_evidence")
+        self.assertEqual(
+            saved["validation_downgrades"],
+            [{"event_key": saved["events"][1]["event_key"], "field": "timeline_relation",
+              "code": "context_entity_refs_invalid"}],
+        )
+        self.assertIn("validator downgrades: context_entity_refs_invalid", out.getvalue())
 
     def test_null_relation_files_event_and_direct_date_without_a_model_call(self):
         self.source.write_text("In 1999 I found the letter while we lived in Cedarport.")
