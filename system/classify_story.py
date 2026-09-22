@@ -759,7 +759,11 @@ when ALL of these already-enforced prerequisites hold:
 If ANY prerequisite is unsupported or uncertain, including empty, null, or
 missing entity refs, return the WHOLE `timeline_relation` as null. Keep the
 event and its independently stated date or age; do not omit the event or invent
-references to make a relation pass. Document-level `places` are retrieval hints
+references to make a relation pass. A place the supplied context does not know
+is still the event's place: keep it in `places` exactly as the source wrote it,
+return a null `timeline_relation`, and let the coverage rule below choose the
+status — an unfamiliar place never makes a complete context `incomplete`.
+Document-level `places` are retrieval hints
 only, never evidence for every event. A supported contextual relation does not
 replace a direct stated date or age; return both when valid.
 
@@ -1039,6 +1043,13 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
 - `events[].title`: a noun phrase of at most seven words naming the thing, not the
   telling: "Grandpa's two-page letter", not "the time Grandpa wrote to me about the
   farm". No verbs of narration, no dates in the title.
+- A pasted record about a named person (Name / Birth / Death / Burial lines) is
+  that person's events: one event per dated line, `subject` the named person,
+  `date.stated` the date exactly as written, `places` the place as written.
+- A message that only corrects WHOSE an already-told moment was ("That was my
+  grandma and Grandpa Jim, not me — I just visited") narrates no new moment:
+  extract no event for the correction itself, name the people it names in
+  `people`, and leave `events` empty unless it also tells a moment of its own.
 {question_guidelines}
 - `focus_opportunities`: entities rich enough to anchor a dedicated wiki page or chapter section
 - `contradictions`: tensions or paradoxes in values, beliefs, or events — leave them unresolved, do not explain them away
@@ -1327,6 +1338,18 @@ def print_summary(classification: dict, new_candidates: list[dict]) -> None:
     else:
         print("  cands   : 0 new question candidates")
 
+    downgrades = classification.get("validation_downgrades")
+    if isinstance(downgrades, list) and downgrades:
+        # Salvage is never silent: name the events the validator filed without
+        # the link or proof the model offered, and why, so a refused link is
+        # something the person can read rather than a reading that vanished.
+        touched = {str(row.get("event_key") or "?") for row in downgrades if isinstance(row, dict)}
+        codes = sorted({str(row.get("code") or "?") for row in downgrades if isinstance(row, dict)})
+        print(
+            f"  kept    : {len(touched)} event(s) filed without the model's link or proof "
+            f"(validator downgrades: {', '.join(codes)})"
+        )
+
 
 # ── core classify action ──────────────────────────────────────────────────────
 
@@ -1598,6 +1621,7 @@ def classify_file(
     skip_candidates: bool = False,
     precomputed_result: dict | None = None,
     require_mode: bool = False,
+    salvage: bool = True,
 ) -> int:
     """Classify a single source file. Returns 0 on success, 1 on error.
 
@@ -1605,7 +1629,17 @@ def classify_file(
     classification JSON that flows through the SAME validation/persistence as
     the AI path. `skip_candidates` suppresses candidate-question generation —
     used for archive backfills where hundreds of new candidates would flood
-    the review store without adding craft value."""
+    the review store without adding craft value.
+
+    `salvage` (default, v326) is the filing rule `file_batch_response` has had
+    since v323, now on this path too: one event's bad link, grounding or
+    resolution bookkeeping falls to its conservative state and is recorded on
+    the classification as `validation_downgrades`; the reading's events and
+    their stated dates are filed. Until v326 `classify-story --classify` was
+    the one filing path still taking the strict verdict, which is how the
+    owner's pasted vital records were refused three times over with nothing
+    filed (2026-09-22). `salvage=False` keeps the strict verdict for callers
+    that want it; structural failures and stale snapshots refuse either way."""
     if not source_path.exists():
         print(f"Error: file not found: {source_path}", file=sys.stderr)
         return 1
@@ -1668,6 +1702,7 @@ def classify_file(
             candidate_store=store,
             skip_candidates=skip_candidates,
             require_mode=require_mode,
+            salvage=salvage,
         )
     except Exception as exc:  # noqa: BLE001 — model schema failures stay private
         print(
