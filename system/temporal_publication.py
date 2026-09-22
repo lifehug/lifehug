@@ -442,6 +442,76 @@ def resolver_questions(vault_root: str | Path) -> dict[str, str]:
     return found
 
 
+def resolver_estimates(vault_root: str | Path) -> dict[str, dict]:
+    """``node_id -> probable_window`` for every moment the resolver could not date.
+
+    v325. When the vault genuinely cannot tell, the resolver keeps its question
+    AND its best reading of the stretch the moment falls in — a bounded range
+    with the lines it rests on (a residence, a tenure, a related dated moment).
+    That reading is published on the moment's node and on its work item as
+    ``probable_window`` so the page can float the dot over the years it
+    probably belongs to instead of over the whole life. It is an ESTIMATE:
+    never a placement, never read by the score or the strip, never an input
+    to the derivation (same rule as :func:`resolver_questions` — read, never
+    folded). Unreadable or absent reads as "no estimates".
+    """
+    try:
+        raw = json.loads((Path(vault_root) / RESOLVER_LEDGER).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    rows = raw.get("nodes") if isinstance(raw, dict) else None
+    found: dict[str, dict] = {}
+    for node_id, row in (rows or {}).items():
+        if not isinstance(row, dict) or row.get("status") not in ("unknown", "unverified"):
+            continue
+        estimate = row.get("estimate")
+        if not isinstance(estimate, dict) or not estimate.get("earliest") or not estimate.get("latest"):
+            continue
+        basis = [dict(b) for b in estimate.get("basis") or () if isinstance(b, dict)]
+        window = {
+            "earliest": str(estimate["earliest"]),
+            "latest": str(estimate["latest"]),
+            "basis": basis,
+            "source": "resolver",
+        }
+        try:
+            window["confidence"] = float(estimate.get("confidence"))
+        except (TypeError, ValueError):
+            pass
+        if node_id:
+            found[str(node_id)] = window
+    return found
+
+
+def _with_resolver_estimates(payloads: dict, estimates: dict[str, dict]) -> None:
+    """Put the resolver's probable window on the node and on its work item.
+
+    v325. In place, on the rendered payloads, exactly as the question is —
+    a display decision over the same generation, so ``calculation_rule_version``
+    does not move and a reader that has never heard of ``probable_window`` is
+    unaffected.
+    """
+    if not estimates:
+        return
+    for payload in payloads.values():
+        rows = payload.get("work_items")
+        if isinstance(rows, list):
+            payload["work_items"] = [
+                {**row, "probable_window": dict(estimates[str(row.get("node_ref"))])}
+                if isinstance(row, dict) and str(row.get("node_ref") or "") in estimates
+                else row
+                for row in rows
+            ]
+        nodes = payload.get("nodes")
+        if isinstance(nodes, list):
+            payload["nodes"] = [
+                {**node, "probable_window": dict(estimates[str(node.get("node_id"))])}
+                if isinstance(node, dict) and str(node.get("node_id") or "") in estimates
+                else node
+                for node in nodes
+            ]
+
+
 def _with_resolver_questions(payloads: dict, questions: dict[str, str]) -> None:
     """Put the resolver's own question on the work item for that node.
 
@@ -635,6 +705,7 @@ def publish(
     )
     published_at = normalized_timestamp(now, error=TemporalPublicationError)
     questions = resolver_questions(vault_root)
+    estimates = resolver_estimates(vault_root)
     digest = store.payload_sha256(_canonical(index if isinstance(index, dict) else list(index)))
 
     # v318. The derivation's inputs are all read by now; if they digest to what
@@ -652,6 +723,7 @@ def publish(
         birth_date=birth_date,
         owner_ref=owner_ref,
         resolver_questions=questions,
+        resolver_estimates=estimates,
     )
     if not full:
         standing = _standing_publication(
@@ -693,6 +765,9 @@ def publish(
     # has one. A display decision over the SAME generation — nothing here
     # re-derives a date, so `calculation_rule_version` does not move.
     _with_resolver_questions(payloads, questions)
+    # v325: the resolver's probable window rides the same seam, for the same
+    # reason and under the same rule.
+    _with_resolver_estimates(payloads, estimates)
 
     # THE SEMANTIC NO-OP (eras design §3.4). Age frames make the projection a
     # function of the clock as well as of the receipts, so "publish again"
@@ -812,7 +887,7 @@ def _rule_identity() -> dict:
 def derivation_fingerprint(
     *, index_digest: str, derivation_inputs: dict, resolution_records: object,
     roster_snapshot: object, owner_names: object, birth_date: object,
-    owner_ref: object, resolver_questions: dict,
+    owner_ref: object, resolver_questions: dict, resolver_estimates: dict | None = None,
 ) -> str | None:
     """A digest over EVERY argument `derive_calculated_timeline` is given.
 
@@ -837,6 +912,7 @@ def derivation_fingerprint(
             "birth_date": birth_date,
             "owner_ref": owner_ref,
             "resolver_questions": resolver_questions,
+            "resolver_estimates": resolver_estimates or {},
         }))
     except (TypeError, ValueError):
         return None

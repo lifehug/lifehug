@@ -164,6 +164,80 @@ that never happened — and on the owner's own vault at v316 both drew cards
     never re-plans it, `--refile` skips it, and it is not an open question.
     Both legs reach this through the same absorb, so a host gets it for free.
 
+## Amendment (v325, 2026-09-22): the resolver revisits, aims, and estimates
+
+**What happened.** On 2026-09-21 the owner answered "When was grandpa's
+death?" on staging with the exact dates of both grandfathers' deaths. Four of
+his six turns parked on the hosted lease (a platform defect, fixed there), but
+the two that filed exposed three gaps in THIS design, none of which a
+re-press would have closed:
+
+1. The hosted resolver plans the story just filed and nothing else, and an
+   `unknown` in `state/resolver/resolutions.json` was terminal (the retry set
+   was `unverified` / `no_answer_returned` / `file_error`). A fact that
+   answered an OLD question helped only if it happened to become a new dated
+   event — which it did, as "Both grandfathers die within a month", leaving
+   the existing "Grandpa James Edwin Taylor Sr.'s death" node undated and the
+   Orderville dream home unplaced beside it.
+2. An anchor handle ("grandpa's death") binds to a node only on an exact key
+   match of words (`_anchor_index`, the uniqueness gate is right and stays).
+   Nothing let the answer SAY which node the handle named.
+3. The resolver never guesses, by design — a range needs a citation that
+   entails it — so the page had nothing to draw for the 35 open questions
+   but the whole life.
+
+**Decision.** Three additions to the pass the resolver already runs; no new
+module, no new model call, no stored dependency graph.
+
+* **Revisits.** A newly filed story re-opens the settled unknowns it bears
+  on, computed on the fly from what the vault holds: the moment the promoted
+  message's own conversation was answering (`session_ref` →
+  `cand:work_item:` → its node, or every moment whose unresolved handle IS
+  that `anchor:` item), and every unknown whose own retrieval query now
+  returns a passage of the new story. Once per story (`revisited_by`), at
+  most `MAX_REVISITS` by retrieval per plan, the new story's passages first
+  in the re-opened moment's prompt, and the re-opened stories ordered right
+  after the one just told. The plan item carries `include_paths`, `trigger`
+  and `revisits` (additive, empty for a v316-shaped item) so leg C verifies
+  against the passages that were planned without a second argument.
+* **Aim.** The story's own prompt lists the open questions it may bear on.
+  An answer may return `handle_binds`: "this moment's unresolved handle
+  names THAT node". Verified mechanically (the handle is the target's own,
+  the node exists, and is not the target), it files a `relative_order`
+  claim whose anchor is the node id — `_anchor_index` seeds every node id as
+  its own key, so the edge resolves without a word match — and retires the
+  raw handle with a supersession correction. The fold places the moment
+  through an ordinary edge; the `missing_anchor` card leaves because nothing
+  is missing. Durable, cited on the story that answered it, correctable like
+  a date.
+* **Estimates.** Whenever `answer` is null and there is no `not_an_event`,
+  the answer carries an `estimate`: a bounded stretch with the lines it
+  rests on (`residence` · `tenure` · `life_stage` · `related_moment` ·
+  `story` · `spine` · `other`). Verified mechanically — parseable, ordered,
+  closed at both ends, never wholly before the birth (that is family
+  history) — kept in the ledger beside the question, and published on the
+  node and its work item as `probable_window` by `temporal_publication`,
+  under the same "read, never folded" rule as the question itself. It is
+  NEVER a claim: the score, the strip and the derivation do not read it,
+  `calculation_rule_version` does not move, and only the person's answer
+  moves the dot to the line. The page floats the dot over its window and
+  draws its height as the window's width.
+* **Refine, and the backfill.** A moment the resolver itself dated to a
+  WIDE range (`REFINE_MIN_YEARS` or more) stays reachable: a new story that
+  bears on it re-asks it once, and only a narrower verified answer replaces
+  the standing one — a refine can never downgrade a placed moment to a
+  question (`kept_resolved`). The person's own stated dates are never
+  re-asked. `resolve --estimate-missing` asks every settled unknown that has
+  no estimate yet for one, once — the one-time backfill that gives the page
+  its first windows.
+
+**What this deliberately is not.** Not an incremental recompute (the fold
+recomputes everything in seconds and is correct because it starts over), not
+a stored graph of affected items (three signals computed per filing cannot
+go stale), and not person-anchored event identity (the three grandfather
+nodes are three tellings of two deaths; merging them by person is its own
+version).
+
 ## Consequences
 
 - The classifier's validator is no longer the place where placement is won or
