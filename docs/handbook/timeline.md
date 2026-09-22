@@ -406,6 +406,26 @@ calculating placement against a spine**:
   was, and an answer that reads somebody else's age off it is refused
   mechanically (`subject_age_not_owner`), in the model lane and in the
   bare-age arithmetic lane alike.
+- **It revisits, aims, and estimates** (v325). A newly filed story re-opens
+  the settled unknowns it bears on — the moment the message's own
+  conversation was answering (`session_ref` names the work item), and every
+  unknown whose retrieval query now returns a passage of the new story — each
+  once per story, with the new passages first in its prompt and its story
+  planned right after the one just told. The story's own prompt lists those
+  open questions, and an answer may return `handle_binds` ("this moment's
+  unresolved handle names THAT node"), which files a `relative_order` claim
+  anchored on the node id and retires the raw handle, so the fold places the
+  moment through an ordinary edge and the `missing_anchor` card leaves. And
+  whenever the vault genuinely cannot tell, the answer carries an `estimate`
+  — a bounded stretch with the lines it rests on — verified mechanically
+  (parseable, ordered, closed, never before the birth), kept in the ledger
+  beside the question and published as the node's and work item's
+  `probable_window`. An estimate is never a claim: the score, the strip and
+  the derivation do not read it; the page floats the dot over it and draws
+  its height as the window's width. A wide range the resolver itself filed is
+  re-asked once when an exact date arrives and only a narrower verified
+  answer replaces it; `resolve --estimate-missing` backfills the windows
+  once. See ADR 0037's v325 amendment.
 - **Verification is mechanical**: every cited quote must occur in the cited
   passage, every date must parse, ranges must be ordered, a `derived` answer
   must cite the spine fact it came from. What fails files nothing.

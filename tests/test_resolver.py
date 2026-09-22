@@ -303,7 +303,11 @@ class LegsTests(unittest.TestCase):
         self.assertTrue(plan["complete"])
         self.assertEqual(len(plan["items"]), 1)
         item = plan["items"][0]
-        self.assertEqual(sorted(item), ["identity", "key", "node_ids", "prompt", "source_path"])
+        self.assertEqual(sorted(item), ["identity", "include_paths", "key", "node_ids", "prompt", "revisits",
+                                        "source_path", "trigger"])
+        # v325: a plan for one story that re-opened nothing carries the additive
+        # keys empty, so a host that ignores them sees the v316 item.
+        self.assertEqual((item["include_paths"], item["revisits"], item["trigger"]), ([], [], False))
         self.assertEqual(item["source_path"], "answers/a1.md")
         self.assertEqual(item["node_ids"], [self.nodes["shop"]])
         self.assertRegex(item["key"], r"^[0-9a-f]{32}$")
@@ -812,3 +816,374 @@ class NotAnEventTests(LegsTests):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RevisitTests(LegsTests):
+    """v325: a new story re-opens the settled unknowns it bears on, an answer
+    names the moment it was given for, a handle binds to a node, and an
+    unknown keeps an estimate the page can draw.
+
+    Before v325 an ``unknown`` was terminal and the resolver planned only the
+    story just filed, so a fact answering an OLD question helped only if it
+    happened to become a new dated event under the same words (the founder's
+    grandfathers' deaths, 2026-09-21: the dates arrived, the question stayed).
+    """
+
+    def settle_unknown(self, label: str, question: str, source_path: str = "answers/a1.md") -> None:
+        ledger = resolver.load_ledger(self.root)
+        ledger.setdefault("nodes", {})[self.nodes[label]] = {
+            "label": label, "source_path": source_path, "status": "unknown",
+            "question": question, "at": NOW}
+        resolver.save_ledger(self.root, ledger)
+
+    def two_stories(self) -> None:
+        self.story("a1", "The shop opened at some point after we moved.",
+                   [("shop", "after", ["the move to Cedarport"])])
+        self.story("a2", "We moved to Cedarport in June 1996; the shop opened that same summer.",
+                   [("wedding", "after", ["the shop opening"])])
+        self.publish()
+        self.settle_unknown("shop", "Which year did the shop open?")
+
+    def answer(self, node_id: str, **fields) -> dict:
+        row = {"node_id": node_id, "answer": None, "basis": "stated", "confidence": 0.9,
+               "fact_key": "shop_opening", "citations": [], "reason": "The story says so.",
+               "question": None, "also_resolves": []}
+        row.update(fields)
+        return row
+
+    def item_for(self, plan: dict, source_path: str) -> dict:
+        return next(item for item in plan["items"] if item["source_path"] == source_path)
+
+    # -- revisits -----------------------------------------------------------
+
+    def test_a_settled_unknown_stays_settled_until_a_story_bears_on_it(self):
+        self.two_stories()
+        plan = resolver.plan_items(self.root, limit=5)
+        self.assertEqual([item["source_path"] for item in plan["items"]], ["answers/a2.md"])
+        self.assertEqual(plan["pending_events"], 1)
+
+    def test_a_new_story_reopens_the_unknown_its_words_reach(self):
+        self.two_stories()
+        read = resolver._Read(self.root, triggers={"answers/a2.md"})
+        self.assertEqual(read.revisit, {self.nodes["shop"]: {"trigger": "answers/a2.md", "why": "retrieval"}})
+        plan = resolver.plan_items(self.root, limit=5, only_sources={"answers/a2.md"}, restrict=True, read=read)
+        # The story just told first, then the story it re-opened.
+        self.assertEqual([item["source_path"] for item in plan["items"]], ["answers/a2.md", "answers/a1.md"])
+        self.assertEqual(plan["pending_events"], 2)
+        told = self.item_for(plan, "answers/a2.md")
+        reopened = self.item_for(plan, "answers/a1.md")
+        self.assertTrue(told["trigger"])
+        self.assertEqual(told["include_paths"], [])
+        # The new story's own prompt lists the question it may bear on…
+        self.assertIn(self.nodes["shop"], told["prompt"])
+        self.assertIn("Which year did the shop open?", told["prompt"])
+        # …and the re-opened moment's prompt carries the new story's passage.
+        self.assertFalse(reopened["trigger"])
+        self.assertEqual(reopened["include_paths"], ["answers/a2.md"])
+        self.assertEqual(reopened["revisits"], [self.nodes["shop"]])
+        self.assertIn("[answers/a2.md#p0]", reopened["prompt"])
+        self.assertIn("moved to Cedarport in June 1996", reopened["prompt"])
+
+    def test_a_revisited_unknown_files_its_answer_from_the_new_passage(self):
+        self.two_stories()
+        plan = resolver.plan_items(self.root, limit=5, only_sources={"answers/a2.md"}, restrict=True)
+        reopened = self.item_for(plan, "answers/a1.md")
+        text = json.dumps({"answers": [self.answer(
+            self.nodes["shop"], answer={"earliest": "1996-06", "latest": "1996-08"}, basis="inferred",
+            citations=[{"doc": "answers/a2.md#p0", "quote": "moved to Cedarport in June 1996"}])]})
+        # Leg C the hosted way: no --source, the envelope alone says what was planned.
+        report = resolver.file_envelope(self.root, self.envelope(reopened, text, include_paths=reopened["include_paths"],
+                                                                 trigger=False), now=NOW)
+        self.assertEqual(report["filed"], 1)
+        entry = resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]
+        self.assertEqual(entry["status"], "resolved")
+        self.assertEqual(entry["revisited_by"], ["answers/a2.md"])
+        self.assertEqual(entry["revisit_why"], "retrieval")
+
+    def test_a_story_reopens_an_unknown_once(self):
+        self.two_stories()
+        plan = resolver.plan_items(self.root, limit=5, only_sources={"answers/a2.md"}, restrict=True)
+        reopened = self.item_for(plan, "answers/a1.md")
+        text = json.dumps({"answers": [self.answer(self.nodes["shop"], question="Which year did the shop open?")]})
+        resolver.file_envelope(self.root, self.envelope(reopened, text, include_paths=reopened["include_paths"]), now=NOW)
+        entry = resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]
+        self.assertEqual((entry["status"], entry["revisited_by"]), ("unknown", ["answers/a2.md"]))
+        self.assertEqual(resolver._Read(self.root, triggers={"answers/a2.md"}).revisit, {})
+        # A DIFFERENT story bearing on it re-opens it again.
+        self.story("a3", "The shop on Cedarport's main street opened the year after the move.", [])
+        self.publish()
+        self.assertIn(self.nodes["shop"], resolver._Read(self.root, triggers={"answers/a3.md"}).revisit)
+
+    def test_the_conversation_names_the_moment_it_answers_whatever_the_words(self):
+        import temporal_publication as pub
+
+        self.story("a1", "The shop opened at some point after we moved.",
+                   [("shop", "after", ["the move to Cedarport"])])
+        self.publish()
+        rows = (pub.read_work_items(self.root) or {})["work_items"]
+        work_item_id = next(row["work_item_id"] for row in rows if row.get("node_ref") == self.nodes["shop"])
+        (self.root / "answers" / "a2.md").write_text(
+            "---\ntitle: a2\ntype: conversation_message\n"
+            f'session_ref: "conversation:cand:work_item:{work_item_id}"\n---\n\n'
+            "Honestly I could not say. Ask my sister.\n", "utf-8")
+        self.publish()
+        self.settle_unknown("shop", "Which year did the shop open?")
+        read = resolver._Read(self.root, triggers={"answers/a2.md"})
+        self.assertEqual(read.revisit, {self.nodes["shop"]: {"trigger": "answers/a2.md", "why": "conversation"}})
+        plan = resolver.plan_items(self.root, limit=5, only_sources={"answers/a2.md"}, restrict=True, read=read)
+        self.assertEqual([item["source_path"] for item in plan["items"]], ["answers/a1.md"])
+        self.assertIn("Ask my sister", self.item_for(plan, "answers/a1.md")["prompt"])
+
+    def test_the_conversation_for_an_anchor_handle_reopens_the_moments_that_hang_on_it(self):
+        import temporal_publication as pub
+        import temporal_work_items as twi
+
+        self.story("a1", "The shop opened at some point after we moved.",
+                   [("shop", "after", ["the move to Cedarport"])])
+        self.publish()
+        rows = (pub.read_work_items(self.root) or {})["work_items"]
+        handle_ref = twi.anchor_handle_ref("the move to Cedarport")
+        anchor_items = [row for row in rows if row.get("subject_ref") == handle_ref]
+        self.assertEqual(len(anchor_items), 1, [row.get("subject_ref") for row in rows])
+        (self.root / "answers" / "a2.md").write_text(
+            "---\ntitle: a2\ntype: conversation_message\n"
+            f'session_ref: "conversation:cand:work_item:{anchor_items[0]["work_item_id"]}"\n---\n\n'
+            "That was my grandparents' move, not mine.\n", "utf-8")
+        self.publish()
+        self.settle_unknown("shop", "Which year did the shop open?")
+        read = resolver._Read(self.root, triggers={"answers/a2.md"})
+        self.assertEqual(read.revisit, {self.nodes["shop"]: {"trigger": "answers/a2.md", "why": "conversation"}})
+
+    # -- estimates ----------------------------------------------------------
+
+    def test_an_estimate_is_verified_mechanically_and_never_before_the_birth(self):
+        sp = spine()
+        ok, why = resolver.verify_estimate({"estimate": {
+            "earliest": "1996", "latest": "1998", "confidence": 0.5,
+            "basis": [{"kind": "residence", "text": "the Cedarport years"},
+                      {"kind": "vibes", "text": "it feels like the nineties", "ref": "landmark:residences:3"}]}}, sp=sp)
+        self.assertEqual(why, "ok")
+        self.assertEqual(ok, {"earliest": "1996", "latest": "1998", "confidence": 0.5,
+                              "basis": [{"kind": "residence", "text": "the Cedarport years"},
+                                        {"kind": "other", "text": "it feels like the nineties",
+                                         "ref": "landmark:residences:3"}]})
+        self.assertEqual(resolver.verify_estimate({}, sp=sp), (None, "no_estimate"))
+        self.assertEqual(resolver.verify_estimate({"estimate": {"earliest": "1960", "latest": "1970",
+                                                                 "basis": [{"kind": "story", "text": "x"}]}}, sp=sp),
+                         (None, "pre_birth"))
+        self.assertEqual(resolver.verify_estimate({"estimate": {"earliest": "1999", "latest": "1996",
+                                                                 "basis": [{"kind": "story", "text": "x"}]}}, sp=sp),
+                         (None, "estimate_reversed"))
+        # A single year is a one-year window, never an open end: an estimate is bounded.
+        self.assertEqual(resolver.verify_estimate({"estimate": {"earliest": "1996", "latest": None,
+                                                                 "basis": [{"kind": "story", "text": "x"}]}}, sp=sp)[0],
+                         {"earliest": "1996", "latest": "1996", "confidence": 0.4,
+                          "basis": [{"kind": "story", "text": "x"}]})
+        self.assertEqual(resolver.verify_estimate({"estimate": {"earliest": "1996", "latest": "1998"}}, sp=sp),
+                         (None, "estimate_without_basis"))
+
+    def test_an_unknown_keeps_its_estimate_and_the_page_floats_the_dot_over_it(self):
+        import temporal_publication as pub
+
+        self.story("a1", "The shop opened at some point after we moved.",
+                   [("shop", "after", ["the move to Cedarport"])])
+        self.publish()
+        before = (pub.read_projection(self.root) or {})["calculation_rule_version"]
+        item = resolver.plan_items(self.root, limit=5)["items"][0]
+        text = json.dumps({"answers": [self.answer(
+            self.nodes["shop"], question="Which year did the shop open?",
+            estimate={"earliest": "1996", "latest": "1998", "confidence": 0.5,
+                      "basis": [{"kind": "residence", "text": "the Cedarport years"}]})]})
+        report = resolver.file_envelope(self.root, self.envelope(item, text), now=NOW)
+        self.assertEqual((report["filed"], report["estimates"], report["outcomes"]), (0, 1, {"unknown": 1}))
+        entry = resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]
+        self.assertEqual(entry["estimate"], {"earliest": "1996", "latest": "1998", "confidence": 0.5,
+                                             "basis": [{"kind": "residence", "text": "the Cedarport years"}]})
+        window = {"earliest": "1996", "latest": "1998", "confidence": 0.5, "source": "resolver",
+                  "basis": [{"kind": "residence", "text": "the Cedarport years"}]}
+        rows = {row.get("node_ref"): row for row in (pub.read_work_items(self.root) or {})["work_items"]}
+        self.assertEqual(rows[self.nodes["shop"]]["probable_window"], window)
+        nodes = {node["node_id"]: node for node in (pub.read_projection(self.root) or {})["nodes"]}
+        self.assertEqual(nodes[self.nodes["shop"]]["probable_window"], window)
+        # An estimate is a display decision, never arithmetic: the rule version
+        # holds, nothing is placed, and every other node carries no window.
+        self.assertEqual((pub.read_projection(self.root) or {})["calculation_rule_version"], before)
+        self.assertFalse(nodes[self.nodes["shop"]].get("usable_placement"))
+        self.assertTrue(all("probable_window" not in node for nid, node in nodes.items() if nid != self.nodes["shop"]))
+
+    # -- handle binds -------------------------------------------------------
+
+    def test_a_handle_bind_files_an_ordering_claim_on_the_node_and_retires_the_raw_handle(self):
+        import temporal_publication as pub
+        import temporal_work_items as twi
+
+        self.story("a1", "The shop opened at some point after we moved.",
+                   [("shop", "after", ["the move to Cedarport"])])
+        self.story("b1", "We moved house the year I finished school.",
+                   [("move", "after", ["finishing school"])])
+        self.publish()
+        handle_ref = twi.anchor_handle_ref("the move to Cedarport")
+        rows = (pub.read_work_items(self.root) or {})["work_items"]
+        self.assertTrue(any(row.get("subject_ref") == handle_ref for row in rows))
+        item = self.item_for(resolver.plan_items(self.root, limit=5), "answers/a1.md")
+        text = json.dumps({"answers": [self.answer(
+            self.nodes["shop"], question="Which year did the shop open?",
+            estimate={"earliest": "1996", "latest": "1998", "confidence": 0.4,
+                      "basis": [{"kind": "related_moment", "text": "after the move"}]},
+            handle_binds=[{"handle": "the move to Cedarport", "node_id": self.nodes["move"]},
+                          {"handle": "the move to Cedarport", "node_id": "node:nobody"},
+                          {"handle": "something else entirely", "node_id": self.nodes["move"]}])]})
+        report = resolver.file_envelope(self.root, self.envelope(item, text), now=NOW)
+        self.assertEqual((report["filed"], report["bound"]), (0, 1))
+        entry = resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]
+        self.assertEqual(entry["status"], "unknown")
+        [bind] = entry["handle_binds"]
+        self.assertEqual((bind["handle"], bind["node_id"], bind["superseded"]),
+                         ("the move to Cedarport", self.nodes["move"], [self.handles["shop"]]))
+        by_id = {c["claim_id"]: c for c in ts.fold_active_index(self.root)["claims"]}
+        self.assertEqual(by_id[self.handles["shop"]]["status"], "superseded")
+        mine = by_id[bind["claim_id"]]
+        self.assertEqual(mine["claim_type"], "relative_order")
+        self.assertEqual(mine["temporal_value"], {"relation": "after", "anchors": [self.nodes["move"]]})
+        self.assertEqual(mine["extractor_version"], resolver.EXTRACTOR_VERSION)
+        # The republish that follows: the handle names something now, so the
+        # `anchor:` work item that asked whose move it was is gone.
+        rows = (pub.read_work_items(self.root) or {})["work_items"]
+        self.assertFalse(any(row.get("subject_ref") == handle_ref for row in rows),
+                         [row.get("subject_ref") for row in rows])
+
+
+class RefineAndBackfillTests(LegsTests):
+    """v325: a wide resolver-dated reading is re-asked when an exact date arrives,
+    never downgraded; and `--estimate-missing` asks a settled unknown for the
+    estimate it lacks, once."""
+
+    def file_wide(self) -> dict:
+        self.story("a1", "The shop opened sometime in the late nineties, after we moved.",
+                   [("shop", "after", ["the move to Cedarport"])])
+        self.publish()
+        item = resolver.plan_items(self.root, limit=5)["items"][0]
+        text = json.dumps({"answers": [{
+            "node_id": self.nodes["shop"], "answer": {"earliest": "1996", "latest": "1999"}, "basis": "stated",
+            "confidence": 0.6, "fact_key": "shop_opening", "reason": "late nineties",
+            "citations": [{"doc": "story", "quote": "sometime in the late nineties"}], "question": None,
+            "also_resolves": []}]})
+        report = resolver.file_envelope(self.root, self.envelope(item, text), now=NOW)
+        self.assertEqual(report["filed"], 1)
+        return item
+
+    def test_a_wide_resolver_reading_is_reopened_by_a_story_with_the_exact_date(self):
+        import temporal_publication as pub
+
+        self.file_wide()
+        nodes = {n["node_id"]: n for n in (pub.read_projection(self.root) or {})["nodes"]}
+        self.assertTrue(nodes[self.nodes["shop"]]["usable_placement"])
+        # A placed moment is not a target… unless the resolver dated it wide.
+        self.story("a2", "The shop on Cedarport's main street opened on 12 June 1997, I have the photo.", [])
+        self.publish()
+        read = resolver._Read(self.root, triggers={"answers/a2.md"})
+        self.assertEqual(read.revisit, {self.nodes["shop"]: {"trigger": "answers/a2.md", "why": "refine"}})
+        plan = resolver.plan_items(self.root, limit=5, only_sources={"answers/a2.md"}, restrict=True, read=read)
+        item = next(i for i in plan["items"] if i["source_path"] == "answers/a1.md")
+        self.assertIn("12 June 1997", item["prompt"])
+        # Sharper, verified against the new passage → replaces the wide reading.
+        text = json.dumps({"answers": [{
+            "node_id": self.nodes["shop"], "answer": {"earliest": "1997-06-12", "latest": "1997-06-12"},
+            "basis": "stated", "confidence": 0.9, "fact_key": "shop_opening", "reason": "the photo",
+            "citations": [{"doc": "answers/a2.md#p0", "quote": "opened on 12 June 1997"}],
+            "question": None, "also_resolves": []}]})
+        report = resolver.file_envelope(self.root, self.envelope(item, text, include_paths=item["include_paths"]), now=NOW)
+        self.assertEqual(report["filed"], 1)
+        entry = resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]
+        self.assertEqual((entry["status"], entry["answer"]["best"], entry["refined_from"]["best"], entry["revisit_why"]),
+                         ("resolved", "1997-06-12", "1996/1999", "refine"))
+        nodes = {n["node_id"]: n for n in (pub.read_projection(self.root) or {})["nodes"]}
+        self.assertEqual(nodes[self.nodes["shop"]]["best_temporal_value"]["best"], "1997-06-12")
+
+    def test_a_refine_that_finds_nothing_sharper_keeps_the_standing_answer(self):
+        self.file_wide()
+        self.story("a2", "I think the shop in Cedarport did well; the move was hard on everyone.", [])
+        self.publish()
+        read = resolver._Read(self.root, triggers={"answers/a2.md"})
+        self.assertIn(self.nodes["shop"], read.revisit)
+        plan = resolver.plan_items(self.root, limit=5, only_sources={"answers/a2.md"}, restrict=True, read=read)
+        item = next(i for i in plan["items"] if i["source_path"] == "answers/a1.md")
+        text = json.dumps({"answers": [{"node_id": self.nodes["shop"], "answer": None, "basis": "inferred",
+                                        "confidence": 0.2, "fact_key": "shop_opening", "reason": "nothing new",
+                                        "citations": [], "question": "When exactly?", "also_resolves": []}]})
+        report = resolver.file_envelope(self.root, self.envelope(item, text, include_paths=item["include_paths"]), now=NOW)
+        self.assertEqual(report["outcomes"], {"kept_resolved": 1})
+        entry = resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]
+        self.assertEqual((entry["status"], entry["answer"]["best"], entry["refine_attempted_by"]),
+                         ("resolved", "1996/1999", ["answers/a2.md"]))
+        # Once per story here too.
+        self.assertEqual(resolver._Read(self.root, triggers={"answers/a2.md"}).revisit, {})
+
+    def test_estimate_missing_asks_a_settled_unknown_once_for_its_window(self):
+        self.story("a1", "The shop opened at some point after we moved.",
+                   [("shop", "after", ["the move to Cedarport"])])
+        self.publish()
+        resolver.save_ledger(self.root, {"version": 1, "nodes": {self.nodes["shop"]: {
+            "label": "shop", "source_path": "answers/a1.md", "status": "unknown",
+            "question": "Which year did the shop open?", "at": NOW}}})
+        self.assertEqual(resolver.plan_items(self.root, limit=5)["items"], [])
+        plan = resolver.plan_items(self.root, limit=5, estimate_missing=True)
+        self.assertEqual([i["node_ids"] for i in plan["items"]], [[self.nodes["shop"]]])
+        text = json.dumps({"answers": [{"node_id": self.nodes["shop"], "answer": None, "basis": "inferred",
+                                        "confidence": 0.3, "fact_key": "shop_opening", "reason": "the move bounds it",
+                                        "citations": [], "question": "Which year did the shop open?", "also_resolves": [],
+                                        "estimate": {"earliest": "1996", "latest": "1999", "confidence": 0.3,
+                                                     "basis": [{"kind": "related_moment", "text": "after the move"}]}}]})
+        report = resolver.file_envelope(self.root, self.envelope(plan["items"][0], text), now=NOW)
+        self.assertEqual((report["estimates"], report["outcomes"]), (1, {"unknown": 1}))
+        # With its estimate in hand it is settled again, even for a backfill run.
+        self.assertEqual(resolver.plan_items(self.root, limit=5, estimate_missing=True)["items"], [])
+
+
+class OwnerAliasAndFallbackTests(unittest.TestCase):
+    """v325: the owner's nickname is the owner; an unverified proposal still floats the dot."""
+
+    def test_the_owners_nickname_passes_the_age_refusal(self):
+        sp = spine(owner_name="David James Taylor", owner_names=["dave", "david", "david james taylor"])
+        self.assertTrue(resolver._subject_is_owner("Dave", sp))
+        self.assertTrue(resolver._subject_is_owner("David James Taylor", sp))
+        self.assertFalse(resolver._subject_is_owner("Mom", sp))
+        # Without the spelling list the old rule still holds: the full name and its first word.
+        plain = spine(owner_name="David James Taylor")
+        self.assertTrue(resolver._subject_is_owner("David", plain))
+        self.assertFalse(resolver._subject_is_owner("Dave", plain))
+
+    def test_a_refused_proposal_becomes_the_estimate(self):
+        sp = spine()
+        item = {"answer": {"earliest": "1999-07", "latest": "2000-07"}, "reason": "age 18 off the birthday"}
+        estimate, why = resolver.verify_estimate(
+            {"estimate": {**item["answer"], "confidence": 0.3,
+                          "basis": [{"kind": "story", "text": item["reason"]}]}}, sp=sp)
+        self.assertEqual(why, "ok")
+        self.assertEqual(estimate, {"earliest": "1999-07", "latest": "2000-07", "confidence": 0.3,
+                                    "basis": [{"kind": "story", "text": "age 18 off the birthday"}]})
+
+
+class ProposalAdoptionTests(LegsTests):
+    """v325: `--estimate-missing` first adopts every refused proposal as an estimate, free."""
+
+    def test_a_refused_proposal_is_adopted_as_the_estimate_without_a_model_call(self):
+        import temporal_publication as pub
+
+        self.story("a1", "The shop opened at some point after we moved.",
+                   [("shop", "after", ["the move to Cedarport"])])
+        self.publish()
+        resolver.save_ledger(self.root, {"version": 1, "nodes": {self.nodes["shop"]: {
+            "label": "shop", "source_path": "answers/a1.md", "status": "unverified", "why": "citations_unverified",
+            "proposed": {"earliest": "1996", "latest": "1998"}, "reason": "the move bounds it", "at": NOW}}})
+        report = resolver.resolve_vault(self.root, model="test-model", execute=False, limit=5, concurrency=1,
+                                        only_sources=None, force=False, now=NOW, estimate_missing=True)
+        self.assertEqual(report["estimates_adopted"], 1)
+        entry = resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]
+        self.assertEqual(entry["status"], "unverified")
+        self.assertEqual(entry["estimate"], {"earliest": "1996", "latest": "1998", "confidence": 0.3,
+                                             "basis": [{"kind": "story", "text": "the move bounds it"}]})
+        rows = {row.get("node_ref"): row for row in (pub.read_work_items(self.root) or {})["work_items"]}
+        self.assertEqual(rows[self.nodes["shop"]]["probable_window"]["earliest"], "1996")
+        # With its estimate adopted, the backfill has nothing left to ask.
+        self.assertEqual(resolver.plan_items(self.root, limit=5, estimate_missing=True)["items"], [])

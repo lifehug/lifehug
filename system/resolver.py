@@ -110,6 +110,26 @@ MAX_SOURCE_CHARS = 7000
 MAX_PASSAGE_CHARS = 700
 RETRIEVE_PER_EVENT = 6
 RETRIEVE_CAP = 18
+#: v325. How many settled-unknown moments ONE newly filed source may re-open in
+#: a single plan. Each is a line in a prompt that is being bought anyway, never
+#: a call of its own; the cap keeps a long story from re-asking the whole ledger.
+MAX_REVISITS = 8
+#: v325. How many paragraphs of a triggering message ride into a re-opened
+#: moment's prompt whole (a conversation turn is short; a pasted record is not).
+INCLUDE_PASSAGE_CAP = 12
+#: v325. A resolver-dated moment whose range spans at least this many calendar
+#: years is "wide", and a new story that bears on it may re-ask it to sharpen
+#: the date. The person's own stated dates are never re-asked: only readings
+#: the resolver itself filed are the resolver's to refine.
+REFINE_MIN_YEARS = 1
+#: v325. What an estimate may rest on. "other" is allowed and named so a reader
+#: can tell a basis the model could not classify from a missing one.
+ESTIMATE_BASIS_KINDS = ("residence", "tenure", "life_stage", "related_moment", "story", "spine", "other")
+MAX_ESTIMATE_BASIS = 4
+MAX_ESTIMATE_TEXT = 200
+#: v325. The conversation a promoted message came from names the work item the
+#: person was answering: ``conversation:cand:work_item:work:<hex>``.
+SESSION_WORK_ITEM_MARKER = "work_item:"
 BASES = ("stated", "derived", "inferred")
 _TOKEN_RE = re.compile(r"[a-z0-9]{2,}")
 _STOP = frozenset("""the and for with that this from was were are you your our his her they them
@@ -247,6 +267,10 @@ def spine(root: Path, projection: dict) -> dict:
             points.append(f"- {label}: {shown} [{node['node_id']}]")
     return {
         "owner_name": str(profile.get("full_name") or profile.get("name") or "the owner"),
+        # v325: every spelling the profile gives the owner — `name` AND `full_name`
+        # and each one's first word ("Dave", "David") — so the refusal that
+        # protects other people's ages never fires on the owner's own nickname.
+        "owner_names": sorted(n for n in owner_names if n),
         "birth": birth,
         "stays": stays[:60],
         "tenures": sorted(set(tenures))[:60],
@@ -314,10 +338,10 @@ class Index:
     def __init__(self, docs: list[dict]) -> None:
         self.docs = {doc["doc_id"]: doc for doc in docs}
         self.db = sqlite3.connect(":memory:")
-        self.db.execute("CREATE VIRTUAL TABLE passages USING fts5(doc_id UNINDEXED, title, body)")
+        self.db.execute("CREATE VIRTUAL TABLE passages USING fts5(doc_id UNINDEXED, path UNINDEXED, title, body)")
         self.db.executemany(
-            "INSERT INTO passages(doc_id, title, body) VALUES (?, ?, ?)",
-            [(d["doc_id"], d["title"], d["text"]) for d in docs],
+            "INSERT INTO passages(doc_id, path, title, body) VALUES (?, ?, ?, ?)",
+            [(d["doc_id"], d.get("path") or "", d["title"], d["text"]) for d in docs],
         )
         self.db.commit()
 
@@ -329,22 +353,36 @@ class Index:
                 seen.append(token)
         return seen
 
-    def search(self, text: object, *, k: int = RETRIEVE_PER_EVENT, exclude_path: str = "") -> list[dict]:
+    def search(self, text: object, *, k: int = RETRIEVE_PER_EVENT, exclude_path: str = "",
+               only_path: str = "") -> list[dict]:
+        """The best ``k`` passages for ``text``; ``only_path`` keeps one source's own
+        (v325: the passages of the story that just re-opened a question)."""
         terms = self.terms(text)
         if not terms:
             return []
         query = " OR ".join(f'"{term}"' for term in terms[:24])
         try:
-            rows = self.db.execute(
-                "SELECT doc_id, bm25(passages) AS score FROM passages WHERE passages MATCH ? "
-                "ORDER BY score LIMIT ?", (query, k * 3),
-            ).fetchall()
+            if only_path:
+                # v325: filtered IN the query — after the LIMIT, a short
+                # message's paragraphs lose to the whole vault's on rank and
+                # the one that carries the date is exactly the one cut.
+                rows = self.db.execute(
+                    "SELECT doc_id, bm25(passages) AS score FROM passages WHERE passages MATCH ? "
+                    "AND path = ? ORDER BY score LIMIT ?", (query, only_path, k * 3),
+                ).fetchall()
+            else:
+                rows = self.db.execute(
+                    "SELECT doc_id, bm25(passages) AS score FROM passages WHERE passages MATCH ? "
+                    "ORDER BY score LIMIT ?", (query, k * 3),
+                ).fetchall()
         except sqlite3.OperationalError:
             return []
         found: list[dict] = []
         for doc_id, _score in rows:
             doc = self.docs.get(doc_id)
             if doc is None or (exclude_path and doc.get("path") == exclude_path):
+                continue
+            if only_path and doc.get("path") != only_path:
                 continue
             found.append(doc)
             if len(found) >= k:
@@ -372,7 +410,8 @@ def _classification_events(root: Path) -> dict[str, tuple[str, dict]]:
     return found
 
 
-def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",)) -> dict[str, list[dict]]:
+def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",),
+            include_placed: frozenset | set = frozenset()) -> dict[str, list[dict]]:
     """``source_path -> [target]`` for every unplaced node ON THE OWNER'S AXIS.
 
     Two ways to be on it and the second one is why this is not a scope test
@@ -397,7 +436,9 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",)) -> 
     revisions: dict[str, str | None] = {}
     by_source: dict[str, list[dict]] = collections.defaultdict(list)
     for node in projection.get("nodes") or ():
-        if node.get("usable_placement") or node.get("node_kind") == "period":
+        if node.get("node_kind") == "period":
+            continue
+        if node.get("usable_placement") and node.get("node_id") not in include_placed:
             continue
         if node.get("occurrence_subject_scope") not in scopes and \
                 collapsed_text(node.get("owner_timeline_relation")) not in tp.AXIS_RELATIONS:
@@ -538,6 +579,13 @@ Each passage has an id you must cite exactly.
 ## Moments from this story that still have no date
 {events}
 
+## Open questions elsewhere in the vault this story may bear on
+Moments from OTHER stories the vault could not date yet. They are asked again on their
+own with this story among their passages; here they are so you can say when a moment
+above IS one of them ("duplicate", cite the node_id) or NAMES one of them as its
+unresolved handle ("handle_binds").
+{open_questions}
+
 ## Answer
 Return ONLY a JSON object: {{"answers": [ ... one per moment, in the order given ... ]}}
 Each answer:
@@ -550,8 +598,21 @@ Each answer:
   "fact_key": "<short snake_case name of the fact this date rests on, e.g. company_founding, mission_start, age_18>",
   "reason": "<one or two sentences>",
   "question": null or "<the one question to the owner that would settle this, only when answer is null>",
-  "also_resolves": ["<other node_ids from this list the same answer settles>"]
+  "also_resolves": ["<other node_ids from this list the same answer settles>"],
+  "estimate": {{"earliest": "YYYY or YYYY-MM", "latest": "YYYY or YYYY-MM",
+               "basis": [{{"kind": "residence" | "tenure" | "life_stage" | "related_moment" | "story" | "spine" | "other", "text": "<one line: what this rests on>"}}],
+               "confidence": 0.0-1.0}},
+  "handle_binds": [{{"handle": "<the anchor words of one of this moment's unresolved handles, e.g. grandpa's death>", "node_id": "<the node_id — from this list, the open questions, or a fact passage — that those words name>"}}]
 }}
+The "estimate" is REQUIRED whenever "answer" is null and there is no "not_an_event": your
+best reading of the stretch this moment falls in, from the shape of the owner's life as the
+spine shows it — the residence or tenure the story sits in, the life stage, a related dated
+moment. It is an estimate and is drawn as one, never as a placement; give the honest widest
+stretch you actually believe, never a single year you do not. When a moment's unresolved
+handle names something that IS in the passages or the open questions (a birth, a move, a
+death listed as a fact), return it in "handle_binds" — that is how the handle stops being a
+question — and still answer the moment itself. Omit "handle_binds" only when nothing here
+names it.
 Some listed moments are not moments at all. When that is so, set "answer" to null and
 add, instead of a question:
   "not_an_event": {{"kind": "future" | "meta" | "fact_statement" | "duplicate", "reason": "<one sentence>"}}
@@ -586,7 +647,23 @@ def _event_lines(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def build_prompt(*, source_path: str, story: str, rows: list[dict], sp: dict, passages: list[dict]) -> str:
+def _open_lines(rows: list[dict]) -> str:
+    """v325. The settled-unknown moments a story may bear on, one line each."""
+    lines = []
+    for row in rows:
+        handle = "; ".join(
+            f"{h.get('relation')} '{', '.join(h.get('anchors') or [])}'" for h in row.get("handles") or ()
+        )
+        lines.append(
+            f"- node_id {row['node_id']} | title: {row.get('label') or ''} | "
+            f"open question: {row.get('question') or ''} | unresolved handle: {handle or 'none'} | "
+            f"from: {row.get('source_path') or ''}"
+        )
+    return "\n".join(lines)
+
+
+def build_prompt(*, source_path: str, story: str, rows: list[dict], sp: dict, passages: list[dict],
+                 open_rows: list[dict] | tuple = ()) -> str:
     return PROMPT.format(
         owner=sp["owner_name"], birth=sp["birth"] or "unknown",
         stays="\n".join(sp["stays"]) or "- none recorded",
@@ -597,6 +674,7 @@ def build_prompt(*, source_path: str, story: str, rows: list[dict], sp: dict, pa
         source_path=source_path, story=story[:MAX_SOURCE_CHARS],
         passages="\n".join(f"[{d['doc_id']}] ({d['kind']}) {d['text'][:MAX_PASSAGE_CHARS]}" for d in passages) or "(none)",
         events=_event_lines(rows),
+        open_questions=_open_lines(list(open_rows)) or "(none)",
     )
 
 
@@ -651,7 +729,9 @@ def _subject_is_owner(subject: object, sp: dict) -> bool:
         return True
     owner = _norm(sp.get("owner_name"))
     names = {owner} | ({owner.split()[0]} if owner else set())
-    return bool(owner) and _norm(text) in names
+    names |= {_norm(n) for n in (sp.get("owner_names") or ()) if _norm(n)}
+    names.discard("")
+    return bool(names) and _norm(text) in names
 
 
 def _is_age_of_subject(item: dict, target: object) -> bool:
@@ -751,6 +831,108 @@ def verify(item: dict, *, story: str, passages: dict[str, dict], sp: dict, story
     }, "ok"
 
 
+def verify_estimate(item: dict, *, sp: dict) -> tuple[dict | None, str]:
+    """v325. ``(normalized estimate, reason)``; ``None`` when there is none worth keeping.
+
+    An estimate is what the model believes when the vault cannot tell: a bounded
+    stretch with at least one line saying what it rests on. It is verified
+    MECHANICALLY like everything else here — parseable, ordered, closed at both
+    ends, not before the owner was born (a stretch wholly before the birth is
+    family history, not a guess about this life) — and never against a quote,
+    because it is not a claim. It is stored beside the question, published as
+    the dot's ``probable_window``, and files nothing.
+    """
+    raw = item.get("estimate")
+    if not isinstance(raw, dict):
+        return None, "no_estimate"
+    record = _record(raw)
+    if record is None:
+        return None, "estimate_unparseable"
+    if not record.earliest or not record.latest:
+        return None, "estimate_open_ended"
+    if record.earliest > record.latest:
+        return None, "estimate_reversed"
+    birth = collapsed_text(sp.get("birth"))
+    try:
+        if birth and int(record.latest[:4]) < int(birth[:4]):
+            return None, "pre_birth"
+    except ValueError:
+        return None, "estimate_unparseable"
+    basis: list[dict] = []
+    for row in raw.get("basis") if isinstance(raw.get("basis"), list) else ():
+        if not isinstance(row, dict):
+            continue
+        text = collapsed_text(row.get("text"))[:MAX_ESTIMATE_TEXT]
+        if not text:
+            continue
+        kind = collapsed_text(row.get("kind"))
+        entry = {"kind": kind if kind in ESTIMATE_BASIS_KINDS else "other", "text": text}
+        ref = collapsed_text(row.get("ref"))
+        if ref:
+            entry["ref"] = ref[:MAX_ESTIMATE_TEXT]
+        basis.append(entry)
+        if len(basis) >= MAX_ESTIMATE_BASIS:
+            break
+    if not basis:
+        return None, "estimate_without_basis"
+    try:
+        confidence = max(0.0, min(1.0, float(raw.get("confidence"))))
+    except (TypeError, ValueError):
+        confidence = 0.4
+    return {"earliest": record.earliest, "latest": record.latest, "basis": basis,
+            "confidence": confidence}, "ok"
+
+
+_HANDLE_RELATION_RE = re.compile(r"^(?:before|after|between|within|during|around)\s+", re.IGNORECASE)
+
+
+def _handle_text(value: object) -> str:
+    """The anchor words out of a copied handle line — ``after 'grandpa's death'``
+    → ``grandpa's death``. Models copy the whole line; the check is on the words."""
+    text = collapsed_text(value)
+    text = _HANDLE_RELATION_RE.sub("", text).strip()
+    while len(text) >= 2 and text[0] in "'\"‘“" and text[-1] in "'\"’”":
+        text = text[1:-1].strip()
+    return text
+
+
+def verify_handle_binds(item: dict, *, target: dict, known_nodes: dict) -> list[dict]:
+    """v325. The handle binds this answer names that the vault can actually take.
+
+    A bind says "this moment's unresolved handle names THAT node". Mechanical
+    checks only: the handle must be one of the target's own, the node must exist
+    in the published projection and not be the target itself. Keyed through
+    `temporal_work_items.anchor_handle_ref`, the same normalisation the fold's
+    anchor index and the `anchor:` work items use, so a bind and the handle it
+    answers agree on what the words are.
+    """
+    import temporal_work_items as twi  # noqa: PLC0415
+
+    raw = item.get("handle_binds")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        handle = _handle_text(row.get("handle"))
+        node_id = collapsed_text(row.get("node_id"))
+        if not handle or node_id not in known_nodes or node_id == target["node_id"]:
+            continue
+        wanted = twi.anchor_handle_ref(handle)
+        for h in target.get("handles") or ():
+            claim_id = collapsed_text(h.get("claim_id"))
+            for anchor in h.get("anchors") or ():
+                if twi.anchor_handle_ref(anchor) != wanted or (claim_id, node_id) in seen:
+                    continue
+                seen.add((claim_id, node_id))
+                out.append({"claim_id": claim_id, "relation": collapsed_text(h.get("relation")) or "after",
+                            "handle": collapsed_text(anchor), "node_id": node_id,
+                            "label": collapsed_text((known_nodes.get(node_id) or {}).get("label"))})
+    return out
+
+
 def verify_not_an_event(item: dict) -> tuple[dict | None, str]:
     """``({"kind", "reason"} , "ok")`` for an accepted verdict, else ``(None, why)``.
 
@@ -841,6 +1023,59 @@ def file_resolution(root: Path, target: dict, resolved: dict, *, story_path: str
             author="resolver", occurred_at=now,
         )
     return {"receipt_path": str(path), "claim_id": claim["claim_id"], "superseded": handles}
+
+
+def file_handle_bind(root: Path, target: dict, bind: dict, *, story_path: str, model: str, now: str) -> dict:
+    """v325. One receipt with one ``relative_order`` claim whose anchor IS a node id.
+
+    The raw handle said "after grandpa's death" in the person's words and the fold
+    could not tell which node those words name — an anchor two nodes answer to
+    resolves to neither, by design. The bind re-files the SAME relation with the
+    node the model pointed at as its anchor (`_anchor_index` seeds every node id
+    as its own key, so the edge resolves without a word match), and retires the
+    raw handle beside it with a supersession correction — durable, cited on the
+    story that answered it, and correctable exactly like a date. The fold then
+    places the moment through the ordinary edge, and the `missing_anchor` work
+    item that asked whose event it was goes away because nothing is missing.
+    """
+    import event_identity as ei  # noqa: PLC0415
+
+    relation = bind["relation"] if bind["relation"] in tc.CONSTRAINT_RELATIONS else "after"
+    revision = _digest({"node": target["node_id"], "handle": bind["handle"], "bound": bind["node_id"],
+                        "model": model, "telling": target.get("telling_ref") or ""})
+    source_ref = {"source_id": f"{SOURCE_ID_PREFIX}{target['node_id'].split(':')[-1]}",
+                  "revision": revision, "source_path": story_path}
+    claim = tc.validate_temporal_claim({
+        "source_ref": source_ref, "source_kind": "system_derived", "claim_type": "relative_order",
+        "subject_mention": target["subject"], "event_kind": target["event_kind"],
+        "event_ref": target.get("event_ref") or target["node_id"],
+        "event_mention": target["label"][:tc.MAX_EVENT_MENTION_CHARS],
+        "temporal_value": {"relation": relation, "anchors": [bind["node_id"]]},
+        "evidence": [{"quote": tc.bounded_quote(f"{bind['handle']} names {bind['label'] or bind['node_id']}")}],
+        "basis": "inferred", "confidence": 0.7, "extractor_version": EXTRACTOR_VERSION,
+    }, now=now)
+    extractor = {"name": "resolver", "rule_version": EXTRACTOR_VERSION.rsplit(":", 1)[-1], "model": model,
+                 "deterministic": False, "basis": "handle_bind", "fact_key": "handle_bind"}
+    if target.get("telling_ref"):
+        extractor = ei.declare_tellings(
+            extractor, telling_keys={claim["claim_id"]: target["telling_ref"]},
+            document_revision=target.get("document_revision"),
+        )
+    path = store.write_receipt(root, {
+        "source_ref": source_ref, "extractor_version": EXTRACTOR_VERSION,
+        "extractor": extractor, "claims": [claim],
+    }, now=now)
+    superseded = [bind["claim_id"]] if bind.get("claim_id") else []
+    if superseded:
+        store.supersede_claims(
+            root, superseded,
+            reason=(f"Handle '{bind['handle']}' bound by {EXTRACTOR_VERSION} to {bind['node_id']}"
+                    f" ({bind['label'] or 'unlabelled'})"),
+            scope=SUPERSEDE_SCOPE, title="Handle bound to a moment",
+            author="resolver", occurred_at=now,
+        )
+    return {"receipt_path": str(path), "claim_id": claim["claim_id"], "superseded": superseded,
+            "handle": bind["handle"], "node_id": bind["node_id"]}
 
 
 def file_not_an_event(root: Path, target: dict, verdict: dict, *, now: str) -> dict:
@@ -1072,22 +1307,169 @@ class _Read:
     against.
     """
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, triggers=None) -> None:
         import temporal_publication as pub  # noqa: PLC0415
 
         self.root = root
         self.projection = pub.read_projection(root) or {}
+        self.work_items = pub.read_work_items(root) or {}
+        self.known_nodes = {collapsed_text(n.get("node_id")): n
+                            for n in (self.projection.get("nodes") or ()) if isinstance(n, dict)}
         self.index = store.fold_active_index(root)
         self.ledger = load_ledger(root)
         self.spine = spine(root, self.projection)
         self.fts = Index(story_documents(root) + fact_documents(root, self.projection))
         self.targets = targets(root, self.projection, self.index)
         self.prior = prior_resolver_claims(self.index)
+        # v325. Placed moments the RESOLVER dated to a wide range are kept
+        # reachable, so a story that carries the exact date can sharpen them.
+        wide = frozenset(node_id for node_id, row in (self.ledger.get("nodes") or {}).items()
+                         if _wide_resolution(row))
+        if wide:
+            for source_path, rows in targets(root, self.projection, self.index, include_placed=wide).items():
+                have = {t["node_id"] for t in self.targets.get(source_path, [])}
+                extra = [t for t in rows if t["node_id"] in wide and t["node_id"] not in have]
+                if extra:
+                    self.targets.setdefault(source_path, []).extend(extra)
         self.by_node = {t["node_id"]: (s, t) for s, rows in self.targets.items() for t in rows}
         self.spine_digest = _digest(self.spine)
+        # v325. The stories that were just filed, and the settled-unknown moments
+        # elsewhere they may bear on. Empty when nothing was named.
+        self.triggers = {collapsed_text(t) for t in (triggers or ()) if collapsed_text(t)}
+        self.revisit = revisit_targets(self)
 
     def row(self, node_id: str) -> dict:
         return (self.ledger.get("nodes") or {}).get(node_id) or {}
+
+    def include_paths(self, rows: list[dict]) -> list[str]:
+        """The triggering stories whose passages these rows' prompt must carry."""
+        return sorted({self.revisit[t["node_id"]]["trigger"] for t in rows if t["node_id"] in self.revisit})
+
+    def open_rows_for(self, source_path: str) -> list[dict]:
+        """The open questions a TRIGGERING story's own prompt lists (v325)."""
+        if source_path not in self.triggers:
+            return []
+        out: list[dict] = []
+        for node_id, info in self.revisit.items():
+            if info["trigger"] != source_path or node_id not in self.by_node:
+                continue
+            other_source, target = self.by_node[node_id]
+            out.append({"node_id": node_id, "label": target["label"], "source_path": other_source,
+                        "question": collapsed_text(self.row(node_id).get("question")),
+                        "handles": target["handles"]})
+        return out
+
+
+def _approx_years(text: object) -> float | None:
+    """``YYYY[-MM[-DD]]`` → a fractional year, for comparing widths only."""
+    parts = collapsed_text(text).split("-")
+    try:
+        year = int(parts[0]); month = int(parts[1]) if len(parts) > 1 else 1; day = int(parts[2]) if len(parts) > 2 else 1
+    except (ValueError, IndexError):
+        return None
+    return year + (month - 1) / 12 + (day - 1) / 365.25
+
+
+def _width_years(answer: object) -> float | None:
+    row = answer if isinstance(answer, dict) else {}
+    a, b = _approx_years(row.get("earliest")), _approx_years(row.get("latest"))
+    return None if a is None or b is None else b - a
+
+
+def _wide_resolution(row: dict) -> bool:
+    """A reading the resolver filed whose range spans REFINE_MIN_YEARS or more."""
+    if collapsed_text(row.get("status")) != "resolved":
+        return False
+    width = _width_years(row.get("answer"))
+    return width is not None and width >= REFINE_MIN_YEARS
+
+
+def _work_item_of_session(session_ref: object) -> str:
+    """``conversation:cand:work_item:work:<hex>`` → ``work:<hex>``, else ``""``."""
+    text = collapsed_text(session_ref)
+    if SESSION_WORK_ITEM_MARKER not in text:
+        return ""
+    return text.split(SESSION_WORK_ITEM_MARKER, 1)[1].strip()
+
+
+def revisit_targets(read: "_Read") -> dict[str, dict]:
+    """v325. ``node_id -> {"trigger", "why"}``: the settled unknowns a new story re-opens.
+
+    Before v325 an ``unknown`` in the ledger was terminal: the resolver planned
+    the story that was just filed and nothing else, so a fact that answered an
+    OLD question only helped if it happened to become a new dated event with the
+    same words. Three signals, computed on the fly from what the vault already
+    holds — never a stored graph that could go stale:
+
+    * **conversation** — the promoted message's own ``session_ref`` names the work
+      item the person was answering (the platform's ``cand:work_item:`` session).
+      Its node, or every moment whose unresolved handle IS that ``anchor:`` item,
+      is re-asked first, whatever the words.
+    * **retrieval** — a settled unknown whose own retrieval query now returns a
+      passage of the new story. The same index the prompt is built from, so a
+      moment is re-asked exactly when the new text would be in its passages.
+
+    A moment is re-asked ONCE per trigger (``revisited_by`` on the ledger row),
+    and at most :data:`MAX_REVISITS` are re-opened by retrieval per plan.
+    """
+    if not read.triggers:
+        return {}
+    import temporal_work_items as twi  # noqa: PLC0415
+
+    out: dict[str, dict] = {}
+
+    def add(node_id: str, trigger: str, why: str) -> None:
+        if node_id in out or node_id not in read.by_node:
+            return
+        if read.by_node[node_id][0] in read.triggers:
+            return  # the story's own moments are planned anyway
+        row = read.row(node_id)
+        if trigger in (row.get("revisited_by") or ()) or trigger in (row.get("refine_attempted_by") or ()):
+            return  # asked once with this story already
+        out[node_id] = {"trigger": trigger, "why": why}
+
+    items = [row for row in (read.work_items.get("work_items") or ()) if isinstance(row, dict)]
+    aliases = read.work_items.get("work_item_aliases") if isinstance(read.work_items.get("work_item_aliases"), dict) else {}
+    for trigger in sorted(read.triggers):
+        path = read.root / trigger
+        if not path.is_file():
+            continue
+        meta, _body = split_frontmatter(_read(path))
+        wanted = _work_item_of_session(meta.get("session_ref"))
+        if not wanted:
+            continue
+        wanted = collapsed_text(aliases.get(wanted, wanted))
+        for row in items:
+            wid = collapsed_text(row.get("work_item_id"))
+            if wid != wanted and collapsed_text(aliases.get(wid, wid)) != wanted:
+                continue
+            node_ref = collapsed_text(row.get("node_ref"))
+            if node_ref:
+                add(node_ref, trigger, "conversation")
+            subject = collapsed_text(row.get("subject_ref"))
+            if twi.is_anchor_handle_ref(subject):
+                for node_id, (_source, target) in read.by_node.items():
+                    if any(twi.anchor_handle_ref(a) == subject
+                           for h in target["handles"] for a in (h.get("anchors") or ())):
+                        add(node_id, trigger, "conversation")
+    by_retrieval = 0
+    for node_id, (source, target) in read.by_node.items():
+        if by_retrieval >= MAX_REVISITS:
+            break
+        if node_id in out or source in read.triggers:
+            continue
+        row = read.row(node_id)
+        status = collapsed_text(row.get("status"))
+        refine = _wide_resolution(row)
+        if status not in ("unknown", "unverified") and not refine:
+            continue
+        for doc in read.fts.search(_query(target), exclude_path=source):
+            if doc.get("path") in read.triggers:
+                before = len(out)
+                add(node_id, doc["path"], "refine" if refine else "retrieval")
+                by_retrieval += len(out) - before
+                break
+    return out
 
 
 def _attempts(row: dict) -> int:
@@ -1097,12 +1479,21 @@ def _attempts(row: dict) -> int:
         return 0
 
 
-def _still_asking(row: dict, *, retry_failed: bool, force: bool) -> bool:
-    """Is this moment still a question? Once answered, never asked again."""
+def _still_asking(row: dict, *, retry_failed: bool, force: bool, revisit: bool = False,
+                  estimate_missing: bool = False) -> bool:
+    """Is this moment still a question? Once answered, never asked again —
+    except (v325) when a new story bears on it, which re-opens an ``unknown``
+    (or a wide resolver-dated reading, to sharpen it) once for that story; and
+    an ``unknown`` with no estimate yet is asked once more when a run is told
+    to fill estimates in (``--estimate-missing``, the one-time backfill)."""
     if force:
         return True
     status = collapsed_text(row.get("status"))
     if not status:
+        return True
+    if revisit and (status in ("unknown", "unverified") or _wide_resolution(row)):
+        return True
+    if estimate_missing and status in ("unknown", "unverified") and not isinstance(row.get("estimate"), dict):
         return True
     if status in ("resolved", "unknown", NOT_AN_EVENT_STATUS):
         # A moment judged not to be an event is as settled as a dated one:
@@ -1120,7 +1511,8 @@ def _still_asking(row: dict, *, retry_failed: bool, force: bool) -> bool:
 
 
 def _pending(read: _Read, *, only_sources=None, retry_failed: bool = False, force: bool = False,
-             restrict: bool = False) -> tuple[list[tuple[str, list[dict]]], list[tuple[str, dict, tuple]]]:
+             restrict: bool = False, estimate_missing: bool = False,
+             ) -> tuple[list[tuple[str, list[dict]]], list[tuple[str, dict, tuple]]]:
     """``([(source_path, rows)], [(source_path, target, (age, relation))])``.
 
     The second list is the moments a bare age handle already answers: they need
@@ -1130,11 +1522,15 @@ def _pending(read: _Read, *, only_sources=None, retry_failed: bool = False, forc
     pending: list[tuple[str, list[dict]]] = []
     deterministic: list[tuple[str, dict, tuple]] = []
     for source_path in sorted(read.targets):
-        if restrict and only_sources and source_path not in only_sources:
-            continue
         rows = []
         for target in read.targets[source_path]:
-            if not _still_asking(read.row(target["node_id"]), retry_failed=retry_failed, force=force):
+            revisit = target["node_id"] in read.revisit
+            # A restricted run keeps to the named stories — plus (v325) the
+            # moments elsewhere those stories re-open.
+            if restrict and only_sources and source_path not in only_sources and not revisit:
+                continue
+            if not _still_asking(read.row(target["node_id"]), retry_failed=retry_failed, force=force,
+                                 revisit=revisit, estimate_missing=estimate_missing):
                 continue
             aged = [(age_from_handle(a), h.get("relation"))
                     for h in target["handles"] for a in (h.get("anchors") or ())]
@@ -1160,6 +1556,9 @@ def _ordered(read: _Read, pending: list, only_sources) -> list:
     question its next purchase answers.
     """
     named = set(only_sources or ())
+    # v325: the stories whose moments the named story just re-opened come
+    # right after it, so a host buying one item per hop reaches them next.
+    reopened = {read.by_node[n][0] for n in read.revisit if n in read.by_node}
     oldest: dict[str, str] = {}
     for row in (read.ledger.get("nodes") or {}).values():
         source_path, at = collapsed_text(row.get("source_path")), collapsed_text(row.get("at"))
@@ -1170,8 +1569,10 @@ def _ordered(read: _Read, pending: list, only_sources) -> list:
         source_path, _rows = entry
         if source_path in named:
             return (0, "", source_path)
+        if source_path in reopened:
+            return (1, "", source_path)
         seen = oldest.get(source_path)
-        return (1, seen, source_path) if seen else (2, "", source_path)
+        return (2, seen, source_path) if seen else (3, "", source_path)
 
     return sorted(pending, key=rank)
 
@@ -1189,7 +1590,7 @@ def _groups(read: _Read, rows: list[dict], *, unanswered_only: bool) -> list[lis
 
 def plan_items(root: Path, *, limit: int = 1, only_sources=None, retry_failed: bool = False,
                force: bool = False, model: str = DEFAULT_MODEL, read: _Read | None = None,
-               restrict: bool = False, unanswered_only: bool = False) -> dict:
+               restrict: bool = False, unanswered_only: bool = False, estimate_missing: bool = False) -> dict:
     """Leg A. What is still unplaced, and the exact prompt that would place it.
 
     Read-only: nothing under the vault is touched — no ledger, no filing, no
@@ -1197,9 +1598,9 @@ def plan_items(root: Path, *, limit: int = 1, only_sources=None, retry_failed: b
     (that is the story the person just told); ``restrict=True`` makes it a
     filter instead, which is what the local run and the batch hook want.
     """
-    read = read or _Read(root)
+    read = read or _Read(root, triggers=only_sources)
     pending, deterministic = _pending(read, only_sources=only_sources, retry_failed=retry_failed,
-                                      force=force, restrict=restrict)
+                                      force=force, restrict=restrict, estimate_missing=estimate_missing)
     items: list[dict] = []
     cap = max(0, int(limit))
     for source_path, rows in _ordered(read, pending, only_sources):
@@ -1207,13 +1608,27 @@ def plan_items(root: Path, *, limit: int = 1, only_sources=None, retry_failed: b
             if len(items) >= cap:
                 break
             node_ids = [target["node_id"] for target in group]
-            passages = _retrieve(read.fts, group, source_path)
+            include_paths = read.include_paths(group)
+            passages = _retrieve(read.fts, group, source_path, include_paths=include_paths)
             items.append({
-                "key": _digest({"source": source_path, "nodes": node_ids, "model": model})[7:39],
+                # v325: the triggering stories are part of the purchase's identity —
+                # a re-ask with NEW passages is a new question, never the cached
+                # answer to the old one ("a rerun never buys twice" still holds
+                # for the same source, the same moments and the same evidence).
+                "key": _digest({"source": source_path, "nodes": node_ids, "model": model,
+                                **({"include": include_paths} if include_paths else {})})[7:39],
                 "source_path": source_path,
                 "node_ids": node_ids,
+                # v325, additive: the stories whose passages this prompt carries
+                # because they re-opened one of these moments, and whether this
+                # story is one that was just filed. Leg C reads both back so the
+                # passages a citation is verified against are the ones planned.
+                "include_paths": include_paths,
+                "trigger": source_path in read.triggers,
+                "revisits": sorted(n for n in node_ids if n in read.revisit),
                 "prompt": build_prompt(source_path=source_path, story=_story_text(root, source_path),
-                                       rows=group, sp=read.spine, passages=passages),
+                                       rows=group, sp=read.spine, passages=passages,
+                                       open_rows=read.open_rows_for(source_path)),
                 "identity": {
                     "source_sha256": _source_sha256(root, source_path),
                     "spine_digest": read.spine_digest,
@@ -1287,6 +1702,14 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
             continue
         entry = {"label": target["label"], "source_path": source_path, "model": model, "at": now,
                  "fact_key": collapsed_text(item.get("fact_key")) or None}
+        # v325: remember which stories re-opened this moment, so each does so once.
+        previous = read.row(node_id)
+        revisit = read.revisit.get(node_id)
+        revisited_by = sorted({*(previous.get("revisited_by") or ()), *([revisit["trigger"]] if revisit else [])})
+        if revisited_by:
+            entry["revisited_by"] = revisited_by
+        if revisit:
+            entry["revisit_why"] = revisit["why"]
         if spine_changed:
             # The frame moved after the prompt was built. The citations are
             # still verified against the text as it is now, so this is a note
@@ -1295,6 +1718,21 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
         resolved, why = verify(item, story=story, passages=passages, sp=read.spine,
                                story_path=source_path, target=target)
         verdict, _verdict_why = verify_not_an_event(item)
+        if previous.get("status") == "resolved":
+            # v325: a wide reading re-asked to sharpen it. Only a NARROWER
+            # verified answer replaces the one standing; anything else keeps
+            # it — a refine can never downgrade a placed moment to a question.
+            standing = _width_years(previous.get("answer"))
+            sharper = resolved is not None and standing is not None and \
+                (_width_years(resolved["record"]) or 0.0) < standing
+            if not sharper:
+                kept = dict(previous)
+                kept["refine_attempted_by"] = sorted({*(previous.get("refine_attempted_by") or ()),
+                                                      *([revisit["trigger"]] if revisit else [])})
+                read.ledger["nodes"][node_id] = kept
+                report["outcomes"]["kept_resolved"] += 1
+                continue
+            entry["refined_from"] = previous.get("answer")
         if resolved is not None:
             entry.update({"answer": resolved["record"], "basis": resolved["basis"],
                           "confidence": resolved["confidence"], "citations": resolved["citations"],
@@ -1330,6 +1768,38 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
         else:
             entry.update({"status": "unverified", "why": why, "proposed": item.get("answer"),
                           "reason": collapsed_text(item.get("reason"))[:400]})
+        if entry["status"] in ("unknown", "unverified"):
+            # v325: what the model believes while the vault cannot tell. Kept
+            # beside the question, never filed; the page draws it as sky.
+            estimate, estimate_why = verify_estimate(item, sp=read.spine)
+            if estimate is None and entry["status"] == "unverified":
+                # The answer failed a mechanical check, so it files nothing —
+                # but it is still the model's reading of where this falls, and
+                # a dot drawn over it beats a dot drawn over the whole life.
+                estimate, estimate_why = verify_estimate(
+                    {"estimate": {**(item.get("answer") or {}), "confidence": 0.3,
+                                  "basis": [{"kind": "story", "text": (collapsed_text(item.get("reason"))
+                                                                        or "the resolver's own reading, not verified")[:MAX_ESTIMATE_TEXT]}]}},
+                    sp=read.spine)
+            if estimate is not None:
+                entry["estimate"] = estimate
+                report["estimates"] += 1
+            else:
+                entry["estimate_dropped"] = estimate_why
+        if resolved is None and verdict is None:
+            # v325: a handle this answer could point at a node. A dated answer
+            # already retired every handle; a verdict is retracting the moment.
+            binds = verify_handle_binds(item, target=target, known_nodes=read.known_nodes)
+            filed_binds: list[dict] = []
+            for bind in binds:
+                try:
+                    filed_binds.append(file_handle_bind(read.root, target, bind, story_path=source_path,
+                                                        model=model, now=now))
+                except Exception as exc:  # noqa: BLE001
+                    entry.setdefault("bind_errors", []).append(f"{type(exc).__name__}: {str(exc)[:160]}")
+            if filed_binds:
+                entry["handle_binds"] = filed_binds
+                report["bound"] += len(filed_binds)
         report["outcomes"][entry["status"]] += 1
         read.ledger["nodes"][node_id] = entry
 
@@ -1389,8 +1859,9 @@ def file_envelope(root: Path, envelope: object, *, now: str, model: str | None =
     if not isinstance(envelope, dict) or not isinstance(envelope.get("items"), list):
         raise ValueError("an envelope is an object with an `items` list")
     model = collapsed_text(model) or collapsed_text(envelope.get("model")) or DEFAULT_MODEL
-    read = read or _Read(root)
-    report: dict = {"filed": 0, "retracted": 0, "outcomes": collections.Counter(),
+    read = read or _Read(root, triggers=set(only_sources or ()) or _triggers_of(envelope))
+    report: dict = {"filed": 0, "retracted": 0, "bound": 0, "estimates": 0,
+                    "outcomes": collections.Counter(),
                     "bases": collections.Counter(), "usage": collections.Counter(),
                     "refused_items": []}
     if deterministic:
@@ -1423,12 +1894,16 @@ def file_envelope(root: Path, envelope: object, *, now: str, model: str | None =
                             spine_changed=spine_changed)
                 report["outcomes"]["no_answer_returned"] += 1
             continue
+        include = [collapsed_text(p) for p in (raw.get("include_paths") or ()) if collapsed_text(p)]
         _absorb(read, report, rows, text=text, story=_story_text(root, source_path),
-                passages={d["doc_id"]: d for d in _retrieve(read.fts, rows, source_path)},
+                passages={d["doc_id"]: d for d in _retrieve(read.fts, rows, source_path, include_paths=include)},
                 source_path=source_path, model=model, now=now, spine_changed=spine_changed)
     if finalize:
         save_ledger(root, read.ledger)
-        if report["filed"] or report["retracted"]:
+        if report["filed"] or report["retracted"] or report["bound"] or report["estimates"]:
+            # A bind moves the vault as a filing does (an edge the fold can now
+            # follow); an estimate moves the page (a dot that now floats where
+            # it probably belongs). Both republish.
             # A retraction moves the vault exactly as a filing does — it is
             # how a retired non-event leaves the page — so it republishes.
             _republish(root)
@@ -1443,8 +1918,50 @@ def file_envelope(root: Path, envelope: object, *, now: str, model: str | None =
     return report
 
 
+def _triggers_of(envelope: object) -> set[str]:
+    """v325. The stories an envelope was planned FROM: its own trigger items and
+    every story a re-opened item carries passages of. Leg C reads them back so
+    the filing knows which moments were revisits without a second argument."""
+    out: set[str] = set()
+    items = envelope.get("items") if isinstance(envelope, dict) else None
+    for raw in items or ():
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("trigger") and collapsed_text(raw.get("source_path")):
+            out.add(collapsed_text(raw.get("source_path")))
+        for path in raw.get("include_paths") or ():
+            if collapsed_text(path):
+                out.add(collapsed_text(path))
+    return out
+
+
+def adopt_proposals_as_estimates(read: "_Read", *, sp: dict) -> int:
+    """v325. Every ``unverified`` ledger row whose refused proposal parses becomes
+    that row's estimate, with no model call: the answer failed a mechanical
+    check and files nothing, but it is still the model's reading of where the
+    moment falls, and a dot over it beats a dot over the whole life. Returns
+    how many rows gained an estimate; the caller saves the ledger."""
+    adopted = 0
+    for row in (read.ledger.get("nodes") or {}).values():
+        if not isinstance(row, dict) or row.get("status") != "unverified" or isinstance(row.get("estimate"), dict):
+            continue
+        proposed = row.get("proposed")
+        if not isinstance(proposed, dict):
+            continue
+        estimate, _why = verify_estimate({"estimate": {
+            **proposed, "confidence": 0.3,
+            "basis": [{"kind": "story", "text": (collapsed_text(row.get("reason"))
+                                                 or "the resolver's own reading, not verified")[:MAX_ESTIMATE_TEXT]}]}}, sp=sp)
+        if estimate is not None:
+            row["estimate"] = estimate
+            row.pop("estimate_dropped", None)
+            adopted += 1
+    return adopted
+
+
 def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurrency: int,
-                  only_sources: set[str] | None, force: bool, now: str, retry_failed: bool = False) -> dict:
+                  only_sources: set[str] | None, force: bool, now: str, retry_failed: bool = False,
+                  estimate_missing: bool = False) -> dict:
     """The local run: the two legs composed in one process, with the cache between.
 
     Round 1 plans one item per pending story and buys it; round 2 re-asks, in
@@ -1452,15 +1969,17 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
     and both are filed through `file_envelope`, so a host that runs the legs
     separately gets exactly what the local run gets.
     """
-    read = _Read(root)
+    read = _Read(root, triggers=only_sources)
+    adopted = adopt_proposals_as_estimates(read, sp=read.spine) if estimate_missing else 0
     plan = plan_items(root, limit=max(1, limit), only_sources=only_sources, retry_failed=retry_failed,
-                      force=force, model=model, read=read, restrict=True)
+                      force=force, model=model, read=read, restrict=True, estimate_missing=estimate_missing)
     report: dict = {"model": model, "execute": execute, "sources_with_targets": len(read.targets),
                     "sources_pending": plan["pending_sources"], "events_pending": plan["pending_events"],
                     "deterministic_age_handles": plan["deterministic_pending"],
+                    "revisits": len(read.revisit), "estimates_adopted": adopted,
                     "selected": min(limit, plan["pending_sources"]),
                     "outcomes": collections.Counter(), "usage": collections.Counter(),
-                    "filed": 0, "retracted": 0, "errors": 0,
+                    "filed": 0, "retracted": 0, "bound": 0, "estimates": 0, "errors": 0,
                     "bases": collections.Counter()}
 
     def flatten() -> dict:
@@ -1470,6 +1989,9 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
         return report
 
     if not execute:
+        if adopted:
+            save_ledger(root, read.ledger)
+            _republish(root)
         if plan["items"]:
             item = plan["items"][0]
             rows = [read.by_node[n][1] for n in item["node_ids"] if n in read.by_node]
@@ -1484,6 +2006,7 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
         """One purchase, durable before anything reads it; a rerun never buys twice."""
         key = item["key"]
         answered = {name: item[name] for name in ("key", "source_path", "node_ids", "identity")}
+        answered.update({name: item[name] for name in ("include_paths", "trigger") if name in item})
         cached = _json(_response_path(root, key), None)
         # A saved response is reused only when it is a usable answer: a cut-off
         # or unparseable one is bought again, in a smaller chunk.
@@ -1518,6 +2041,8 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
                             deterministic=deterministic, finalize=False)
         report["filed"] += sub["filed"]
         report["retracted"] += sub.get("retracted") or 0
+        report["bound"] += sub.get("bound") or 0
+        report["estimates"] += sub.get("estimates") or 0
         for name, value in sub["outcomes"].items():
             report["outcomes"][name] += value
         for name, value in sub["bases"].items():
@@ -1540,19 +2065,37 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
         if again["items"]:
             file_round(again, deterministic=False)
     save_ledger(root, read.ledger)
-    if report["filed"] or report["retracted"]:
+    if report["filed"] or report["retracted"] or report["bound"] or report["estimates"] or adopted:
         _republish(root)
     report["open_questions"] = open_questions(read.ledger)[:25]
     return flatten()
 
 
-def _retrieve(fts: Index, rows: list[dict], source_path: str) -> list[dict]:
+def _query(row: dict) -> str:
+    """One moment's retrieval query: its telling's words and its handles."""
+    event = row["event"]
+    query = " ".join(str(event.get(k) or "") for k in ("title", "description", "when_hint", "anchor"))
+    return query + " " + " ".join(a for h in row["handles"] for a in h.get("anchors") or [])
+
+
+def _retrieve(fts: Index, rows: list[dict], source_path: str, *, include_paths=()) -> list[dict]:
+    """The passages a prompt carries. v325: the stories in ``include_paths`` — the
+    ones that re-opened these moments — come FIRST and are never squeezed out
+    by the cap, matched passages where the query finds any, the opening
+    paragraphs otherwise, so the new evidence is in front of the model."""
     seen: dict[str, dict] = {}
+    for path in include_paths:
+        if not path or path == source_path:
+            continue
+        # The whole message, in its own order: a conversation turn is short,
+        # and the paragraph that carries the date is often the one no query
+        # term reaches ("Death • 3 Sources / 4 April 1996"). Capped so a long
+        # pasted document cannot take the prompt over.
+        whole = [d for d in fts.docs.values() if d.get("path") == path][:INCLUDE_PASSAGE_CAP]
+        for doc in whole:
+            seen.setdefault(doc["doc_id"], doc)
     for row in rows:
-        event = row["event"]
-        query = " ".join(str(event.get(k) or "") for k in ("title", "description", "when_hint", "anchor"))
-        query += " " + " ".join(a for h in row["handles"] for a in h.get("anchors") or [])
-        for doc in fts.search(query, exclude_path=source_path):
+        for doc in fts.search(_query(row), exclude_path=source_path):
             seen.setdefault(doc["doc_id"], doc)
         if len(seen) >= RETRIEVE_CAP:
             break
@@ -1640,6 +2183,8 @@ def main() -> int:
     parser.add_argument("--source", action="append", default=[])
     parser.add_argument("--force", action="store_true", help="re-resolve nodes already in the ledger")
     parser.add_argument("--retry-failed", action="store_true", help="re-verify unverified, unanswered and unfiled nodes (cached responses cost nothing)")
+    parser.add_argument("--estimate-missing", action="store_true",
+                        help="v325: also ask every settled unknown that has no estimate yet for one (one-time backfill)")
     parser.add_argument("--eval", type=Path, help="JSON list of {question, expected:{earliest,latest}, hint}")
     parser.add_argument("--refile", action="store_true", help="re-file ledger answers without a model call, then publish")
     # The two legs a host runs separately (ADR 0037). --plan reads and writes
@@ -1658,7 +2203,7 @@ def main() -> int:
         if args.out is None:
             parser.error("--plan writes a file: pass --out")
         plan = plan_items(root, limit=limit, only_sources=set(args.source) or None,
-                          retry_failed=args.retry_failed, model=model)
+                          retry_failed=args.retry_failed, model=model, estimate_missing=args.estimate_missing)
         try:
             written = write_plan(plan, args.out, vault_root=root)
         except (OSError, ValueError) as exc:
@@ -1689,7 +2234,7 @@ def main() -> int:
         return 0
     report = resolve_vault(root, model=model, execute=args.execute, limit=limit, concurrency=args.concurrency,
                            only_sources=set(args.source) or None, force=args.force, now=now,
-                           retry_failed=args.retry_failed)
+                           retry_failed=args.retry_failed, estimate_missing=args.estimate_missing)
     print(json.dumps(report, indent=1, ensure_ascii=False, default=str))
     return 0
 
