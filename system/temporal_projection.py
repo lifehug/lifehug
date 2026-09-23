@@ -125,10 +125,16 @@ OCCURRENCE_SUBJECT_SCOPES = ("owner", "other_person", "unresolved")
 #: landmark's first-met/married). ``lived_effect`` — it happened to somebody
 #: else and the owner lived through it (a child's birth, a loss). Both put the
 #: row on the axis. ``contextual_only`` — a stated relationship exists and this
-#: particular occurrence is not owner-relevant (a relative's unrelated event,
-#: pre-birth family history); the row renders under "Not placed yet · about
-#: someone else" and gets no membership. ``none`` — no relationship is stated
-#: at all. ``unresolved`` — identity has not landed yet.
+#: particular occurrence is not owner-relevant by the EVIDENCE rules (a
+#: relative's unrelated event, pre-birth family history). ``none`` — no
+#: relationship is stated at all. ``unresolved`` — identity has not landed yet.
+#:
+#: Every value here is unchanged by the owner ruling of 2026-09-23, and what one
+#: of them IMPLIES about the axis no longer lives here. Until v334 a
+#: `contextual_only` row rendered under "Not placed yet · about someone else"
+#: and got no membership; that surface is retired and the answer is the published
+#: :data:`AXIS_MEMBERSHIPS` pair below, which a host reads instead of inferring
+#: one from this field.
 OWNER_TIMELINE_RELATIONS = (
     "participated",
     "lived_effect",
@@ -140,6 +146,49 @@ OWNER_TIMELINE_RELATIONS = (
 #: The relations that put a row ON the owner's axis, spelled once so the fold
 #: and the legacy pass cannot answer "is this on the timeline?" two ways.
 AXIS_RELATIONS = ("participated", "lived_effect")
+
+#: WHETHER a node is drawn on the owner's axis, and WHY (owner ruling
+#: 2026-09-23, ADR 0030 amendment; the rule itself is `axis_membership.py`).
+#:
+#: Derived at fold time from the roster relationship, the owner's birth and the
+#: node's own date — never from a model's judgement about who was present — and
+#: PUBLISHED, so a host reads the answer instead of inferring a surface from
+#: ``contextual_only``. That inference is what the amendment retires: as a
+#: Timeline surface the "About someone else" group is gone, and a `family` row
+#: is drawn on the axis as a moment about that person.
+#:
+#: ``owner`` — he lived it (his own occurrence, or any :data:`AXIS_RELATIONS`
+#: relation). ``family`` — an immediate family member's own event during his
+#: lifetime; drawn on his axis, marked as being about them. ``none`` — not on
+#: his axis at all; it stays in the substrate and on that person's page.
+AXIS_MEMBERSHIP_OWNER = "owner"
+AXIS_MEMBERSHIP_FAMILY = "family"
+AXIS_MEMBERSHIP_NONE = "none"
+AXIS_MEMBERSHIPS = (
+    AXIS_MEMBERSHIP_OWNER,
+    AXIS_MEMBERSHIP_FAMILY,
+    AXIS_MEMBERSHIP_NONE,
+)
+
+#: WHY the membership above is what it is — the ruling's four clauses, plus the
+#: one honest fifth for a subject nobody has identified yet. ``lived`` is rule
+#: 1, ``immediate_family_in_lifetime`` rule 2, ``not_family`` rule 3,
+#: ``pre_birth`` rule 4 (which is v324's own pre-birth rule under a name), and
+#: ``subject_unresolved`` says no tier could be read because identity has not
+#: landed — not a decision against the node, and the identity question stays
+#: open.
+AXIS_REASON_LIVED = "lived"
+AXIS_REASON_IMMEDIATE_FAMILY = "immediate_family_in_lifetime"
+AXIS_REASON_PRE_BIRTH = "pre_birth"
+AXIS_REASON_NOT_FAMILY = "not_family"
+AXIS_REASON_SUBJECT_UNRESOLVED = "subject_unresolved"
+AXIS_MEMBERSHIP_REASONS = (
+    AXIS_REASON_LIVED,
+    AXIS_REASON_IMMEDIATE_FAMILY,
+    AXIS_REASON_PRE_BIRTH,
+    AXIS_REASON_NOT_FAMILY,
+    AXIS_REASON_SUBJECT_UNRESOLVED,
+)
 
 #: The evidence ref a FRAME membership cites. A frame membership is arithmetic
 #: over the member's own dates and the birth origin — there is no receipt to
@@ -400,6 +449,9 @@ ERROR_CODES = (
     "unknown_life_view",
     "unknown_occurrence_subject_scope",
     "unknown_owner_timeline_relation",
+    "unknown_axis_membership",
+    "unknown_axis_membership_reason",
+    "incomplete_axis_membership",
     # Schema v3 (E-L2d): a lane row that names no row group, or a lane
     # outside the three §9.2 declares.
     "lane_needs_group",
@@ -655,6 +707,17 @@ class CalculatedTimelineNode:
     occurrence_subject_scope: str | None = None
     owner_timeline_relation: str | None = None
     relation_evidence_refs: tuple[str, ...] = ()
+    #: additive, DERIVED (owner ruling 2026-09-23, ADR 0030 amendment). Whether
+    #: this node is drawn on the owner's axis and why — see
+    #: :data:`AXIS_MEMBERSHIPS` / :data:`AXIS_MEMBERSHIP_REASONS`. A pure
+    #: function of the roster relationship, the owner's birth, this node's date
+    #: and the relation above (`axis_membership.axis_membership`), so a reader
+    #: that has all four can recompute it and one that has not can read it.
+    #: Absent on every projection written before the amendment, and absent
+    #: means "derive it yourself, or fall back to the old axis test"
+    #: (`axis_membership.on_owner_axis` does exactly that).
+    axis_membership: str | None = None
+    axis_membership_reason: str | None = None
     #: v2, additive (eras design §2.2, §2.4). A named era's COVERAGE of its
     #: explicit members. It is never a bound: it does not enter
     #: ``best_temporal_value``, ``definition_span`` or
@@ -720,6 +783,8 @@ class CalculatedTimelineNode:
             ("timeline_resolution_status", self.timeline_resolution_status),
             ("occurrence_subject_scope", self.occurrence_subject_scope),
             ("owner_timeline_relation", self.owner_timeline_relation),
+            ("axis_membership", self.axis_membership),
+            ("axis_membership_reason", self.axis_membership_reason),
             ("observed_envelope", self.observed_envelope),
         ):
             if value is not None:
@@ -864,6 +929,25 @@ def validate_calculated_timeline_node(value: object) -> dict:
             "unknown_owner_timeline_relation",
             f"unknown owner_timeline_relation: {relation!r}",
         )
+    membership = collapsed_text(value.get("axis_membership"))
+    if membership and membership not in AXIS_MEMBERSHIPS:
+        raise TimelineNodeError(
+            "unknown_axis_membership", f"unknown axis_membership: {membership!r}"
+        )
+    membership_reason = collapsed_text(value.get("axis_membership_reason"))
+    if membership_reason and membership_reason not in AXIS_MEMBERSHIP_REASONS:
+        raise TimelineNodeError(
+            "unknown_axis_membership_reason",
+            f"unknown axis_membership_reason: {membership_reason!r}",
+        )
+    # Neither half is a fact on its own: "on the axis" with no reason, or a
+    # reason with nothing it explains, would be a pair a reader has to guess at.
+    if bool(membership) != bool(membership_reason):
+        raise TimelineNodeError(
+            "incomplete_axis_membership",
+            "axis_membership and axis_membership_reason are published together "
+            f"or not at all (got {membership!r} / {membership_reason!r})",
+        )
     envelope = _normalized_node_value(value.get("observed_envelope"))
     span = value.get("definition_span")
     definition_span = None
@@ -912,6 +996,10 @@ def validate_calculated_timeline_node(value: object) -> dict:
         normalized["occurrence_subject_scope"] = scope
     if relation:
         normalized["owner_timeline_relation"] = relation
+    if membership:
+        normalized["axis_membership"] = membership
+    if membership_reason:
+        normalized["axis_membership_reason"] = membership_reason
     if envelope is not None:
         normalized["observed_envelope"] = envelope
     episode_id = collapsed_text(value.get("episode_id"))
@@ -1022,6 +1110,8 @@ def node_from_dict(value: object) -> CalculatedTimelineNode | None:
         temporal_state=normalized.get("temporal_state"),
         timeline_resolution_status=normalized.get("timeline_resolution_status"),
         occurrence_subject_scope=normalized.get("occurrence_subject_scope"),
+        axis_membership=normalized.get("axis_membership"),
+        axis_membership_reason=normalized.get("axis_membership_reason"),
         owner_timeline_relation=normalized.get("owner_timeline_relation"),
         relation_evidence_refs=tuple(normalized.get("relation_evidence_refs") or ()),
         observed_envelope=normalized.get("observed_envelope"),
@@ -1637,6 +1727,16 @@ def surfaces_conflict(items: object) -> tuple[str, ...]:
 __all__ = [
     "AGE_FRAME_EVENT_KIND",
     "NAMED_ERA_EVENT_KIND",
+    "AXIS_MEMBERSHIPS",
+    "AXIS_MEMBERSHIP_FAMILY",
+    "AXIS_MEMBERSHIP_NONE",
+    "AXIS_MEMBERSHIP_OWNER",
+    "AXIS_MEMBERSHIP_REASONS",
+    "AXIS_REASON_IMMEDIATE_FAMILY",
+    "AXIS_REASON_LIVED",
+    "AXIS_REASON_NOT_FAMILY",
+    "AXIS_REASON_PRE_BIRTH",
+    "AXIS_REASON_SUBJECT_UNRESOLVED",
     "AXIS_RELATIONS",
     "CONFLICT_STATES",
     "FRAME_MEMBERSHIP_RULE",

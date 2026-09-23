@@ -128,12 +128,24 @@ Two different kinds of period, kept as two different facts (ADR 0030,
   two eras share binds nothing and mints `identity_uncertain` rather than
   guessing. **Merged**, O-E3, lifehug#261, v239.
 - **Occurrence subject scope / owner timeline relation** — who an event
-  happened to, and why it belongs on the owner's own axis
+  happened to, and why the EVIDENCE says it belongs on the owner's own axis
   (`participated`, `lived_effect`, `contextual_only`, …), each with its own
   evidence. A stated relationship never by itself pulls a relative's
   unrelated history onto the axis, and since `timeline-rules:9` a name the
   roster does not know is not the owner just because it is unknown.
   **Merged**, O-E2 + v324/`timeline-rules:9`.
+- **Axis membership** — whether a node is DRAWN on the owner's axis and why:
+  `owner` (he lived it) | `family` (an immediate family member's own event
+  during his lifetime, drawn as a moment about them) | `none` (anyone else's
+  own event, or family history from before he was born), with the reason
+  (`lived`, `immediate_family_in_lifetime`, `pre_birth`, `not_family`,
+  `subject_unresolved`). Derived at fold time by one pure rule from the person
+  roster's `relationship` field and his birth date — never from a judgement
+  about who was present — and published, so a host reads the answer instead of
+  inferring a surface from `contextual_only`. It is what retired the "About
+  someone else" group. **Merged**, owner ruling 2026-09-23, v334 /
+  `timeline-rules:10`, `system/axis_membership.py`,
+  `tests/test_axis_membership.py`.
 - **Correction role** — the difference between a correction saying a source
   got something wrong (`content`, which marks the classification stale) and
   one saying only when an accepted moment happened (`placement`, which must

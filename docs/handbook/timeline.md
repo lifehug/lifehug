@@ -395,13 +395,32 @@ calculating placement against a spine**:
   citations and — only when the vault cannot tell — the one question that
   would settle it. Bare age handles resolve from the age table without a
   model call.
-- **Whose moments it plans** (v324): the ones on the owner's axis —
+- **Whose moments it plans** (v324, unchanged by v334): the ones on the
+  owner's axis by the EVIDENCE test —
   `occurrence_subject_scope == "owner"`, or any relation in
   `temporal_projection.AXIS_RELATIONS`, which is how a grandparent's death
   told as *"when I was in 9th grade"* (`other_person` / `lived_effect`) is
   dated from the owner's own school spine. A `contextual_only` node — a
   relative's own milestone, family history from before the owner was born —
-  is never planned: nothing in this vault dates it. **The owner's age table
+  is never planned: nothing in this vault dates it. v334 draws more rows on the
+  axis than this test plans (see below) and deliberately did not widen the
+  resolver: a `family` row is drawn, not newly dated from his spine.
+- **Whose moments are DRAWN on the axis** (v334, owner ruling 2026-09-23):
+  every node publishes `axis_membership` (`owner` | `family` | `none`) and
+  `axis_membership_reason` (`lived` | `immediate_family_in_lifetime` |
+  `pre_birth` | `not_family` | `subject_unresolved`), derived at fold time by
+  one pure rule (`system/axis_membership.py`) from the person roster's
+  `relationship` field and the owner's birth date — never from a judgement
+  about who the words say was present. He lived it → his axis, whoever else it
+  is about. An immediate family member's own event during his lifetime
+  (spouse/partner, parents, siblings, grandparents, children, grandchildren) →
+  his axis, drawn as a moment about them. Anyone else's own event, and
+  anything before his birth → not on his axis; it stays in the substrate and on
+  that person's page, and it mints no owner-axis date question unless something
+  else is anchored to it. **The "About someone else" group is retired**: hosts
+  read the field rather than inferring a surface from `contextual_only`, which
+  keeps every value it had. ADR 0030's 2026-09-23 amendment has the ruling in
+  the owner's own terms. **The owner's age table
   is never applied to another person's age.** It answers how old the OWNER
   was, and an answer that reads somebody else's age off it is refused
   mechanically (`subject_age_not_owner`), in the model lane and in the

@@ -117,6 +117,7 @@ import landmark_projection as lp  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import timeline_evidence  # noqa: E402
 import temporal_projection as tp  # noqa: E402
+import axis_membership as axm  # noqa: E402
 import temporal_work_items as twi  # noqa: E402
 import timeline_gain as tg  # noqa: E402
 from temporal_claims import (  # noqa: E402
@@ -170,7 +171,17 @@ from temporal_claims import (  # noqa: E402
 #: the "about someone else" bucket change for claims nobody edited. The
 #: subject-less anchor handle moves with it: it is minted under `anchor:`
 #: instead of `unresolved:` and asks whose event it was.
-CALCULATION_RULE_VERSION = "timeline-rules:9"
+#: ``timeline-rules:10`` (owner ruling 2026-09-23): WHOSE MOMENTS RIDE THE
+#: OWNER'S AXIS. Every node gains the fold-derived ``axis_membership`` /
+#: ``axis_membership_reason`` pair (`axis_membership.py`, ADR 0030 amendment),
+#: and the axis test the MEMBERSHIPS are gated on becomes that pair rather than
+#: `AXIS_RELATIONS` alone — so an immediate family member's own event during the
+#: owner's lifetime now sits in his age frames as a moment about them, where
+#: `contextual_only` used to leave it with no membership at all. The same claims
+#: therefore calculate to a LARGER axis and to a retired "About someone else"
+#: group, for claims nobody edited, which is exactly what a rule-version bump is
+#: for.
+CALCULATION_RULE_VERSION = "timeline-rules:10"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -2944,6 +2955,66 @@ def _mention_names_another_person(group: dict) -> str | None:
     return None
 
 
+def _subject_appositions(group: dict) -> tuple[str, ...]:
+    """The relation-word APPOSITIONS that name THIS subject — "Grandpa James",
+    "my aunt Ruth" — as whole phrases, in claim order.
+
+    The same mechanism :func:`_mention_names_another_person` uses for its third
+    ground (`_RELATION_APPOSITION_RE`, keyed on the subject's own first token),
+    read for a different question: that one asks WHETHER the words name somebody
+    else, this one hands the words that say WHO they are to the tier rule. One
+    regex, two readers — a second apposition pattern would be the recurring
+    defect `THIRD_PARTY_RELATION_WORDS` was promoted to prevent.
+    """
+    mention = collapsed_text(group.get("subject"))
+    tokens = mention.split()
+    first = normalized_mention_key(tokens[0]) if tokens else ""
+    if not first:
+        return ()
+    found: list[str] = []
+    for claim in group.get("claims") or ():
+        text = collapsed_text(claim.get("event_mention"))
+        if not text:
+            continue
+        for match in _RELATION_APPOSITION_RE.finditer(text):
+            if normalized_mention_key(match.group(1)) != first:
+                continue
+            phrase = match.group(0)
+            if phrase not in found:
+                found.append(phrase)
+    return tuple(found)
+
+
+def _family_tier(group: dict, *, tier_index: dict) -> tuple[str, str]:
+    """``(tier, basis)`` — is this node's subject the owner's IMMEDIATE FAMILY?
+
+    The owner ruling's one input that is not arithmetic, and it is still not a
+    judgement: `axis_membership.subject_family_tier` reads the roster row's
+    stated ``relationship`` first, then the words of that row's own name, then
+    the words of the subject mention — and a mention that named nobody the
+    roster knows gets one more honest source, the relation word somebody put in
+    APPOSITION in front of this subject's name in a telling. Every one of them
+    is a lookup or a closed word list; none of them asks a model who was there.
+
+    Each of the group's ``subjects`` is tried, not only the primary one: a group
+    that merged two spellings of the same relative ("Mom", "person/mom") must
+    not read as family under one and as a stranger under the other, and
+    immediate family wins the disagreement — the owner's rule is a floor.
+    """
+    best = (axm.UNKNOWN_TIER, "none")
+    appositions = _subject_appositions(group)
+    subjects = [group.get("subject"), *(group.get("subjects") or ())]
+    for subject in subjects:
+        tier, basis = axm.subject_family_tier(
+            subject, tier_index=tier_index, mention_texts=appositions,
+        )
+        if tier == axm.IMMEDIATE_FAMILY_TIER:
+            return tier, basis
+        if tier != axm.UNKNOWN_TIER and best[0] == axm.UNKNOWN_TIER:
+            best = (tier, basis)
+    return best
+
+
 def _age_is_the_subjects_own(group: dict) -> bool:
     """Does a claim here state THIS subject's own age?
 
@@ -3173,10 +3244,18 @@ def _frame_memberships(nodes: list[dict], frames, *, on_axis: dict) -> list[dict
 
     Two gates, both of them refusals rather than guesses. A node with no
     ``best_temporal_value`` gets no membership (an undated moment is not
-    secretly in childhood), and a node whose ``owner_timeline_relation`` does
-    not put it on the axis gets none either — that is §2.5's *"Not placed yet ·
-    about someone else"* expressed as an absence rather than as a row somebody
-    has to notice is wrong.
+    secretly in childhood), and a node that is not DRAWN on the owner's axis
+    gets none either.
+
+    What "drawn on his axis" means moved with the owner ruling of 2026-09-23
+    (`axis_membership.on_owner_axis`, ``timeline-rules:10``). It used to be
+    `AXIS_RELATIONS` alone, so a `contextual_only` row had no membership — §2.5's
+    *"Not placed yet · about someone else"* expressed as an absence. It is now
+    the published ``axis_membership``: ``owner`` and ``family`` both get their
+    frames, because an immediate family member's own event during his lifetime is
+    drawn on his axis as a moment about them, and a row drawn in a frame needs to
+    be IN that frame. Only ``none`` — somebody else's own event, or family
+    history from before he was born — still gets nothing.
     """
     if not frames:
         return []
@@ -4364,11 +4443,30 @@ def derive_calculated_timeline(
     origin_best = (
         resolved_origin["best"] if resolved_origin is not None else owner_birth
     )
+    #: The tiers, read ONCE per fold off the person roster this publication was
+    #: handed (`temporal_publication.owner_identity_inputs`) — the same snapshot
+    #: `timeline-rules:8` reads the owner's own name out of, so "who is
+    #: immediate family" and "who is the owner" can never come from two vaults.
+    family_tiers = axm.family_tier_index(roster_snapshot)
     relevance = {
-        node_id: _owner_relevance(
-            groups[node_id], best=placed.get(node_id), entry_index=entry_index,
-            owner=owner, birth=origin_best,
-        )
+        node_id: {
+            **(row := _owner_relevance(
+                groups[node_id], best=placed.get(node_id), entry_index=entry_index,
+                owner=owner, birth=origin_best,
+            )),
+            # The owner ruling, 2026-09-23. One deterministic rule over the
+            # roster relationship, his birth and this node's date — never a
+            # judgement about who the words say was present — published on the
+            # node so no host has to infer an axis from `contextual_only`.
+            **axm.axis_membership(
+                occurrence_subject_scope=row["occurrence_subject_scope"],
+                owner_timeline_relation=row["owner_timeline_relation"],
+                family_tier=_family_tier(
+                    groups[node_id], tier_index=family_tiers,
+                )[0],
+                before_owner_birth=_before_birth(placed.get(node_id), origin_best),
+            ),
+        }
         for node_id in sorted(groups)
     }
 
@@ -4465,9 +4563,11 @@ def derive_calculated_timeline(
     # eras, and one display role decided over the union of both.
     mark = clock()
     node_index = {collapsed_text(row.get("node_id")): row for row in nodes}
+    # The owner ruling's one predicate (`axis_membership.on_owner_axis`), not a
+    # second reading of the relation: `owner` and `family` are drawn on his
+    # axis, `none` is not.
     on_axis = {
-        node_id: relevance[node_id]["owner_timeline_relation"] in tp.AXIS_RELATIONS
-        for node_id in relevance
+        node_id: axm.on_owner_axis(relevance[node_id]) for node_id in relevance
     }
     memberships = _frame_memberships(nodes, frames, on_axis=on_axis)
     memberships.extend(
@@ -4512,6 +4612,7 @@ def derive_calculated_timeline(
         ambiguity=ambiguity,
         residence_overlaps=overlaps,
         containment_conflicts=containment_conflicts,
+        axis_rows=relevance,
         owner=owner,
         now=now,
     )
@@ -4527,7 +4628,24 @@ def derive_calculated_timeline(
     mark = clock()
     import temporal_placement as placement  # noqa: PLC0415 - fold is now initialized
 
-    unplaced_ids = placement.unplaced_node_ids(nodes, cohort_ids=groups)
+    # THE UNPLACED COHORT IS THE OWNER'S OWN (owner ruling 2026-09-23). An
+    # undated node the ruling took off his axis — a friend's own event, family
+    # history from before he was born — is not an unplaced row of HIS timeline:
+    # nothing will ever offer it to him (see `off_owner_axis_by_ruling`), and
+    # counting it as debt makes the number describe work that does not exist. A
+    # node that still mints a leverage question re-enters `gain_universe` through
+    # that item's own `node_ref`, so nothing an answer WOULD place is lost.
+    owner_axis_cohort = [
+        node_id for node_id in groups
+        if not (
+            collapsed_text((relevance.get(node_id) or {}).get(
+                axm.AXIS_MEMBERSHIP_FIELD)) == tp.AXIS_MEMBERSHIP_NONE
+            and collapsed_text((relevance.get(node_id) or {}).get(
+                axm.AXIS_MEMBERSHIP_REASON_FIELD)) in (
+                    tp.AXIS_REASON_NOT_FAMILY, tp.AXIS_REASON_PRE_BIRTH)
+        )
+    ]
+    unplaced_ids = placement.unplaced_node_ids(nodes, cohort_ids=owner_axis_cohort)
     dependencies = tg.dependency_index(
         nodes=nodes,
         ordering=[(edge.subject, edge.anchors) for edge in edges],
@@ -4906,7 +5024,8 @@ def _dated_node_for(groups: dict, placed: dict, ref: str, event_kind: str) -> st
 def _derive_work_items(
     *, groups, calculated, placed, possibilities, edges, diagnostics, records, by_mention, displays,
     whats=None, owner_flags=None, place_flags=None, roster_snapshot=(),
-    ambiguity=None, residence_overlaps=None, containment_conflicts=None, owner, now
+    ambiguity=None, residence_overlaps=None, containment_conflicts=None,
+    axis_rows=None, owner, now
 ):
     """Everything the substrate currently implies a question about (§5.4, D2).
 
@@ -4934,6 +5053,26 @@ def _derive_work_items(
     ambiguity = ambiguity or {}
     containment_conflicts = containment_conflicts or {}
     residence_overlaps = residence_overlaps or {}
+    #: ``node_id -> {axis_membership, axis_membership_reason}`` — the owner
+    #: ruling's answer for each node, already computed by this fold. Absent for
+    #: a caller that does not hand it in, which reads as "ask about everything",
+    #: the behaviour before the ruling.
+    axis_rows = axis_rows or {}
+
+    def off_owner_axis_by_ruling(node_id: str) -> bool:
+        """Did the 2026-09-23 ruling take this node OFF the owner's axis?
+
+        True only for its two decided exclusions — rule 3 (``not_family``: a
+        friend's divorce, a colleague's move; it stays in the substrate and on
+        that person's page) and rule 4 (``pre_birth``: family history). A subject
+        nobody has identified is NOT one of them: ``subject_unresolved`` is an
+        open question, not a decision, and suppressing its date question would
+        be the ruling silently closing something it did not rule on.
+        """
+        row = axis_rows.get(node_id) or {}
+        return collapsed_text(row.get(axm.AXIS_MEMBERSHIP_FIELD)) == tp.AXIS_MEMBERSHIP_NONE \
+            and collapsed_text(row.get(axm.AXIS_MEMBERSHIP_REASON_FIELD)) in (
+                tp.AXIS_REASON_NOT_FAMILY, tp.AXIS_REASON_PRE_BIRTH)
 
     def sentence(item_kind, node_id, group, **extra):
         """This node's question through the ONE composer (D3)."""
@@ -5174,6 +5313,25 @@ def _derive_work_items(
         if collapsed_text(group["event_kind"]) in UNASKABLE_EVENT_KINDS:
             continue
         raw = node_reach.get(node_id, 0)
+        # The owner ruling, 2026-09-23. A row the ruling took off his axis mints
+        # no OWNER-AXIS question: asking "when was your friend's divorce?" on his
+        # Timeline is the surface the ruling retired, in question form. Its date
+        # may still be asked when LEVERAGE says so — when something else in the
+        # substrate is anchored to it, dating it places the owner's own rows, and
+        # that is a question about his life that happens to be phrased about
+        # theirs. The owner ruled there is no person-page question feature, so
+        # nothing else is minted in its place; the node keeps its claims, its
+        # evidence and its place on that person's page.
+        if not raw and off_owner_axis_by_ruling(node_id):
+            diagnostics.append({
+                "finding": "off_owner_axis_no_question",
+                "node_ids": [node_id],
+                "axis_membership_reason": collapsed_text(
+                    (axis_rows.get(node_id) or {}).get(
+                        axm.AXIS_MEMBERSHIP_REASON_FIELD)
+                ) or None,
+            })
+            continue
         target = _precision_target(group["event_kind"])
         intent = sentence(
             "precision_gap" if best is None else "precision_gap_coarse",
