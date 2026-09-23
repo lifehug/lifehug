@@ -292,6 +292,80 @@ class ContextTests(unittest.TestCase):
         self.assertNotIn("1985", years)
 
 
+class SubjectSentenceTests(unittest.TestCase):
+    """lifehug/lifehug#382 — parity with the platform's `work_item_walk.
+    render_card_aside`/`card_subject` (platform#903, the 2026-09-23 owner
+    incident): a card's `about:` line names its subject in one word, the
+    model discounted it, and a card about "Father's mission to New Zealand"
+    (subject James Edwin Taylor) read the owner's "19-21 years old" as the
+    OWNER's own age. `render_work_item` now says whose moment it is in a
+    sentence, exactly when the platform's own block does."""
+
+    def test_a_relatives_subject_renders_the_sentence(self):
+        body = ti.render_work_item(target(subject_ref="James Edwin Taylor"))
+        self.assertIn(
+            "This moment is about James Edwin Taylor, not about the person "
+            "you are talking with.",
+            body,
+        )
+        self.assertIn(
+            '"19" is how old James Edwin Taylor was, never how old they were.',
+            body,
+        )
+        self.assertIn("Confirm it as James Edwin Taylor's", body)
+        # It lands right after `about:`, ahead of the rest of the block.
+        lines = body.splitlines()
+        self.assertEqual(lines[1], "about: the move to Dayton")
+        self.assertTrue(lines[2].startswith("This moment is about James Edwin Taylor"))
+
+    def test_no_subject_ref_renders_no_sentence_and_is_byte_identical(self):
+        """The overwhelming majority of work items (a contradiction or a
+        precision gap on the owner's own life) never carry `subject_ref` at
+        all, and the block they render must not move by a byte."""
+        without_subject_field = {
+            k: v for k, v in target().items() if k != "subject_ref"
+        }
+        body = ti.render_work_item(without_subject_field)
+        self.assertNotIn("This moment is about", body)
+        self.assertEqual(
+            body,
+            "kind: contradiction\n"
+            "about: the move to Dayton\n"
+            "readings (all of them stand until you settle it):\n"
+            "  - 1984 [certain, stated] (source: msg-a)\n"
+            "  - 1986 [certain, stated] (source: msg-b)\n"
+            "their own words:\n"
+            '  - “We moved to Dayton the summer after Mom died.” (msg-a)\n'
+            '  - “I was seven when we landed in Dayton.” (msg-b)',
+        )
+
+    def test_self_renders_no_sentence(self):
+        body = ti.render_work_item(target(subject_ref="self"))
+        self.assertNotIn("This moment is about", body)
+
+    def test_a_bare_owner_pronoun_renders_no_sentence(self):
+        body = ti.render_work_item(target(subject_ref="you"))
+        self.assertNotIn("This moment is about", body)
+
+    def test_an_unresolved_handle_renders_no_sentence(self):
+        """`identity_resolution.is_unresolved_ref` — a mention the binder
+        could not place, e.g. "which of the four Jameses?". A handle nobody
+        has resolved is not a person to attribute an age to."""
+        ref = ident.unresolved_subject_ref("james")
+        self.assertTrue(ident.is_unresolved_ref(ref))
+        body = ti.render_work_item(target(subject_ref=ref))
+        self.assertNotIn("This moment is about", body)
+
+    def test_an_anchor_handle_renders_no_sentence(self):
+        """`temporal_work_items.is_anchor_handle_ref` — an EVENT nobody has
+        attributed yet ("the move to Orderville"), not a person nobody has
+        identified."""
+        ref = twi.anchor_handle_ref("move to Orderville")
+        self.assertTrue(twi.is_anchor_handle_ref(ref))
+        body = ti.render_work_item(target(subject_ref=ref))
+        self.assertNotIn("This moment is about", body)
+
+
 # --------------------------------------------------------------------------
 # The stage
 # --------------------------------------------------------------------------
