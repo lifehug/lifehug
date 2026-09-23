@@ -139,12 +139,33 @@ from temporal_projection import (
 #: that keeps the claim and hands the question to Mirror (§2.5).
 RESOLUTIONS = ("same", "different", "uncertain")
 
+#: A bare given name BINDS NOBODY when the roster holds more than one person
+#: who bears it. A roster may spell one person's whole entry with a single given
+#: name ("James", the entry a family landmark minted for the owner's brother)
+#: while three other people on the same roster — a son, a father, a grandfather
+#: — carry that same given name inside a longer name. The exact-key uniqueness
+#: gate reads the short entry as unique and binds *every* bare "James" to it,
+#: which is how one ref came to hold two people. The census that decides this is
+#: over name TOKENS, not over whole keys, so a name that several people answer
+#: to is ambiguous however few of them happen to spell it that way alone.
+SHARED_NAME_TOKEN_REASON = "shared_name_token"
+
+#: A given name plus a RELATIONSHIP WORD the roster corroborates: "my son
+#: James", "my brother James", "my father James". The relationship word is the
+#: distinguishing token that makes the shared given name answerable — it is
+#: matched against the roster's own ``relationship`` field, so the roster, not
+#: the sentence, is what decides. Still uniqueness-gated: two children named
+#: James would leave "my son James" uncertain, as it should.
+RELATIONSHIP_QUALIFIED_REASON = "relationship_qualified_name"
+
 #: Named deterministic rules, in ladder order. These are the values ``reason``
 #: may take when the resolver reached the verdict on its own.
 DETERMINISTIC_REASONS = (
     "exact_ref",
     "roster_alias",
     "unique_name",
+    RELATIONSHIP_QUALIFIED_REASON,
+    SHARED_NAME_TOKEN_REASON,
     "ambiguous_candidates",
     "no_candidate",
 )
@@ -189,7 +210,12 @@ RESOLUTION_REASONS = DETERMINISTIC_REASONS + (
 
 #: The reasons that mean "we did not decide". Both are ``uncertain``; they
 #: differ in whether anybody was in the running.
-UNCERTAIN_REASONS = ("ambiguous_candidates", "no_candidate", UNRESOLVED_REASON)
+UNCERTAIN_REASONS = (
+    "ambiguous_candidates",
+    "no_candidate",
+    SHARED_NAME_TOKEN_REASON,
+    UNRESOLVED_REASON,
+)
 
 #: How a candidate got into the running — the "score-basis" the record carries
 #: per candidate, so a human reading a Mirror row can see *why* each name is
@@ -255,6 +281,49 @@ UNRESOLVED_REF_PREFIX = "unresolved"
 #: ``entity_roster`` owns the roster's internals and this module is a reader.
 ROSTER_NAME_KEYS = ("name", "slug")
 ROSTER_ALIAS_KEY = "aliases"
+
+#: The roster field that says how this person stands to the owner. Written by
+#: the family landmark recorder and by roster curation; read here only to
+#: corroborate a relationship word the mention itself supplied.
+ROSTER_RELATIONSHIP_KEY = "relationship"
+
+#: Determiners and possessives a mention may wrap a name in. They carry no
+#: identity, so they are dropped before a mention's tokens are counted —
+#: "my son James" and "our son James" are the same three-token question.
+MENTION_QUALIFIER_WORDS = frozenset(
+    {"a", "an", "the", "my", "our", "his", "her", "their", "its", "of", "and"}
+)
+
+#: Relationship words a mention may carry, mapped to the roster
+#: ``relationship`` values that satisfy them. A word resolves nothing on its
+#: own; it only narrows the people a shared given name could mean.
+RELATIONSHIP_MENTION_WORDS = {
+    "son": frozenset({"child", "son"}),
+    "daughter": frozenset({"child", "daughter"}),
+    "child": frozenset({"child", "son", "daughter"}),
+    "kid": frozenset({"child", "son", "daughter"}),
+    "brother": frozenset({"sibling", "brother"}),
+    "sister": frozenset({"sibling", "sister"}),
+    "sibling": frozenset({"sibling", "brother", "sister"}),
+    "dad": frozenset({"parent", "father"}),
+    "father": frozenset({"parent", "father"}),
+    "mom": frozenset({"parent", "mother"}),
+    "mother": frozenset({"parent", "mother"}),
+    "parent": frozenset({"parent", "father", "mother"}),
+    "grandpa": frozenset({"grandparent", "grandfather"}),
+    "grandfather": frozenset({"grandparent", "grandfather"}),
+    "grandma": frozenset({"grandparent", "grandmother"}),
+    "grandmother": frozenset({"grandparent", "grandmother"}),
+    "grandparent": frozenset({"grandparent", "grandfather", "grandmother"}),
+    "wife": frozenset({"spouse", "wife", "partner"}),
+    "husband": frozenset({"spouse", "husband", "partner"}),
+    "spouse": frozenset({"spouse", "wife", "husband", "partner"}),
+    "uncle": frozenset({"uncle"}),
+    "aunt": frozenset({"aunt"}),
+    "cousin": frozenset({"cousin"}),
+    "nephew": frozenset({"nephew"}),
+    "niece": frozenset({"niece"}),
+}
 
 
 class IdentityResolutionError(TemporalContractError):
@@ -344,9 +413,36 @@ class RosterIndex:
     refs: dict = field(default_factory=dict)
     by_name_key: dict = field(default_factory=dict)
     by_alias_key: dict = field(default_factory=dict)
+    #: One name TOKEN -> every ref that bears it anywhere in a name, slug or
+    #: alias. This is the census :data:`SHARED_NAME_TOKEN_REASON` reads. It is
+    #: only ever used to DENY a binding, never to create one: a rule that let a
+    #: token reach into a longer name to bind it would be the containment
+    #: folding this module's docstring rejects.
+    by_name_token: dict = field(default_factory=dict)
+    #: One GIVEN name -> every ref that answers to it: the first word of each
+    #: name, slug and alias, plus any spelling that is that word entire. This —
+    #: not :attr:`by_name_token` — is the census the bare-name gate reads,
+    #: because a name buried inside somebody else's is not a name they answer
+    #: to. The owner whose whole spelling is "Pat Quincy Example" does not
+    #: answer to "Quincy", so a stranger named Quincy still resolves; three
+    #: Jameses whose names BEGIN with James all answer to "James", so that word
+    #: answers nobody. (The middle-name half is the same rule
+    #: ``temporal_publication.owner_names_from_profile`` already applies to the
+    #: owner's own name: whole spellings only.)
+    by_given_name: dict = field(default_factory=dict)
+    #: ref -> the roster's own ``relationship`` value, normalized.
+    relationship_of: dict = field(default_factory=dict)
 
     def size(self) -> int:
         return len(self.refs)
+
+    def refs_bearing(self, token: object) -> tuple[str, ...]:
+        """Every ref whose name, slug or alias contains this exact token."""
+        return self.by_name_token.get(normalized_mention_key(token), ())
+
+    def refs_named(self, token: object) -> tuple[str, ...]:
+        """Every ref that ANSWERS to this word — a given name, not a middle one."""
+        return self.by_given_name.get(normalized_mention_key(token), ())
 
     def name_of(self, ref: object) -> str:
         return self.refs.get(collapsed_text(ref), "")
@@ -380,6 +476,9 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
     refs: dict = {}
     by_name_key: dict = {}
     by_alias_key: dict = {}
+    by_name_token: dict = {}
+    by_given_name: dict = {}
+    relationship_of: dict = {}
     for entity in entities:
         if not isinstance(entity, dict):
             continue
@@ -390,9 +489,15 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
         ref = entity_ref(kind, slug or name)
         refs.setdefault(ref, name or slug)
 
+        relationship = normalized_mention_key(entity.get(ROSTER_RELATIONSHIP_KEY))
+        if relationship:
+            relationship_of.setdefault(ref, relationship)
+
+        keys: list[str] = []
         for key_field in ROSTER_NAME_KEYS:
             key = normalized_mention_key(entity.get(key_field))
             if key:
+                keys.append(key)
                 by_name_key.setdefault(key, []).append(ref)
         raw_aliases = entity.get(ROSTER_ALIAS_KEY) or ()
         if isinstance(raw_aliases, (str, bytes)):
@@ -400,13 +505,30 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
         for alias in raw_aliases:
             key = normalized_mention_key(alias)
             if key:
+                keys.append(key)
                 by_alias_key.setdefault(key, []).append(ref)
+
+        # The token census. Every word of every spelling this person answers to,
+        # counted per REF, so one person spelled five ways is still one person.
+        for key in keys:
+            words = [
+                token
+                for token in key.split()
+                if token not in MENTION_QUALIFIER_WORDS and len(token) >= 2
+            ]
+            for token in words:
+                by_name_token.setdefault(token, []).append(ref)
+            if words:
+                by_given_name.setdefault(words[0], []).append(ref)
 
     return RosterIndex(
         entity_type=kind,
         refs=refs,
         by_name_key={k: tuple(dict.fromkeys(v)) for k, v in by_name_key.items()},
         by_alias_key={k: tuple(dict.fromkeys(v)) for k, v in by_alias_key.items()},
+        by_name_token={k: tuple(dict.fromkeys(v)) for k, v in by_name_token.items()},
+        by_given_name={k: tuple(dict.fromkeys(v)) for k, v in by_given_name.items()},
+        relationship_of=relationship_of,
     )
 
 
@@ -713,6 +835,102 @@ def candidates_for(mention: object, roster: object, *, entity_type: object = Non
     return tuple(out)
 
 
+def mention_tokens(mention: object) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split a mention into ``(name_tokens, relationship_words)``.
+
+    Determiners and possessives are dropped (:data:`MENTION_QUALIFIER_WORDS`),
+    a word :data:`RELATIONSHIP_MENTION_WORDS` knows becomes a relationship word,
+    and everything else is a name token. Order is preserved and duplicates are
+    kept out, so ``"my son James"`` is ``(("james",), ("son",))`` and
+    ``"James Edwin Taylor Sr"`` is ``(("james", "edwin", "taylor", "sr"), ())``.
+
+    A word can only be one or the other, which is why "Dad" alone yields no name
+    token at all: it is a relationship word, and a mention that names no name
+    has nothing for the bare-given-name gate to be bare *about*. That mention
+    resolves — or does not — through the ordinary exact-key path, exactly as it
+    did before this rule existed.
+    """
+    names: list[str] = []
+    relations: list[str] = []
+    for token in normalized_mention_key(mention).split():
+        if token in MENTION_QUALIFIER_WORDS:
+            continue
+        if token in RELATIONSHIP_MENTION_WORDS:
+            if token not in relations:
+                relations.append(token)
+        elif token not in names:
+            names.append(token)
+    return tuple(names), tuple(relations)
+
+
+def shared_name_token_refs(
+    mention: object, roster: object, *, entity_type: object = None
+) -> tuple[str, ...]:
+    """The refs that make a BARE given name unanswerable, or ``()``.
+
+    A mention is bare when its meaningful words are exactly one name token and
+    no relationship word narrows it. Such a mention is unanswerable the moment
+    two or more roster people ANSWER to that token — the son *James* Everett
+    Taylor, the brother whose roster entry is spelled only ``James``, the father
+    *James* Edwin Taylor, the grandfather *James* Edwin Taylor Sr. Answering is
+    :attr:`RosterIndex.by_given_name`, so a word that merely sits inside somebody
+    else's name does not count: a person named Quincy still resolves next to an
+    owner spelled "Pat Quincy Example". Returned in roster order so the candidate
+    set, and therefore the Mirror row's wording, is deterministic.
+
+    Empty when the mention is not bare, or when at most one person bears the
+    token — a vault with one Della still resolves "Della" on sight.
+    """
+    names, relations = mention_tokens(mention)
+    if relations or len(names) != 1:
+        return ()
+    index = roster_index(roster, entity_type=entity_type)
+    bearers = index.refs_named(names[0])
+    return bearers if len(bearers) > 1 else ()
+
+
+def relationship_qualified_candidates(
+    mention: object, roster: object, *, entity_type: object = None
+) -> tuple[dict, ...]:
+    """Candidates for a mention whose relationship word the ROSTER corroborates.
+
+    ``"my son James"`` names a given name several people share plus one word
+    that only one of them satisfies. The narrowing is done by the roster's own
+    ``relationship`` field, never by the sentence: a person whose roster entry
+    says nothing about how they stand to the owner is never pulled in by a
+    relationship word, and every name token in the mention must be borne by the
+    candidate, so ``"my son James Everett"`` is at least as narrow as
+    ``"my son James"`` and never wider.
+
+    This rung is consulted only when no exact key matched, so it can never
+    override a curated alias or a full name — and it is uniqueness-gated by
+    :func:`resolve_mention` like every other rung, so two sons named James leave
+    the mention uncertain rather than picking one.
+    """
+    names, relations = mention_tokens(mention)
+    if not names or not relations:
+        return ()
+    index = roster_index(roster, entity_type=entity_type)
+    wanted: set[str] = set()
+    for word in relations:
+        wanted |= RELATIONSHIP_MENTION_WORDS.get(word, frozenset())
+    if not wanted:
+        return ()
+
+    bearers = [set(index.refs_bearing(token)) for token in names]
+    shared = set.intersection(*bearers) if bearers else set()
+    out: list[dict] = []
+    for ref in index.refs:
+        if ref not in shared:
+            continue
+        if index.relationship_of.get(ref, "") not in wanted:
+            continue
+        out.append(
+            RosterCandidate(ref=ref, name=index.name_of(ref), basis="name").to_dict()
+        )
+    return tuple(out)
+
+
 def resolve_mention(
     mention: object,
     *,
@@ -741,6 +959,29 @@ def resolve_mention(
 
     if len(matches) == 1:
         only = matches[0]
+        # An already-resolved ref is idempotent and answers to nothing else, so
+        # the bare-name census does not apply to it. For a name or alias match,
+        # the census is the gate: one exact key is not uniqueness when the vault
+        # holds several people who answer to that word.
+        if only["basis"] != "exact_ref":
+            shared = shared_name_token_refs(mention, roster, entity_type=entity_type)
+            if shared:
+                index = roster_index(roster, entity_type=entity_type)
+                return resolution_record(
+                    {
+                        "mention": mention,
+                        "candidates": [
+                            RosterCandidate(
+                                ref=ref, name=index.name_of(ref), basis="name"
+                            ).to_dict()
+                            for ref in shared
+                        ],
+                        "resolution": "uncertain",
+                        "reason": SHARED_NAME_TOKEN_REASON,
+                        "evidence_ref": evidence_ref,
+                    },
+                    now=now,
+                )
         reason = {
             "exact_ref": "exact_ref",
             "alias": "roster_alias",
@@ -757,6 +998,55 @@ def resolve_mention(
             },
             now=now,
         )
+
+    if not matches:
+        qualified = relationship_qualified_candidates(
+            mention, roster, entity_type=entity_type
+        )
+        if len(qualified) == 1:
+            return resolution_record(
+                {
+                    "mention": mention,
+                    "candidates": qualified,
+                    "resolution": "same",
+                    "resolved_ref": qualified[0]["ref"],
+                    "reason": RELATIONSHIP_QUALIFIED_REASON,
+                    "evidence_ref": evidence_ref,
+                },
+                now=now,
+            )
+        if len(qualified) > 1:
+            return resolution_record(
+                {
+                    "mention": mention,
+                    "candidates": qualified,
+                    "resolution": "uncertain",
+                    "reason": "ambiguous_candidates",
+                    "evidence_ref": evidence_ref,
+                },
+                now=now,
+            )
+        shared = shared_name_token_refs(mention, roster, entity_type=entity_type)
+        if shared:
+            # No exact key matched, but the bare word is one several people
+            # bear. Reporting *who* is what turns it into an answerable Mirror
+            # row instead of a nameless "no candidate".
+            index = roster_index(roster, entity_type=entity_type)
+            return resolution_record(
+                {
+                    "mention": mention,
+                    "candidates": [
+                        RosterCandidate(
+                            ref=ref, name=index.name_of(ref), basis="name"
+                        ).to_dict()
+                        for ref in shared
+                    ],
+                    "resolution": "uncertain",
+                    "reason": SHARED_NAME_TOKEN_REASON,
+                    "evidence_ref": evidence_ref,
+                },
+                now=now,
+            )
 
     return resolution_record(
         {
@@ -1158,8 +1448,16 @@ __all__ = [
     "ERROR_CODES",
     "IDENTITY_REQUESTED_FIELD",
     "IDENTITY_WORK_SURFACES",
+    "MENTION_QUALIFIER_WORDS",
     "MODEL_REASON",
     "OWNER_REASON",
+    "RELATIONSHIP_MENTION_WORDS",
+    "RELATIONSHIP_QUALIFIED_REASON",
+    "ROSTER_RELATIONSHIP_KEY",
+    "SHARED_NAME_TOKEN_REASON",
+    "mention_tokens",
+    "relationship_qualified_candidates",
+    "shared_name_token_refs",
     "RELATIONSHIP_EVENT_KINDS",
     "REPEATABLE_EVENT_KINDS",
     "RESOLUTIONS",

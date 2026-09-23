@@ -636,14 +636,160 @@ def scan_mentions(names, answers, manual_sources):
 
 _ALIAS_STOPWORDS = {"the", "my", "our", "a", "an"}
 
+#: How `connectors/base.py` writes each message header inside a third-party
+#: record: `**2012-02-01** — **James Cotter** · Subject`. The author of a
+#: third-party record is a person in the corpus too — usually one the roster has
+#: never heard of — and a bare given name that a stranger in the owner's inbox
+#: also answers to is not a name that identifies anybody.
+_RECORD_AUTHOR_RE = re.compile(r"^\*\*[^*]*\*\*\s+—\s+\*\*([^*]+)\*\*", re.MULTILINE)
 
-def _first_name_alias(title: str) -> str:
+
+def _name_tokens(text: str) -> frozenset[str]:
+    """The meaningful words of a name, lowercased. 'James Everett Taylor' ->
+    {james, everett, taylor}. Determiners and one-letter initials are dropped."""
+    words = re.findall(r"[A-Za-z][A-Za-z'’-]*", str(text or "").lower())
+    return frozenset(w for w in words if len(w) >= 2 and w not in _ALIAS_STOPWORDS)
+
+
+def _record_author_names(item: dict) -> list[str]:
+    """Display names of whoever wrote a third-party record's messages."""
+    if str(item.get("authority", "")) != "third_party_record":
+        return []
+    return [a.strip() for a in _RECORD_AUTHOR_RE.findall(item.get("body") or "") if a.strip()]
+
+
+def _given_name(text: str) -> str:
+    """The word a person answers to: the first word of one spelling of a name.
+
+    A word buried inside a longer name is not a name anybody answers to — the
+    same rule `temporal_publication.owner_names_from_profile` applies to the
+    owner's own middle name, and `identity_resolution.RosterIndex.by_given_name`
+    applies to the roster."""
+    words = re.findall(r"[A-Za-z][A-Za-z'\u2019-]*", str(text or "").lower())
+    for word in words:
+        if len(word) >= 2 and word not in _ALIAS_STOPWORDS:
+            return word
+    return ""
+
+
+def known_person_names(categories, person_roster, manual_sources=None, author_full="") -> list[tuple]:
+    """One ``(given names, every token)`` pair per person the vault knows about:
+    every person Focus, every person on the roster (aliases folded into the one
+    person they belong to), the owner, and the author of every third-party
+    record.
+
+    This is the census that decides whether a bare given name identifies anyone.
+    It is deliberately wider than the roster: the owner's inbox holds college
+    classmates named James who will never be roster entities, and a page that
+    matched sources on the word "James" collected their threads."""
+    people: list[tuple] = []
+
+    def add(*spellings):
+        given: set[str] = set()
+        tokens: frozenset = frozenset()
+        for spelling in spellings:
+            if not spelling:
+                continue
+            tokens |= _name_tokens(spelling)
+            word = _given_name(spelling)
+            if word:
+                given.add(word)
+        if tokens:
+            people.append((frozenset(given), tokens))
+
+    for info in (categories or {}).values():
+        if info.get("group") == "focus":
+            add(clean_focus_name(info.get("name", "")))
+    for entry in (person_roster or {}).get("entities", []):
+        add(entry.get("name", ""), *(entry.get("aliases", []) or []))
+    add(author_full)
+    seen_authors = set()
+    for item in (manual_sources or {}).values():
+        for author in _record_author_names(item):
+            if author in seen_authors:
+                continue
+            seen_authors.add(author)
+            add(author)
+    return people
+
+
+def _distinct_people(identities) -> list[frozenset]:
+    """Collapse a list of name token-sets to one entry per PERSON.
+
+    Two spellings are the same person when one's tokens contain the other's:
+    the roster's bare 'Charlee' and the Focus title 'Charlee Joy Taylor' are one
+    child, not two. 'Anthon James Taylor' and 'James Everett Taylor' contain
+    neither, so they are two people who answer to the same middle word."""
+    people: list[frozenset] = []
+    for tokens in identities:
+        if not tokens:
+            continue
+        for index, known in enumerate(people):
+            if tokens <= known:
+                break
+            if known <= tokens:
+                people[index] = tokens  # keep the fuller spelling
+                break
+        else:
+            people.append(tokens)
+    return people
+
+
+def _name_is_ambiguous(name: str, others, mine=None) -> bool:
+    """Does this BARE name (one meaningful word) belong to more than one person?
+
+    ``mine`` is the full identity the name is standing in for — the Focus title,
+    or every name the page already answers to — and defaults to the name itself.
+    The word is ambiguous when, counting ``mine``, more than one distinct person
+    in the census bears it. 'Charlee' stays unambiguous next to the roster's own
+    'Charlee' (one person, two spellings) while 'James' is borne by the son, the
+    brother, the father, the grandfather and a James Cotter in a 2012 gmail
+    thread — five people, so the word names none of them. Bearing is by GIVEN
+    name (:func:`_given_name`): the owner spelled "David James Taylor" does not
+    answer to "James", so a middle name never makes somebody else's first name
+    ambiguous.
+
+    Multi-word names are never bare: a distinguishing token is exactly what
+    makes them answerable (`identity_resolution.shared_name_token_refs`)."""
+    tokens = _name_tokens(name)
+    if len(tokens) != 1:
+        return False
+    (token,) = tuple(tokens)
+    identity = _name_tokens(mine) if isinstance(mine, str) else (mine or tokens)
+    bearers = [identity] + [
+        whole for given, whole in (others or ()) if token in given
+    ]
+    return len(_distinct_people(bearers)) > 1
+
+
+def unambiguous_names(names, others=()) -> list[str]:
+    """`names` minus every bare given name the census says two people answer to.
+
+    The dropped word is not replaced by a looser match — it is dropped. A
+    mention the framework cannot attribute becomes a question (an unresolved
+    handle, a Mirror identity row), never a link to whichever person happened to
+    be spelled shortest."""
+    others = list(others or ())
+    if not others:
+        return [n for n in names if n]
+    identity: frozenset = frozenset()
+    for name in names:
+        if name:
+            identity |= _name_tokens(name)
+    return [n for n in names if n and not _name_is_ambiguous(n, others, identity)]
+
+
+def _first_name_alias(title: str, others=()) -> str:
     """'Charlee Joy Taylor' -> 'Charlee': a brand-new Focus has no roster
     aliases until the monthly refresh, so derive the obvious one from the
-    title itself. Determiners and short tokens are skipped."""
+    title itself. Determiners and short tokens are skipped — and so is a first
+    name more than one person in the vault answers to (`others`, from
+    :func:`known_person_names`): deriving "James" for 'James Everett Taylor'
+    attached his father's and two strangers' gmail threads to a seven-year-old's
+    page."""
     first = title.split()[0] if title.split() else ""
     if len(first) >= 3 and first.lower() not in _ALIAS_STOPWORDS and first != title:
-        return first
+        return "" if _name_is_ambiguous(first, list(others or ()), title) else first
     return ""
 
 
@@ -684,7 +830,8 @@ def _focus_alias_map(person_roster, focus_slugs=None):
     return alias_map
 
 
-def plan_focuses(categories, questions, answers, manual_sources, person_roster=None):
+def plan_focuses(categories, questions, answers, manual_sources, person_roster=None,
+                 known_people=()):
     descs = []
     alias_map = _focus_alias_map(person_roster, _focus_slugs(categories))
     for cat_id, info in sorted(categories.items()):
@@ -699,9 +846,12 @@ def plan_focuses(categories, questions, answers, manual_sources, person_roster=N
         # is what fills, e.g., an empty Dad Focus from his many cross-category
         # mentions. Focus *behavior* is unchanged — only the page's sources widen.
         names = [title] + sorted(n for n in alias_map.get(slug, set()) if n)
-        first_alias = _first_name_alias(title)
+        first_alias = _first_name_alias(title, known_people)
         if first_alias and first_alias not in names:
             names.append(first_alias)
+        # A bare given name two people answer to attaches nobody's sources
+        # (v335). The page keeps every name that distinguishes its person.
+        names = unambiguous_names(names, known_people) or [title]
         research_items = matching_candidate_research(
             manual_sources,
             candidate_kind="focus_candidate",
@@ -768,7 +918,8 @@ _ENTITY_MIN_MENTIONS = {"person": 1, "place": 2, "period": 2, "object": 1}
 RELATIONSHIP_MIN_MENTION_ANSWERS = 2
 
 
-def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
+def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs,
+                  known_people=()):
     """Auto pages for page-eligible ENTITIES of a type (person/place/period/object)
     that aren't already Focuses — graduated purely from mentions across the corpus.
     Generalizes the old person-only path to every entity type (the life graph
@@ -783,6 +934,14 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs):
         if not slug or slug in taken_slugs:
             continue  # a Focus owns it, or already emitted
         names = [ent.get("name", "")] + ent.get("aliases", [])
+        if entity_type == "person":
+            # Same rule as the Focus pages: a roster entry spelled with one
+            # given name several people bear stops matching on that word. With
+            # nothing left that distinguishes them, the entity graduates no page
+            # rather than a page built out of other people's sources.
+            names = unambiguous_names(names, known_people)
+            if not names:
+                continue
         a_hits, m_hits = scan_mentions(names, answers, manual_sources)
         research_items = matching_candidate_research(
             manual_sources,
@@ -986,7 +1145,8 @@ def plan_themes(answers, manual_sources, theme_roster=None, author_slug=None):
     return descs
 
 
-def plan_relationships(categories, questions, answers, manual_sources, author, person_roster=None):
+def plan_relationships(categories, questions, answers, manual_sources, author, person_roster=None,
+                       known_people=()):
     descs = []
     author = author or "Me"
     author_slug = slugify(author)
@@ -1003,6 +1163,7 @@ def plan_relationships(categories, questions, answers, manual_sources, author, p
         # person pages, but only when there is enough actual source material to
         # say something useful about the bond.
         names = [person] + sorted(n for n in alias_map.get(person_slug, set()) if n)
+        names = unambiguous_names(names, known_people) or [person]
         a_hits, _m_hits = scan_mentions(names, answers, manual_sources)
         cited_srcs = {a["source"] for a in answer_items}
         extra_answers = [it for it in a_hits if it["source"] not in cited_srcs]
@@ -1677,14 +1838,19 @@ def main():
     person_roster = load_roster("person")
     focus_slugs = {slugify(clean_focus_name(info["name"]))
                    for info in categories.values() if info.get("group") == "focus"}
+    # Who the vault knows about, by name token — the census that decides whether
+    # a bare given name identifies anybody (v335).
+    known_people = known_person_names(categories, person_roster, manual_sources, author_full)
 
     # 1. plan — the person's own life story leads.
     descs = []
     descs += plan_life_story(categories, questions, answers, manual_sources, author_full)
-    descs += plan_focuses(categories, questions, answers, manual_sources, person_roster)
+    descs += plan_focuses(categories, questions, answers, manual_sources, person_roster,
+                          known_people)
     descs += plan_projects(categories, questions, answers, manual_sources)
     descs += plan_themes(answers, manual_sources, load_roster("theme"), slugify(author_full))
-    descs += plan_relationships(categories, questions, answers, manual_sources, author, person_roster)
+    descs += plan_relationships(categories, questions, answers, manual_sources, author,
+                                person_roster, known_people)
     descs += plan_self(questions, answers)
 
     # Entity/node graduation: build out every node of the life graph from mentions —
@@ -1693,7 +1859,7 @@ def main():
     taken_slugs = set(focus_slugs) | {d["slug"] for d in descs}
     for entity_type in ("person", "place", "period", "object"):
         descs += plan_entities(entity_type, answers, manual_sources,
-                               load_roster(entity_type), taken_slugs)
+                               load_roster(entity_type), taken_slugs, known_people)
 
     slug_title = {d["slug"]: d["title"] for d in descs}
     roster = [{"slug": d["slug"], "title": d["title"], "type": d["type"]} for d in descs]

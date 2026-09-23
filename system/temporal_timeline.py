@@ -2850,6 +2850,16 @@ def _group_entries(group: dict, entry_index: dict) -> list[dict]:
     return out
 
 
+#: The two resolution reasons that mean "more than one person answers to this
+#: mention, and identity stopped rather than guess". `shared_name_token` (v335)
+#: is that standoff reached by the census rather than by two exact keys: a bare
+#: "James" on a roster holding four of them. It must read as a standoff HERE too
+#: — otherwise a mention identity honestly refused to bind would fall through
+#: this function to the zero-candidate fallback and land on the owner's own axis,
+#: which for a `birth` claim would make somebody else's birthday his.
+_AMBIGUOUS_REASONS = ("ambiguous_candidates", ident.SHARED_NAME_TOKEN_REASON)
+
+
 def _mention_is_ambiguous(group: dict) -> bool:
     """Did identity resolution find MORE THAN ONE roster candidate for this
     subject and stop rather than guess (`identity_resolution.resolve_mention`,
@@ -2866,7 +2876,7 @@ def _mention_is_ambiguous(group: dict) -> bool:
     """
     for claim in group.get("claims") or ():
         resolution = claim.get("subject_resolution")
-        if isinstance(resolution, dict) and resolution.get("reason") == "ambiguous_candidates":
+        if isinstance(resolution, dict) and resolution.get("reason") in _AMBIGUOUS_REASONS:
             return True
     return False
 

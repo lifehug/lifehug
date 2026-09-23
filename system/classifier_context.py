@@ -258,7 +258,24 @@ def _resolved_subject_refs(
                 if ref:
                     matches[ref] = match
         if len(matches) == 1:
-            refs.add(next(iter(matches)))
+            # One exact key is not uniqueness when several people answer to the
+            # word (v335). `identity_resolution` owns the census; this surface
+            # reports the collision as the ambiguity it is rather than binding
+            # whichever person the roster happened to spell shortest.
+            bearers: set[str] = set()
+            for kind, roster in rosters.items():
+                bearers.update(
+                    identity_resolution.shared_name_token_refs(
+                        mention, roster, entity_type=kind
+                    )
+                )
+            if len(bearers) > 1:
+                ambiguities.append({
+                    "mention": mention,
+                    "candidate_refs": sorted(bearers),
+                })
+            else:
+                refs.add(next(iter(matches)))
         elif len(matches) > 1:
             ambiguities.append({
                 "mention": mention,
