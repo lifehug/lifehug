@@ -87,7 +87,12 @@ class ResolutionPublicationTests(unittest.TestCase):
                 self.assertEqual(node["timeline_resolution_status"], status)
                 self.assertEqual(tp.node_from_dict(node).to_dict(), node)
                 gaps = items_of(derived, "precision_gap")
-                if status in {"incomplete", "not_temporal", "linked"}:
+                # v333: `incomplete` asks its question like `missing_evidence`
+                # and `ambiguous` do — the search never finished, so nothing
+                # was decided, and this moment is unplaced. `not_temporal` is a
+                # closed answer and `linked` is dated by its anchor; neither
+                # asks.
+                if status in {"not_temporal", "linked"}:
                     self.assertEqual(gaps, [])
                 else:
                     self.assertEqual(len(gaps), 1)

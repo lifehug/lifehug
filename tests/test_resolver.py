@@ -257,6 +257,31 @@ class LegsTests(unittest.TestCase):
             self.nodes[label] = node_id
             self.handles[label] = claim["claim_id"]
 
+    def incomplete_story(self, stem: str, body: str, *, title: str) -> str:
+        """One story whose classifier event carries an UNFINISHED search.
+
+        The real shape the classifier writes — `classifier_claims.event_claims`
+        off an event with `timeline_resolution.status == "incomplete"` — rather
+        than a hand-built claim, so the node reaches the fold exactly as the
+        owner's vault does.
+        """
+        import classifier_claims  # noqa: PLC0415 - test-local
+
+        (self.root / "answers" / f"{stem}.md").write_text(
+            f"---\ntitle: {stem}\ntype: prompted_answer\n---\n\n{body}\n", "utf-8")
+        claim = classifier_claims.event_claims(
+            stem=f"answers-{stem}",
+            event={"title": title, "description": body, "subject": "self", "date": None,
+                   "timeline_resolution": {"status": "incomplete"}},
+            revision="sha256:" + "1" * 64,
+            source_path=f"answers/{stem}.md",
+            now=NOW,
+        )[0]
+        ts.write_receipt(self.root, {"source_ref": claim["source_ref"],
+                                     "extractor_version": claim["extractor_version"],
+                                     "claims": [claim]}, now=NOW)
+        return str(claim["event_ref"])
+
     def publish(self):
         import temporal_publication as pub
 
@@ -639,6 +664,43 @@ class LegsTests(unittest.TestCase):
         # where it came from.
         others = [row for node, row in rows.items() if node != self.nodes["shop"]]
         self.assertTrue(all("question_source" not in row for row in others))
+
+    def test_an_unfinished_search_gets_a_card_that_asks_the_resolvers_question(self):
+        """v333, the owner's dead-end (2026-09-23). A moment whose classifier
+        search never finished used to mint NO work item, so the resolver's real
+        question never became a card and the page could only show a status the
+        person could not act on. It mints its ordinary item now, with the
+        resolver's sentence, its window — and the `incomplete` status intact."""
+        import temporal_publication as pub
+
+        node_id = self.incomplete_story(
+            "c5", "Grandma stepped in during bullying.",
+            title="Grandma stepped in during bullying",
+        )
+        self.publish()
+        nodes = {node["node_id"]: node for node in (pub.read_projection(self.root) or {})["nodes"]}
+        self.assertEqual(nodes[node_id]["timeline_resolution_status"], "incomplete")
+        self.assertFalse(nodes[node_id].get("usable_placement"))
+        question = ("Roughly how old were you when Grandma stepped in for you like that "
+                    "— still in elementary school, or later?")
+        resolver.save_ledger(self.root, {"version": 1, "nodes": {node_id: {
+            "label": "Grandma stepped in during bullying", "source_path": "answers/c5.md",
+            "status": "unknown", "question": question, "at": NOW,
+            "estimate": {"earliest": "1987", "latest": "1996", "confidence": 0.4,
+                         "basis": [{"kind": "residence", "text": "the Cedarport years"}]}}}})
+        pub.publish(self.root, now="2026-09-23T12:00:00Z")
+        rows = {row.get("node_ref"): row
+                for row in (pub.read_work_items(self.root) or {})["work_items"]}
+        self.assertIn(node_id, rows)
+        mine = rows[node_id]
+        self.assertEqual(mine["prompt_intent"], question)
+        self.assertEqual(mine["question_source"], "resolver")
+        self.assertEqual(mine["probable_window"]["earliest"], "1987")
+        self.assertEqual(mine["probable_window"]["latest"], "1996")
+        # The honest status is kept, not traded for the question.
+        published = {node["node_id"]: node
+                     for node in (pub.read_projection(self.root) or {})["nodes"]}
+        self.assertEqual(published[node_id]["timeline_resolution_status"], "incomplete")
 
     def test_a_resolved_moment_puts_no_question_on_any_card(self):
         import temporal_publication as pub

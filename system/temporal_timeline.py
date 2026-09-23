@@ -3938,8 +3938,25 @@ def _evidence_refs(group: dict) -> list[str]:
     return sorted({_source_key(claim) for claim in group["claims"] if _source_key(claim)})
 
 
-def _resolution_suppresses_date_question(group: dict) -> bool:
-    """Incomplete searches and non-events are not missing date assertions."""
+def _resolution_suppresses_date_question(group: dict, *, unplaced: bool = False) -> bool:
+    """A non-event is not a missing date assertion; an unfinished search is one.
+
+    ``not_temporal`` is a CLOSED answer: the classifier read the telling and
+    says it asserts no date, so asking for one would fabricate the question.
+    ``incomplete`` is the opposite — the bounded candidate search never
+    finished, so nothing was decided either way.
+
+    v333. An ``incomplete`` node that is also UNPLACED therefore asks its
+    ordinary question like any other unplaced node. Suppressing it made the
+    one thing the person could actually settle the one thing they could not
+    act on: the status only clears when the refresh sweep reaches the source
+    again (50 sources a run against hundreds pending), while the person who
+    lived the moment settles it in a sentence. The status is not dropped — it
+    stays on the node beside the question, so the page can still say the
+    search is unfinished. An ``incomplete`` node that IS placed keeps the
+    suppression: it is already drawn, and a precision question over an
+    unfinished search would be asking for sharpness nobody knows is missing.
+    """
     statuses: list[str] = []
     for claim in group.get("claims") or ():
         if not timeline_evidence.is_current_classifier_claim(claim):
@@ -3948,7 +3965,9 @@ def _resolution_suppresses_date_question(group: dict) -> bool:
         if not status:
             return False
         statuses.append(status)
-    return bool(statuses) and set(statuses) <= {"incomplete", "not_temporal"}
+    if not statuses or not set(statuses) <= {"incomplete", "not_temporal"}:
+        return False
+    return not (unplaced and set(statuses) == {"incomplete"})
 
 
 def _linked_resolution_suppresses_anchor_question(group: dict) -> bool:
@@ -5148,7 +5167,7 @@ def _derive_work_items(
         possible = possibilities.get(node_id)
         if not _wants_precision(best, group["event_kind"], possible):
             continue
-        if _resolution_suppresses_date_question(group):
+        if _resolution_suppresses_date_question(group, unplaced=best is None):
             continue
         # D5: an age frame's boundary is arithmetic off the birth origin, never
         # a question (ADR 0030). "When did Childhood end?" is not askable.

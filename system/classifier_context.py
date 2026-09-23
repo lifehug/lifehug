@@ -1602,6 +1602,34 @@ REFRESH_REASON_PRIORITY: dict[str, int] = {
 }
 
 
+def unfinished_search_blocks_a_moment(classification: object) -> bool:
+    """Does this source hold a moment the classifier never finished placing?
+
+    v333. The classifier's bounded candidate search can run out before it has
+    read all the relevant evidence; the event is filed `incomplete` and the
+    status only clears when the refresh sweep reaches the source again. When
+    the event ALSO says nothing datable of its own — `classifier_claims`'
+    fourth rung, an ``occurrence`` reading: it happened, when is not known —
+    that unfinished search is the only thing standing between the moment and a
+    place on the timeline. Reuses the one reading definition rather than
+    re-parsing the date block here.
+    """
+    import classifier_claims  # noqa: PLC0415 - avoids an import cycle at module load
+
+    row = classification if isinstance(classification, dict) else {}
+    for event in row.get("events") or ():
+        if not isinstance(event, dict):
+            continue
+        resolution = event.get("timeline_resolution")
+        status = (resolution or {}).get("status") if isinstance(resolution, dict) else None
+        if timeline_evidence.collapsed_text(status) != "incomplete":
+            continue
+        reading = classifier_claims.temporal_reading(event)
+        if timeline_evidence.collapsed_text(reading.get("claim_type")) == temporal_claims.OCCURRENCE_CLAIM_TYPE:
+            return True
+    return False
+
+
 def select_refresh_targets(
     vault_root: str | Path,
     source_paths: object,
@@ -1633,18 +1661,29 @@ def select_refresh_targets(
     records = _classification_records(root) if classifications is None else classifications
     catalog = _load_context_catalog(root)
     pending: list[dict] = []
+    blocked: set[str] = set()
     for source in sources:
         relative = _relative_source(root, source)
         snapshot = _build_context_snapshot_from_catalog(root, source, catalog)
-        reason = refresh_reason(snapshot, records.get(relative))
+        record = records.get(relative)
+        reason = refresh_reason(snapshot, record)
         if reason:
             pending.append({"source_path": relative, "reason": reason, "snapshot": snapshot_metadata(snapshot)})
-    # Newest information first (issue lifehug#371). A story the person just
-    # told or corrected outranks a backlog of context refreshes: without this
-    # a vault with hundreds of `context_changed` rows starved a just-edited
-    # answer behind them for a week. Within one reason, path order keeps the
-    # selection a pure function of the vault.
-    pending.sort(key=lambda row: (REFRESH_REASON_PRIORITY.get(row["reason"], len(REFRESH_REASON_PRIORITY)),
+            if unfinished_search_blocks_a_moment(record):
+                blocked.add(relative)
+    # Unfinished searches first (v333), then newest information (issue
+    # lifehug#371). A story the person just told or corrected outranks a
+    # backlog of context refreshes: without that a vault with hundreds of
+    # `context_changed` rows starved a just-edited answer behind them for a
+    # week. Ahead of BOTH sits the source holding a moment nothing but this
+    # sweep can place — a search that ran out, on an event with no date of its
+    # own. That set is small and self-draining (once refreshed the source
+    # leaves the backlog), so it cannot starve the rest; leaving it at the back
+    # of ~350 pending rows behind a 50-a-run cap is what left the owner looking
+    # at a moment neither he nor the sweep could settle. Within one rank, path
+    # order keeps the selection a pure function of the vault.
+    pending.sort(key=lambda row: (0 if row["source_path"] in blocked else 1,
+                                  REFRESH_REASON_PRIORITY.get(row["reason"], len(REFRESH_REASON_PRIORITY)),
                                   row["source_path"]))
     targets = pending[:cap]
     return {
@@ -1676,5 +1715,6 @@ __all__ = [
     "select_refresh_targets",
     "snapshot_metadata",
     "source_revision",
+    "unfinished_search_blocks_a_moment",
     "validate_response",
 ]
