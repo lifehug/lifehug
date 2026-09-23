@@ -24,6 +24,19 @@ relationship and his birth date:
 4. anything before his birth — family history, on the person's page, never on
    his axis. That is v324's own pre-birth rule, kept.
 
+**The v338 correction.** Rule 3 is a DECISION, and v334 let it swallow the
+cases where no decision had been made. Any subject whose tier could not be read
+— a roster person with no ``relationship`` recorded, or a name the roster has
+never heard of — came out ``not_family``, and downstream (`temporal_timeline`)
+that is the reason that SUPPRESSES the date question and drops the node from
+``diagnostics["unplaced"]``. So "Lumen died." minted no "when?" card at all, and
+the owner's own marriage lost its card because the spouse's row carried no
+relationship word. The owner ruled (2026-09-23) that an unknown relationship is
+not rule 3: treat it like ``subject_unresolved`` — nothing has been decided, so
+the node keeps its questions. Hence the sixth reason,
+``relationship_unknown``, and rule 3 now needs the tier to be affirmatively
+:data:`DISTANT_TIER`.
+
 Immediate family is spouse/partner, parents, siblings, grandparents, children,
 grandchildren. In-laws, aunts/uncles/cousins, friends and colleagues are not.
 
@@ -132,10 +145,14 @@ DISTANT_RELATION_WORDS = frozenset({
 #: hyphenated word is the thing that changes the answer.
 IN_LAW_RE = re.compile(r"(?<!\w)in[-\s]?laws?(?!\w)", re.IGNORECASE)
 
-#: The tiers this module reads a subject into. ``unknown`` is not ``distant``:
-#: it says nothing in the roster and nothing in the words answered, and the
-#: ruling's rule 3 is what turns it into ``none`` — "anyone else" covers the
-#: people we cannot name a tier for exactly as it covers the ones we can.
+#: The tiers this module reads a subject into. ``unknown`` is not ``distant``,
+#: and since v338 that distinction reaches the published reason: nothing in the
+#: roster and nothing in the words answered, so the ruling's rule 3 — which is a
+#: DECISION about a person whose relationship is KNOWN to be outside the
+#: immediate family — has not been made. ``unknown`` still takes the ruling's
+#: default membership (``none``: not drawn on his axis until somebody says who
+#: this is) under a reason of its own, ``relationship_unknown``, and it keeps
+#: its questions. Only :data:`DISTANT_TIER` is rule 3.
 IMMEDIATE_FAMILY_TIER = "immediate_family"
 DISTANT_TIER = "distant"
 UNKNOWN_TIER = "unknown"
@@ -326,8 +343,20 @@ def axis_membership(*, occurrence_subject_scope: object,
       v324's own pre-birth rule under a name;
     * immediate family — ``family`` / ``immediate_family_in_lifetime``. Rule 2.
       ``family`` means DRAWN ON HIS AXIS, as a moment about them;
-    * anybody else, including a person no tier could be read for — ``none`` /
-      ``not_family``. Rule 3.
+    * affirmatively somebody ELSE — a relationship that is KNOWN and outside
+      the immediate family (:data:`DISTANT_TIER`: a friend, a colleague, a
+      cousin, an in-law) — ``none`` / ``not_family``. Rule 3;
+    * a person nobody has said anything about — ``none`` /
+      ``relationship_unknown``. The SIXTH reason (v338), and the defect it
+      fixes is v334 folding it into rule 3. Rule 3 is a DECISION: it needs a
+      relationship, known, and outside the immediate set. :data:`UNKNOWN_TIER`
+      is the absence of that statement, not a statement of it — a roster row
+      with no ``relationship`` whose name carries no relation word, or a named
+      subject the roster has never heard of. So it reads exactly like
+      ``subject_unresolved``: ``none``, because it is still not drawn on the
+      owner's axis until somebody says who this is (the ruling's default, and
+      the person-page home), and NOTHING has been decided, so the node keeps
+      every question it had before the ruling existed.
     """
     scope = collapsed_text(occurrence_subject_scope)
     relation = collapsed_text(owner_timeline_relation)
@@ -337,9 +366,12 @@ def axis_membership(*, occurrence_subject_scope: object,
         return _row(tp.AXIS_MEMBERSHIP_NONE, tp.AXIS_REASON_SUBJECT_UNRESOLVED)
     if before_owner_birth:
         return _row(tp.AXIS_MEMBERSHIP_NONE, tp.AXIS_REASON_PRE_BIRTH)
-    if collapsed_text(family_tier) == IMMEDIATE_FAMILY_TIER:
+    tier = collapsed_text(family_tier)
+    if tier == IMMEDIATE_FAMILY_TIER:
         return _row(tp.AXIS_MEMBERSHIP_FAMILY, tp.AXIS_REASON_IMMEDIATE_FAMILY)
-    return _row(tp.AXIS_MEMBERSHIP_NONE, tp.AXIS_REASON_NOT_FAMILY)
+    if tier == DISTANT_TIER:
+        return _row(tp.AXIS_MEMBERSHIP_NONE, tp.AXIS_REASON_NOT_FAMILY)
+    return _row(tp.AXIS_MEMBERSHIP_NONE, tp.AXIS_REASON_RELATIONSHIP_UNKNOWN)
 
 
 def _row(membership: str, reason: str) -> dict:

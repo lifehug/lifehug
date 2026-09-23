@@ -408,7 +408,8 @@ calculating placement against a spine**:
 - **Whose moments are DRAWN on the axis** (v334, owner ruling 2026-09-23):
   every node publishes `axis_membership` (`owner` | `family` | `none`) and
   `axis_membership_reason` (`lived` | `immediate_family_in_lifetime` |
-  `pre_birth` | `not_family` | `subject_unresolved`), derived at fold time by
+  `pre_birth` | `not_family` | `subject_unresolved` | `relationship_unknown`),
+  derived at fold time by
   one pure rule (`system/axis_membership.py`) from the person roster's
   `relationship` field and the owner's birth date — never from a judgement
   about who the words say was present. He lived it → his axis, whoever else it
@@ -417,7 +418,14 @@ calculating placement against a spine**:
   his axis, drawn as a moment about them. Anyone else's own event, and
   anything before his birth → not on his axis; it stays in the substrate and on
   that person's page, and it mints no owner-axis date question unless something
-  else is anchored to it. **The "About someone else" group is retired**: hosts
+  else is anchored to it. Those two — `not_family` and `pre_birth` — are the
+  ruling's only DECISIONS
+  (`temporal_projection.AXIS_DECIDED_OFF_AXIS_REASONS`), and only they suppress
+  anything. A subject nobody has identified (`subject_unresolved`) and a person
+  nobody has said is family or not (`relationship_unknown`, v338: a roster row
+  with no `relationship`, or a name the roster has never heard of) are also
+  `none` — not drawn until somebody says who this is — but they KEEP their date
+  and identity questions, because nothing has been decided about them. **The "About someone else" group is retired**: hosts
   read the field rather than inferring a surface from `contextual_only`, which
   keeps every value it had. ADR 0030's 2026-09-23 amendment has the ruling in
   the owner's own terms. **The owner's age table
