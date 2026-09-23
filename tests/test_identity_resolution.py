@@ -105,7 +105,18 @@ class VocabularyTests(unittest.TestCase):
     def test_every_deterministic_rule_is_named(self):
         self.assertEqual(
             ir.DETERMINISTIC_REASONS,
-            ("exact_ref", "roster_alias", "unique_name", "ambiguous_candidates", "no_candidate"),
+            (
+                "exact_ref",
+                "roster_alias",
+                "unique_name",
+                # v335: a relationship word the roster corroborates is the
+                # distinguishing token that answers a shared given name; a
+                # shared given name with no such token answers nobody.
+                "relationship_qualified_name",
+                "shared_name_token",
+                "ambiguous_candidates",
+                "no_candidate",
+            ),
         )
         # The model rung writes through the same contract, with its own reason.
         self.assertIn(ir.MODEL_REASON, ir.RESOLUTION_REASONS)
