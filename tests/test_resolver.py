@@ -170,11 +170,11 @@ class FilingTests(unittest.TestCase):
             "event_kind": "moment", "event_ref": self.event_ref, "event_mention": "The founding",
             "temporal_value": {"relation": "after", "anchors": ["the move to Cedarport"]},
             "evidence": [{"quote": "after the move to Cedarport"}], "basis": "explicit", "confidence": 0.8,
-            "extractor_version": "classifier-claims/rule:4",
+            "extractor_version": "classifier-claims/rule:5",
             "source_ref": {"source_id": "classification:answers-a1#000000000001", "revision": "sha256:" + "1" * 64,
                            "source_path": "answers/a1.md"},
         }, now=NOW)
-        ts.write_receipt(self.root, {"source_ref": handle["source_ref"], "extractor_version": "classifier-claims/rule:4",
+        ts.write_receipt(self.root, {"source_ref": handle["source_ref"], "extractor_version": "classifier-claims/rule:5",
                                      "claims": [handle]}, now=NOW)
         self.handle_id = handle["claim_id"]
         self.target = {"node_id": self.event_ref, "event_ref": self.event_ref, "label": "The founding",
@@ -246,13 +246,13 @@ class LegsTests(unittest.TestCase):
                 "event_kind": event_kind, "event_ref": node_id, "event_mention": label,
                 "temporal_value": {"relation": relation, "anchors": list(anchors)},
                 "evidence": [{"quote": anchors[0]}], "basis": "explicit", "confidence": 0.8,
-                "extractor_version": "classifier-claims/rule:4",
+                "extractor_version": "classifier-claims/rule:5",
                 "source_ref": {"source_id": f"classification:answers-{stem}#{label}",
                                "revision": "sha256:" + "1" * 64,
                                "source_path": f"answers/{stem}.md"},
             }, now=NOW)
             ts.write_receipt(self.root, {"source_ref": claim["source_ref"],
-                                         "extractor_version": "classifier-claims/rule:4",
+                                         "extractor_version": "classifier-claims/rule:5",
                                          "claims": [claim]}, now=NOW)
             self.nodes[label] = node_id
             self.handles[label] = claim["claim_id"]

@@ -223,6 +223,19 @@ module, no new model call, no stored dependency graph.
   `calculation_rule_version` does not move, and only the person's answer
   moves the dot to the line. The page floats the dot over its window and
   draws its height as the window's width.
+
+  **v333 amendment (owner ruling 2, 2026-09-23).** Two things follow from
+  "never a placement". An estimate is not drawn on a node that IS placed —
+  once the substrate can place the moment for real, a window beside a stated
+  interval is two answers to one question, and the ledger row simply stops
+  being drawn rather than being rewritten. And the window, once known, is
+  enough to decide whether the card it rides on is worth drawing:
+  `temporal_publication._without_stakeless_date_cards` applies
+  `temporal_work_items.date_card_changes_something` — the ruling's own
+  predicate — and retires a date card on a freestanding anecdote whose window
+  is already inside about a year with nothing waiting on it. That is a
+  display decision at the same seam and under the same rule; the ledger is
+  still read, never folded, and `calculation_rule_version` does not move.
 * **Refine, and the backfill.** A moment the resolver itself dated to a
   WIDE range (`REFINE_MIN_YEARS` or more) stays reachable: a new story that
   bears on it re-asks it once, and only a narrower verified answer replaces

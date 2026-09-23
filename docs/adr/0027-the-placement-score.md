@@ -251,3 +251,41 @@ slug (`tl:the-lost-years`); a calculated anchor's is a node digest
 star the same thing on the same facts and both row numbers agree exactly
 (`tests/test_timeline_gain.py::ParityTwinTests`); the two `tl:` strings do not,
 and nothing is invented to make them.
+
+## Amendment (2026-09-23, owner-ruled — v333, `resolves` is also a reason NOT to ask)
+
+`leverage` and `resolves` were published to RANK Timeline's rows. The owner's
+second ruling of 2026-09-23 makes them a refusal as well:
+
+> "A date card (precision_gap / missing date) is minted only when narrowing
+> would change something: the node participates in an ordering constraint or
+> contradiction, straddles a frame (decade/age-frame) boundary, another
+> placement depends on it (leverage / `resolves` non-empty), OR the moment is a
+> real life event … A freestanding anecdote whose placement is already inside
+> about a year gets NO card: 'higher fidelity can happen later on the timeline,
+> ideally not at all.'"
+
+`temporal_work_items.date_card_changes_something` is that sentence as one
+predicate, and it reads the number this ADR already publishes rather than a new
+one. Three properties keep it honest:
+
+* **It is a gate on top of the existing ones, never instead of them.**
+  `_wants_precision` still decides whether the placement is coarse at all and
+  `compose_question` still decides whether there is a sentence to ask; this only
+  ever declines an item those two allowed.
+* **It runs after `apply_gain`**, beside the dangling-anchor drop and for the
+  same stated reason: `resolves` has no value before then. Work items only — no
+  node's placement moves, so `CALCULATION_RULE_VERSION` does not move.
+* **Life-event kinds are exempt**, read off the fold's own milestone vocabulary
+  (`temporal_claims.EVENT_KINDS` plus `residence`). A wedding dated only to a
+  year is a gap in the spine every other placement is read against, whatever
+  its leverage says. The classifier's generic `moment` — what a freestanding
+  anecdote arrives as — is the one kind the list excludes, and that exclusion
+  is the whole gate.
+
+Ruling 3 of the same day is the other side of it: *"a question MAY ask for
+higher fidelity when that would resolve many things"*. `PRECISION_TARGETS`
+already encodes it for the fold's own sentences — every kind asking finer than a
+year is a kind other placements are read against — and `resolver.PROMPT` now
+asks for the least fidelity that settles a moment, naming a finer grain only
+when the same answer reaches the moments it lists in `also_resolves`.

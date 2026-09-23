@@ -469,6 +469,155 @@ def resolve_work_item_ids(refs: object, *, aliases: object = None) -> tuple[str,
     )
 
 
+# --------------------------------------------------------------------------
+# A DATE CARD ONLY WHEN IT CHANGES SOMETHING (owner ruling 2, 2026-09-23)
+# --------------------------------------------------------------------------
+
+#: The work-item kind the stakes gate governs. Named rather than spelled at the
+#: call site, because the gate is about ONE kind and an alias never crosses
+#: `kind` (rule 1 at the top of this module).
+PRECISION_GAP_KIND = "precision_gap"
+
+#: "Already inside about a year." The ruling's own unit — *"a freestanding
+#: anecdote whose placement is already inside about a year gets NO card"* — as
+#: whole calendar months, measured with `chronology.span_months` so this number
+#: and every other interval width in the package come off one arithmetic.
+#:
+#: Twelve and not thirteen: a placement covering a single calendar year is
+#: `span_months == 12`, and a year is the coarsest thing the ruling calls good
+#: enough. Wider than this and narrowing is still worth asking for on its own;
+#: at or inside it, narrowing has to earn the card.
+PRECISION_STAKES_WINDOW_MONTHS = 12
+
+#: WHAT A REAL LIFE EVENT IS — the ruling's list, as the vocabulary the fold
+#: and the binder already speak rather than as a seventh table.
+#:
+#: The ruling names *"birth, death, marriage/wedding, baptism, move/residence
+#: change, job start/end, school start/end, graduation, mission — reuse the
+#: milestone vocabulary the fold/binder already has"*, and that vocabulary is
+#: `temporal_claims.EVENT_KINDS`: the landmark ladders' own `date_semantics`
+#: (`birth`, `death`, `married`, `started`, `ended`, `transition`, `span`,
+#: `first_met`, `dating_started`) plus the domains §5.1 names (`school`,
+#: `graduation`, `move`, `job`, `military`, `child_born`, `loss`, `engaged`,
+#: `separated`, `divorced`, `reconciled`). `residence` is added because a stay
+#: IS the ruling's "move/residence change" and it is an EPISODE kind rather
+#: than a claim kind, so the seed tuple does not carry it —
+#: `episode_binder.KIND_FAMILIES` files it under `dwelling` beside `move`, and
+#: this is that one crossing rather than a copy of that table (importing
+#: `episode_binder` here is a cycle: it imports `temporal_timeline`, which
+#: imports this module).
+#:
+#: What it deliberately EXCLUDES is `classifier_claims.MOMENT_EVENT_KIND` —
+#: `moment`, the classifier's kind for "a thing that happened". That is what a
+#: freestanding anecdote arrives as, and that exclusion is the whole gate: the
+#: mid-anger hug with James is a `moment`, and the father's mission is not.
+#:
+#: NAMED GAP, not a silent one: the vocabulary has no kind for a baptism or a
+#: mission today, so both arrive as `moment` and neither is recognised here.
+#: The day a kind for either is seeded upstream it is recognised with no edit,
+#: which is the point of reading the seed tuple instead of re-typing the
+#: ruling's list.
+LIFE_EVENT_KINDS = tuple(sorted(set(tc.EVENT_KINDS) | {"residence"}))
+
+#: WHY A DATE CARD WAS NOT MINTED. A closed vocabulary, like every other
+#: refusal in this module, so the fold can say which rule declined rather than
+#: publishing an item nobody can account for.
+NO_STAKES_INSIDE_A_YEAR = "placement_inside_a_year"
+
+
+def date_card_changes_something(
+    item: object,
+    *,
+    window: object = None,
+    orders: bool = False,
+    contradicted: bool = False,
+    straddles_frame: bool = False,
+) -> bool:
+    """Would narrowing this placement CHANGE anything? Owner ruling 2, verbatim:
+
+        "A date card (precision_gap / missing date) is minted only when
+        narrowing would change something: the node participates in an ordering
+        constraint or contradiction, straddles a frame (decade/age-frame)
+        boundary, another placement depends on it (leverage / `resolves`
+        non-empty), OR the moment is a real life event (birth, death,
+        marriage/wedding, baptism, move/residence change, job start/end, school
+        start/end, graduation, mission — reuse the milestone vocabulary the
+        fold/binder already has). A freestanding anecdote whose placement is
+        already inside about a year gets NO card: 'higher fidelity can happen
+        later on the timeline, ideally not at all.'"
+        (owner, staging, 2026-09-23)
+
+    The last sentence is the one that makes this a REFUSAL rather than a
+    ranking. The queue has never been short of date questions; what it was
+    short of was a reason not to ask one. A card the person can only answer
+    with a shrug costs the same attention as a card that unlocks fifty moments,
+    and the ruling says which of the two is worth minting.
+
+    Read as a gate ON TOP of the existing ones, never instead of them:
+    `temporal_timeline._wants_precision` still decides whether the placement is
+    coarse at all, and `compose_question` still decides whether there is a
+    sentence to ask. This only ever declines an item those two allowed.
+
+    Five ways to have stakes, and the first two are the ruling's own escape
+    hatches rather than tests of anything:
+
+    * **a real life event** — :data:`LIFE_EVENT_KINDS`. *"Life-event kinds
+      always keep their card."* A wedding dated only to a year is a gap in the
+      spine every other placement is read against, whatever its leverage says.
+    * **a placement wider than about a year** —
+      :data:`PRECISION_STAKES_WINDOW_MONTHS`, measured by
+      `chronology.span_months`, and ``window`` of ``None`` (unplaced, or an
+      open-ended interval with no far edge) counts as wider. The gate applies
+      *"to windows narrower than ~12 months"*, so anything looser is asked
+      exactly as it was before this release.
+    * **leverage** — a non-empty ``resolves``. Another placement is waiting on
+      this one, which is the ruling's own wording and the number
+      `timeline_gain.item_gain` already publishes.
+    * **an ordering constraint**, ``orders`` — the node is a subject or an
+      anchor of a resolved ordering edge, so a tighter date moves something
+      else's bounds.
+    * **a contradiction or a frame boundary**, ``contradicted`` /
+      ``straddles_frame`` — two readings disagree, or the interval spans a
+      decade or age-frame edge and so cannot say which side of it the moment
+      falls on. Either way the answer settles a question the projection is
+      currently unable to answer at all.
+
+    ``True`` for anything that is not a ``precision_gap`` at all: this gate
+    speaks for one kind and must never quietly drop another's item.
+
+    Read AFTER `timeline_gain.apply_gain`, for the same reason
+    :func:`dangling_anchor_reason` is — ``resolves`` is one of the five inputs
+    and it has no value before then. Work-item composition only: no node's
+    placement moves, so `temporal_timeline.CALCULATION_RULE_VERSION` does not
+    move either.
+    """
+    row = item if isinstance(item, dict) else {}
+    if collapsed_text(row.get("kind")) != PRECISION_GAP_KIND:
+        return True
+    if collapsed_text(row.get("event_kind")) in LIFE_EVENT_KINDS:
+        return True
+    months = None
+    try:
+        months = int(window)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        months = None
+    if months is None or months > PRECISION_STAKES_WINDOW_MONTHS:
+        return True
+    if row.get("resolves") or ():
+        return True
+    return bool(orders or contradicted or straddles_frame)
+
+
+def no_date_card_reason(item: object, **stakes) -> str | None:
+    """:data:`NO_STAKES_INSIDE_A_YEAR` when this card must not be minted, else ``None``.
+
+    The reason-shaped twin of :func:`date_card_changes_something`, so the fold
+    can file a diagnostic naming the rule that declined — the same pairing
+    :func:`dangling_anchor_reason` already is for the anchor lane.
+    """
+    return None if date_card_changes_something(item, **stakes) else NO_STAKES_INSIDE_A_YEAR
+
+
 #: WHY AN ANCHOR CARD IS DANGLING (lifehug#365 item 4). A closed vocabulary,
 #: for the same reason every other refusal here is one.
 ANCHOR_WITHOUT_QUESTION = "question_withheld"
@@ -536,7 +685,11 @@ __all__ = [
     "DANGLING_ANCHOR_REASONS",
     "DEFAULT_CANONICAL_REQUESTED_FIELD",
     "LEGACY_REQUESTED_FIELD",
+    "LIFE_EVENT_KINDS",
+    "NO_STAKES_INSIDE_A_YEAR",
     "OWNER_SUBJECT_REF",
+    "PRECISION_GAP_KIND",
+    "PRECISION_STAKES_WINDOW_MONTHS",
     "REACH_SATURATION",
     "REQUESTED_FIELD_BIRTH_DATE",
     "REQUESTED_FIELD_DATE",
@@ -552,10 +705,12 @@ __all__ = [
     "canonical_work_item_id",
     "clamp_unit",
     "dangling_anchor_reason",
+    "date_card_changes_something",
     "is_anchor_handle_ref",
     "is_birth_anchor",
     "is_explicit_origin",
     "legacy_work_item_ids",
+    "no_date_card_reason",
     "node_claim_basis",
     "resolve_work_item_id",
     "resolve_work_item_ids",

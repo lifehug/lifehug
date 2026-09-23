@@ -290,3 +290,58 @@ the second is the load-bearing one.
 kind and one stage. The platform twin — the interaction-registry row that
 consumes this stage, and converging both web switches on `work_item` — rides
 the pin-bump wiring PR.
+
+## Amendment (2026-09-23, owner-ruled — v333, "recent" is a placement)
+
+The owner read a card on staging asking *"About how long before you recorded
+this (a week, a month, several months) did the mid-anger hug with James
+happen?"*. The source was a prompted answer captured 2026-07-14 to the question
+*"What's a **recent** moment that was peak James…?"*; the story carried no time
+words, the classifier stamped `when_hint: recent`, and the substrate filed an
+`occurrence` — *it happened, when is not known*. The ruling:
+
+> "'Recent' with a known capture date IS a placement, not a guess. Place the
+> moment as a STATED range [capture_date − 6 months, capture_date], basis
+> stated — it renders as 'placed by you', because the person is the one saying
+> it was recent."
+
+This is decision 1 of this ADR applied to a case it had not reached. *The
+interval is itself a finding, not a failure* — and here both of the interval's
+edges are facts the vault already holds: a word the person chose, and the day
+they said it. Filing that as an absence was the fabricated ignorance decision 3
+already forbids in the other direction.
+
+1. **One recency vocabulary, in `chronology`.** `RECENCY_RUNGS` is a closed,
+   narrowest-first table of six rungs beside the module's other time tables,
+   and it is where the ruling's own ladder lives: "yesterday"/"the other
+   day"/"this week" → 2 weeks, "last week" → 1 month, "last month"/"a few
+   weeks ago" → 2 months, "recently"/"lately"/"these days"/"a recent …" →
+   6 months, "a few months ago" → 9 months, "this year" → 1 January of the
+   capture year. `recency_cue` is the ONE reader; the first rung that matches
+   wins, so the stronger word narrows deterministically. A second table of
+   recency phrasings anywhere in the package is the recurring defect, not a
+   synonym — the same rule `cross_dating.AGE_STATEMENT_RES` and
+   `general_listener.PRESCREEN_TABLES` are already held to.
+
+2. **Basis `stated`, and it must read that way.** `from_recency` returns a
+   `range` at `approximate` confidence with basis `stated` and one provenance
+   clause under the same basis, so `display_date` renders *"— you said recent,
+   told 2026-07-14"* and `temporal_claims.CLAIM_BASIS_BY_DATE_BASIS` publishes
+   it as `explicit`. It is deliberately not `CALCULATED_PROVENANCE_BASIS` or
+   `INFERRED_PROVENANCE_BASIS`: attributing this to arithmetic would be
+   lifehug#266's defect wearing a third hat, and the person really did say it.
+
+3. **Both edges are required, and neither is invented.** No capture date, or no
+   cue, and the reading is byte-identical to what it was. The capture date is
+   the whole warrant: without it "recent" bounds nothing.
+
+4. **The cue may be in the QUESTION.** A person answering *"a recent moment"*
+   in kind has said the word as surely as if they had typed it, which is the
+   case this amendment exists for — O6's story says nothing about time at all.
+   `classifier_claims.capture_context` reads `captured_at`/`answered_date` and
+   `question_text` off the telling's own frontmatter, because neither survives
+   into `state/classifications/`.
+
+5. **It sits below everything the person spelled out.** A stated date, an age
+   or a named landmark is always tighter and always wins; recency sits between
+   those and the occurrence.

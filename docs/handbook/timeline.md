@@ -445,6 +445,26 @@ calculating placement against a spine**:
   re-asked once when an exact date arrives and only a narrower verified
   answer replaces it; `resolve --estimate-missing` backfills the windows
   once. See ADR 0037's v325 amendment.
+- **It is not asked for what "recent" already says** (v333, owner ruling,
+  2026-09-23). A moment the person called recent in a telling the vault knows
+  the capture date of is PLACED, not estimated: `chronology.RECENCY_RUNGS` is
+  the one recency vocabulary and `classifier_claims` reads it into a stated
+  range ending at the capture date, so the moment arrives on the timeline as
+  *placed by you* and the resolver never plans it. A node that IS placed no
+  longer carries a probable window beside its real interval — an estimate is
+  never a placement, so it is never drawn as a second answer to a settled
+  question.
+- **A date card is minted only when narrowing would change something** (v333,
+  owner ruling, 2026-09-23). An ordering constraint or a contradiction, a
+  decade or age-frame boundary the interval straddles, another placement
+  waiting on it (`resolves` non-empty), or a real life event — any one of
+  those and the card stands. A freestanding anecdote already placed inside
+  about a year gets no card at all: *"higher fidelity can happen later on the
+  timeline, ideally not at all."* One predicate,
+  `temporal_work_items.date_card_changes_something`, applied in the fold and
+  again where the probable window is known. A question may still ask for
+  higher fidelity when that would settle many things, and its wording may
+  name the grain it needs.
 - **Verification is mechanical**: every cited quote must occur in the cited
   passage, every date must parse, ranges must be ordered, a `derived` answer
   must cite the spine fact it came from. What fails files nothing.

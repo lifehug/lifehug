@@ -18,7 +18,20 @@ import chronology as chrono
 from temporal_claims import collapsed_text, normalized_mention_key
 
 EVENT_KEY_LENGTH = 12
-CLASSIFIER_CLAIMS_RULE_VERSION = "4"
+#: What the deterministic classifier-claims rule READS. Bumped whenever the
+#: rule reads something new out of the same classification bytes, because that
+#: is what the receipt identity is keyed on: a new version files a receipt
+#: beside the old one and `classifier_claims._superseded_by_reclassification`
+#: retires the previous reading, which is how a vault that has already run the
+#: migration picks up a better rule without anything being re-classified or
+#: edited in place.
+#:
+#: v333 (owner ruling 1, 2026-09-23): "4" -> "5". The rule now reads a RECENCY
+#: cue (`chronology.RECENCY_RUNGS`) together with the telling's own capture
+#: date, so a moment the person called recent is placed as a stated range
+#: instead of filed as an undated occurrence. Same bytes in, a different and
+#: better reading out — exactly the case this constant exists for.
+CLASSIFIER_CLAIMS_RULE_VERSION = "5"
 CLASSIFIER_CLAIMS_EXTRACTOR = (
     f"classifier-claims/rule:{CLASSIFIER_CLAIMS_RULE_VERSION}"
 )
