@@ -614,6 +614,14 @@ handle names something that IS in the passages or the open questions (a birth, a
 death listed as a fact), return it in "handle_binds" — that is how the handle stops being a
 question — and still answer the moment itself. Omit "handle_binds" only when nothing here
 names it.
+The "question" asks for the LEAST fidelity that would settle the moment. Ask for a
+year when a year settles it; name a finer grain — a month, a season, a day — only when
+this same answer would also settle other moments you are listing in "also_resolves" or
+in the open questions above, and say in the question itself which grain you need and
+why it reaches further. A moment that stands alone gets the plain question and nothing
+more: higher fidelity on a single anecdote is not worth asking for, and a question that
+asks the owner to split hairs over one story he has already told is a question that
+should not have been asked at all.
 Some listed moments are not moments at all. When that is so, set "answer" to null and
 add, instead of a question:
   "not_an_event": {{"kind": "future" | "meta" | "fact_statement" | "duplicate", "reason": "<one sentence>"}}

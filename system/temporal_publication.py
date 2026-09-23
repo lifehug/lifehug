@@ -86,6 +86,7 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
+import chronology as chrono  # noqa: E402
 import episode_fold as ef  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
 import era_identity as ei  # noqa: E402
@@ -98,6 +99,7 @@ import temporal_projection as tp  # noqa: E402
 import temporal_receipts as trcpt  # noqa: E402
 import temporal_store as store  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
+import temporal_work_items as twi  # noqa: E402
 from temporal_claims import (  # noqa: E402
     SCHEMA_VERSION,
     TemporalContractError,
@@ -507,6 +509,13 @@ def _with_resolver_estimates(payloads: dict, estimates: dict[str, dict]) -> None
     a display decision over the same generation, so ``calculation_rule_version``
     does not move and a reader that has never heard of ``probable_window`` is
     unaffected.
+
+    A node that is actually PLACED gets no window (owner ruling 1, 2026-09-23).
+    An estimate is *"never a placement"* — that is the whole rule it lives
+    under — so once the substrate can place the moment for real, a stale
+    estimate beside a stated interval is two answers to one question. The
+    ledger row is left exactly as it is: it is the resolver's memory of what it
+    asked, and it stops being drawn rather than being rewritten.
     """
     if not estimates:
         return
@@ -524,6 +533,7 @@ def _with_resolver_estimates(payloads: dict, estimates: dict[str, dict]) -> None
             payload["nodes"] = [
                 {**node, "probable_window": dict(estimates[str(node.get("node_id"))])}
                 if isinstance(node, dict) and str(node.get("node_id") or "") in estimates
+                and not tpl.has_usable_placement(node)
                 else node
                 for node in nodes
             ]
@@ -550,6 +560,106 @@ def _with_resolver_questions(payloads: dict, questions: dict[str, str]) -> None:
             else row
             for row in rows
         ]
+
+
+def _without_stakeless_date_cards(payloads: dict) -> list[dict]:
+    """Drop every date card the resolver's OWN window shows buys nothing.
+
+    Owner ruling 2 (2026-09-23) is held by
+    `temporal_work_items.date_card_changes_something`, which the fold already
+    applies over the node's real placement. This is the second seam the same
+    predicate has to run on, and the reason is the case the ruling was written
+    about: the card the owner read said *"About how long before you recorded
+    this (a week, a month, several months) did the mid-anger hug with James
+    happen?"* over a probable window of 2026-01..2026-07 — seven months, a
+    freestanding anecdote, and nothing at all waiting on it.
+
+    The fold cannot see that window. The resolver's ledger is deliberately not
+    a derivation input (ADR 0037: *read, never folded*), and an estimate is
+    *"never a placement"* — so the fold is right to leave the card standing on
+    a node it considers unplaced. But by the time the window has been stamped
+    on, the projection DOES know how wide the moment's reading is, and the
+    ruling's question — would narrowing change anything? — has an answer. So it
+    is asked here, once, over the payloads that already carry the window.
+
+    The four stakes inputs come off the published payloads rather than being
+    re-derived: ``resolves`` from the item, ``conflict_state`` and
+    ``input_constraint_refs`` from its node, and the frame-boundary test from
+    the window's own decades plus the node's ``overlaps`` memberships — which
+    is `cross_dating.frames_touching`' verdict as the fold already published
+    it, not a second reading of it.
+
+    In place on ``payloads``, exactly as the question and the window are, and
+    for the same reason: nothing here re-derives a date, so
+    ``calculation_rule_version`` does not move.
+
+    Returns ONE row per card dropped, keyed by ``work_item_id`` — not one per
+    payload. The same card lives in both published files and is judged
+    identically in each (the predicate's inputs come from the projection's nodes
+    either way), so counting it twice would make `_summary`'s
+    ``work_items`` under-report by the number of files it happens to appear in.
+    """
+    dropped: dict[str, dict] = {}
+    projection = payloads.get(PROJECTION_FILE) or {}
+    nodes = {
+        str(node.get("node_id") or ""): node
+        for node in (projection.get("nodes") or ())
+        if isinstance(node, dict)
+    }
+    overlapping = {
+        str(row.get("member") or "")
+        for row in (projection.get("memberships") or ())
+        if isinstance(row, dict) and str(row.get("relation") or "") == "overlaps"
+    }
+    for payload in payloads.values():
+        rows = payload.get("work_items")
+        if not isinstance(rows, list):
+            continue
+        kept: list = []
+        for row in rows:
+            if not isinstance(row, dict):
+                kept.append(row)
+                continue
+            window = row.get("probable_window")
+            node = nodes.get(str(row.get("node_ref") or "")) or {}
+            if not isinstance(window, dict) or tpl.has_usable_placement(node):
+                kept.append(row)
+                continue
+            months = chrono.span_months({
+                "earliest": str(window.get("earliest") or "") or None,
+                "latest": str(window.get("latest") or "") or None,
+            })
+            low = chrono.year_of({"earliest": window.get("earliest")})
+            high = chrono.year_of({"latest": window.get("latest")}, end=True)
+            straddles = bool(
+                (low is not None and high is not None and low // 10 != high // 10)
+                or str(row.get("node_ref") or "") in overlapping
+            )
+            if twi.date_card_changes_something(
+                row,
+                window=months,
+                orders=bool(node.get("input_constraint_refs")),
+                contradicted=str(node.get("conflict_state") or "") == "contradicted",
+                straddles_frame=straddles,
+            ):
+                kept.append(row)
+                continue
+            work_item_id = str(row.get("work_item_id") or "")
+            dropped[work_item_id] = {
+                "work_item_id": work_item_id,
+                "node_ref": str(row.get("node_ref") or ""),
+                "event_kind": str(row.get("event_kind") or ""),
+                "label": str(node.get("label") or ""),
+                "window": f"{window.get('earliest')}..{window.get('latest')}",
+                "months": months,
+                "reason": twi.NO_STAKES_INSIDE_A_YEAR,
+            }
+        if len(kept) != len(rows):
+            payload["work_items"] = kept
+            counts = payload.get("counts")
+            if isinstance(counts, dict) and "work_items" in counts:
+                counts["work_items"] = len(kept)
+    return [dropped[key] for key in sorted(dropped)]
 
 
 def rebuild_signature(payload: object) -> dict:
@@ -929,6 +1039,9 @@ def publish(
     # v325: the resolver's probable window rides the same seam, for the same
     # reason and under the same rule.
     _with_resolver_estimates(payloads, estimates)
+    # Owner ruling 2 (2026-09-23): and now that the window IS on the card, the
+    # cards that the window shows buy nothing come off. Same seam, same rule.
+    stakeless_cards = _without_stakeless_date_cards(payloads)
 
     # THE SEMANTIC NO-OP (eras design §3.4). Age frames make the projection a
     # function of the clock as well as of the receipts, so "publish again"
@@ -953,7 +1066,8 @@ def publish(
                         published_at=str(_published_at_of(vault_root) or published_at),
                         digest=digest, timings=timings,
                         paths=[str(store.store_path(vault_root, name))
-                               for name in PUBLICATION_ORDER])
+                               for name in PUBLICATION_ORDER],
+                        stakeless_cards=stakeless_cards)
 
     # Serialize BOTH before writing EITHER: a payload that cannot be rendered
     # must fail with nothing on disk changed, not halfway through the pair.
@@ -989,7 +1103,8 @@ def publish(
 
     return _summary(result, generation=generation, unchanged=False,
                     published_at=published_at, digest=digest, timings=timings,
-                    paths=written, receipt=receipt)
+                    paths=written, receipt=receipt,
+                    stakeless_cards=stakeless_cards)
 
 
 def _work_item_identities(payload: object) -> set:
@@ -1221,7 +1336,8 @@ def _unchanged_generation(vault_root: str | Path, payloads: dict) -> int | None:
 
 def _summary(result: tt.CalculatedTimeline, *, generation: int, unchanged: bool,
              published_at: str, digest: str, timings: dict, paths: list,
-             receipt: dict | None = None) -> dict:
+             receipt: dict | None = None, stakeless_cards: object = ()) -> dict:
+    dropped = [dict(row) for row in (stakeless_cards or ()) if isinstance(row, dict)]
     return {
         "generation": generation,
         "unchanged": unchanged,
@@ -1235,8 +1351,14 @@ def _summary(result: tt.CalculatedTimeline, *, generation: int, unchanged: bool,
         "receipt": receipt,
         "claims": int((result.diagnostics or {}).get("claims") or 0),
         "nodes": len(result.nodes),
-        "work_items": len(result.work_items),
+        "work_items": len(result.work_items) - len(dropped),
         "unplaced": len((result.diagnostics or {}).get("unplaced") or ()),
+        # Owner ruling 2 (2026-09-23): the date cards this publish declined to
+        # draw because narrowing them would change nothing, each with the label
+        # and the window it was declined on. Reported rather than merely
+        # counted, because a refusal the owner cannot read is a refusal he
+        # cannot check.
+        "stakeless_date_cards": dropped,
         "timings": {key: round(float(value), 9) for key, value in sorted(timings.items())},
     }
 

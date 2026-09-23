@@ -802,6 +802,294 @@ def parse_stated_date(text: object) -> DateRecord | None:
     return from_dict(loose) if loose else None
 
 
+
+# --------------------------------------------------------------------------
+# Recency — "recent" is a PLACEMENT, not a guess (owner ruling 1, 2026-09-23)
+# --------------------------------------------------------------------------
+
+#: THE ONE RECENCY VOCABULARY. Owner ruling, staging 2026-09-23:
+#:
+#:     "'Recent' with a known capture date IS a placement, not a guess. Place
+#:     the moment as a STATED range [capture_date − 6 months, capture_date],
+#:     basis stated — it renders as 'placed by you', because the person is the
+#:     one saying it was recent."
+#:
+#: The reasoning is the same one ADR 0024 already made about intervals: a
+#: recency word plus a capture date bounds the moment, and *the interval is
+#: itself a finding, not a failure*. What was new in the defect was the other
+#: half — the system had been treating its OWN reading of "recent" as an
+#: estimate it then asked the person to improve, when the person is the one who
+#: said it. A capture date is a fact the vault holds; "recent" is a fact the
+#: person stated; the interval between them is not arithmetic over a guess.
+#:
+#: Stronger recency words narrow it DETERMINISTICALLY, which is why this is a
+#: table and not a single constant. Each rung is ``(months, days)`` back from
+#: the capture date — months where the person spoke in months, days where they
+#: spoke in days — plus the patterns that mean it. ``months=0, days=0`` marks
+#: the one calendar-anchored rung ("this year" runs from 1 January of the
+#: capture year, not from an offset).
+#:
+#: This table lives HERE, beside the other time tables (:data:`YEAR_RE`,
+#: :data:`NUMBER_WORDS`, the loose-date forms) and beside
+#: `cross_dating.AGE_STATEMENT_RES` and `general_listener.PRESCREEN_TABLES`
+#: which both read their vocabularies from this module rather than re-typing
+#: them. There is ONE recency vocabulary and every reader of ``when_hint`` or
+#: of a recency cue goes through :func:`recency_cue`; a second table of
+#: recency phrasings is exactly the duplicate the recurring-defect doctrine
+#: forbids.
+#:
+#: NARROWEST FIRST, and the order is load-bearing: "this week" must beat "this
+#: year", and "a few weeks ago" must beat "a few months ago". The first rung
+#: that matches wins, so a story saying both "recently" and "yesterday" is
+#: placed on the tighter of the two — the stronger word is the one the person
+#: chose to be precise with.
+#: THE VETO. A recency word used to say the OPPOSITE of recency, which English
+#: does constantly: *"I remember it like it was yesterday"* is a claim about how
+#: vivid the memory is, and *"in recent decades"* is a claim about a stretch far
+#: wider than any rung below. Checked BEFORE the rungs and applied to the whole
+#: text, exactly as `cross_dating.THIRD_PERSON_AGE_RES` vetoes an age statement
+#: over the moment's whole text rather than over the fragment that matched — a
+#: veto beside a positive table, for the same reason and at the same grain.
+#:
+#: Over-refusing is the CHEAP direction here and under-refusing is not. A cue
+#: this table wrongly vetoes leaves the moment exactly the undated occurrence it
+#: was, which is visible and still asked about; a cue that wrongly fires files a
+#: `stated` interval that reads as *placed by you*, is never re-asked, and no
+#: longer shows as a gap — a wrong date that hides itself.
+RECENCY_VETO_RES = (
+    # "like it was yesterday", "as though it were yesterday", "feels like
+    # yesterday" — vividness, not a date.
+    re.compile(r"\b(?:like|as if|as though)\s+it\s+(?:was|were|happened)\s+yesterday\b",
+               re.IGNORECASE),
+    re.compile(r"\bfe(?:el|els|lt)s?\s+like\s+(?:it\s+was\s+)?yesterday\b", re.IGNORECASE),
+    # "in recent years", "recent decades", "recent memory", "recent history" —
+    # a stretch, and a wide one.
+    re.compile(r"\brecent\s+(?:years|decades|centuries|generations|times|"
+               r"memory|history|past|months|weeks|days)\b", re.IGNORECASE),
+    # "in those days" sitting beside "these days".
+    re.compile(r"\b(?:back\s+)?in\s+(?:those|the)\s+days\b", re.IGNORECASE),
+)
+
+RECENCY_RUNGS = (
+    # "yesterday" / "the other day" / "this week" -> 2 weeks
+    ("immediate", 0, 14, (
+        re.compile(r"\byesterday\b", re.IGNORECASE),
+        re.compile(r"\bthe other (?:day|night|morning|evening)\b", re.IGNORECASE),
+        re.compile(r"\bthis (?:week|morning|afternoon|evening)\b", re.IGNORECASE),
+        re.compile(r"\b(?:a few|couple of) days ago\b", re.IGNORECASE),
+    )),
+    # "last week" -> 1 month
+    ("last_week", 1, 0, (
+        re.compile(r"\blast (?:week|weekend)\b", re.IGNORECASE),
+        re.compile(r"\ba week ago\b", re.IGNORECASE),
+    )),
+    # "last month" / "a few weeks ago" -> 2 months
+    ("last_month", 2, 0, (
+        re.compile(r"\blast month\b", re.IGNORECASE),
+        re.compile(r"\b(?:a few|a couple of|a couple|several) weeks ago\b", re.IGNORECASE),
+        re.compile(r"\ba month ago\b", re.IGNORECASE),
+    )),
+    # "recently" / "lately" / "these days" / "a recent …" -> 6 months.
+    # The bare word is included on purpose: the classifier's own
+    # ``when_hint`` for a story with no time words in it is the single word
+    # `recent`, which is what node `d49b31bc` carried, and the prompting
+    # question — *"What's a recent moment that was peak James…?"* — is where
+    # the word was actually said.
+    ("recent", 6, 0, (
+        re.compile(r"\brecent(?:ly)?\b", re.IGNORECASE),
+        re.compile(r"\blately\b", re.IGNORECASE),
+        re.compile(r"\bthese days\b", re.IGNORECASE),
+        re.compile(r"\bnowadays\b", re.IGNORECASE),
+        re.compile(r"\bin the last (?:little )?while\b", re.IGNORECASE),
+    )),
+    # "a few months ago" -> 9 months
+    ("months_ago", 9, 0, (
+        re.compile(r"\b(?:a few|a couple of|a couple|several) months ago\b", re.IGNORECASE),
+    )),
+    # "this year" -> 1 January of the capture year to the capture date.
+    #
+    # "earlier this year" belongs HERE and not on the 9-month rung above,
+    # however much wider this is: the phrase ASSERTS the calendar year, and a
+    # 9-month offset from a February capture would start in the year before the
+    # one the person just named. A rung may be wider than the phrase suggests;
+    # it may never contradict it.
+    ("this_year", 0, 0, (
+        re.compile(r"\b(?:earlier )?this year\b", re.IGNORECASE),
+    )),
+)
+
+#: The rung whose window is the ruling's DEFAULT — the one a bare "recent"
+#: lands on, and the six months the ruling names in its first sentence. Named
+#: so a caller can say "the default recency window" without re-counting the
+#: table.
+DEFAULT_RECENCY_RUNG = "recent"
+
+#: The calendar-anchored rung's marker: it runs from 1 January of the capture
+#: year rather than from an offset behind the capture date.
+RECENCY_YEAR_START_RUNG = "this_year"
+
+#: What a recency placement's provenance ``claim`` reads as. The owner's words
+#: for it are *"it renders as 'placed by you', because the person is the one
+#: saying it was recent"*, so the clause is filed under basis ``stated`` and
+#: :func:`display_date` renders it *"— you said recent, told 2026-07-14"*. It
+#: is deliberately NOT one of :data:`VERBATIM_PROVENANCE_BASES`: a calculated
+#: or inferred clause is the one thing this must not read as.
+RECENCY_PROVENANCE = "{cue}, told {captured}"
+
+#: Where a recency placement came from, for the provenance entry's ``source``.
+RECENCY_PROVENANCE_SOURCE = "recency"
+
+
+def recency_cue(*texts: object) -> tuple[str, str] | None:
+    """``(rung name, the words that matched)`` for the strongest cue, or ``None``.
+
+    Reads each text in the order given and returns the NARROWEST rung any of
+    them matched (:data:`RECENCY_RUNGS` is narrowest-first, and the scan is by
+    rung rather than by text, so a tight cue in the prompting question beats a
+    loose one in the story and vice versa). This is the one reader of the
+    recency vocabulary: `classifier_claims`, the fold and the prescreen all
+    call it rather than matching the patterns themselves.
+
+    TWO REFUSALS, both applied per TEXT before any rung is tried, and both of
+    them the cheap direction (see :data:`RECENCY_VETO_RES`):
+
+    * **The year trap.** A text that names a four-digit year DATES ITSELF, so a
+      recency word inside it is not the reading — *"this week in 1985 we drove
+      to Mesa"*, *"I remember it like it was yesterday: he wrote from Korea in
+      1952"*. This is `classifier_claims._age_band_text`'s own guard, reused
+      rather than re-decided: that function refuses an age value carrying a year
+      for exactly this reason, and :data:`YEAR_RE` is the one table both ask.
+      Per text and not per call, so a ``when_hint`` of *"recent"* still places a
+      story whose description happens to mention a year elsewhere.
+    * **The idioms**, :data:`RECENCY_VETO_RES` — a recency word saying the
+      opposite of recency.
+    """
+    haystacks = [
+        str(text) for text in texts
+        if isinstance(text, str) and text.strip()
+        and not YEAR_RE.search(text)
+        and not any(veto.search(text) for veto in RECENCY_VETO_RES)
+    ]
+    if not haystacks:
+        return None
+    for name, _months, _days, patterns in RECENCY_RUNGS:
+        for pattern in patterns:
+            for body in haystacks:
+                match = pattern.search(body)
+                if match is not None:
+                    return name, " ".join(match.group(0).split())
+    return None
+
+
+def recency_window(name: object) -> tuple[int, int] | None:
+    """One rung's ``(months, days)`` back from the capture date, or ``None``."""
+    wanted = str(name or "").strip()
+    for rung, months, days, _patterns in RECENCY_RUNGS:
+        if rung == wanted:
+            return months, days
+    return None
+
+
+def _shift_months(day: _date, months: int) -> _date:
+    """``day`` that many months EARLIER, clamped into a shorter month.
+
+    31 August less six months is 28 February, not an error: the same clamp
+    :func:`_shift_token` already applies to a leap day, applied to the one
+    other place a month's length can bite.
+    """
+    total = (day.year * 12 + (day.month - 1)) - months
+    year, month = divmod(total, 12)
+    month += 1
+    return _date(year, month, min(day.day, _month_last_day(year, month)))
+
+
+def from_recency(captured: object, *texts: object) -> DateRecord | None:
+    """A recency cue plus a capture date as a STATED range (owner ruling 1).
+
+    ``captured`` is when the telling was recorded — a prompted answer's
+    ``captured_at``/``answered_date``, the one date the vault holds about the
+    telling itself. ``texts`` are the places the cue may have been said, in
+    preference order: the story's own words, and the QUESTION that prompted the
+    answer, because *"What's a recent moment…"* is the person being told the
+    word and answering in it.
+
+    ``None`` — unchanged, still an occurrence — when there is no cue, or no
+    capture date, or the capture date is unreadable. The capture date is the
+    whole warrant: without it "recent" bounds nothing and the honest reading is
+    the one the substrate already had.
+
+    The record is ``basis: "stated"``, because the person stated it, and its
+    provenance clause is :data:`RECENCY_PROVENANCE` under the same basis, so it
+    renders as *placed by you* and never as arithmetic.
+    """
+    day = capture_day(captured)
+    if day is None:
+        return None
+    found = recency_cue(*texts)
+    if found is None:
+        return None
+    name, phrase = found
+    window = recency_window(name)
+    if window is None:
+        return None
+    months, days = window
+    if name == RECENCY_YEAR_START_RUNG:
+        start = _date(day.year, 1, 1)
+    elif months:
+        start = _shift_months(day, months)
+    elif days:
+        start = day - _timedelta(days=days)
+    else:  # pragma: no cover - a rung with no window is a table error
+        return None
+    if start > day:
+        return None
+    earliest, latest = start.isoformat(), day.isoformat()
+    return DateRecord(
+        best=f"{earliest}/{latest}",
+        earliest=earliest,
+        latest=latest,
+        granularity="range",
+        # They said it loosely and they said it themselves: `approximate` is
+        # the confidence for a bound the person asserted without naming a day.
+        confidence="approximate",
+        basis="stated",
+        provenance=({
+            "claim": RECENCY_PROVENANCE.format(cue=phrase.lower(), captured=latest),
+            "basis": "stated",
+            "source": RECENCY_PROVENANCE_SOURCE,
+        },),
+    )
+
+
+def capture_day(value: object) -> _date | None:
+    """A capture timestamp as a calendar day, or ``None``.
+
+    PUBLIC because the recency rung's two halves live in two modules: this one
+    turns the frontmatter value into a day, and `classifier_claims.
+    capture_context` needs the same answer to decide which of
+    :data:`classifier_claims.CAPTURE_DATE_KEYS` to use. One parser, two
+    callers — a second reading of ``captured_at`` is exactly the duplicate this
+    module exists not to have.
+
+    Accepts a ``date``/``datetime``, an ISO day, and an ISO timestamp with or
+    without a zone — every shape a vault's ``captured_at`` has ever carried —
+    and refuses everything else rather than guessing.
+    """
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, _date):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    match = _DAY_RE.match(text[:10])
+    if match is None:
+        return None
+    year, month, day = (int(part) for part in match.groups())
+    if not (1 <= month <= 12) or not (1 <= day <= _month_last_day(year, month)):
+        return None
+    return _date(year, month, day)
+
 def display_date(record: object, *, with_basis: bool = True) -> str:
     """Render a record the way the person would recognise it.
 
@@ -1056,6 +1344,34 @@ def gap_months(left: object, right: object) -> int | None:
     if lo <= hi:
         return None
     return max(0, _month_index(lo) - _month_index(hi) - 1)
+
+
+def span_months(record: object) -> int | None:
+    """How many whole calendar months ONE interval covers; ``None`` when unbounded.
+
+    The third reading of the same arithmetic :func:`overlap_months` and
+    :func:`gap_months` already share, and here for the same stated reason: how
+    WIDE a placement is is a question two callers now ask (the precision-card
+    stakes gate, and anything that wants to say "this is inside about a year"),
+    and a second implementation of it is the duplicate those two docstrings
+    exist to prevent.
+
+    Inclusive of both end months, exactly as :func:`overlap_months` is: a
+    single year is 12, a single month is 1, and 2026-01-14/2026-07-14 is 7. An
+    open-ended or unreadable record is ``None`` — an interval with no far edge
+    has no width, and a caller must decide what that means rather than be
+    handed a number that pretends otherwise.
+    """
+    parsed = record if isinstance(record, DateRecord) else from_dict(record)
+    if parsed is None or parsed.earliest is None or parsed.latest is None:
+        return None
+    bounds = _interval_ordinals(parsed)
+    if bounds is None:
+        return None
+    lo, hi = bounds
+    if lo > hi:
+        return None
+    return _month_index(hi) - _month_index(lo) + 1
 
 
 def at_most(confidence: str, floor: str) -> str:

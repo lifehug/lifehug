@@ -238,6 +238,19 @@ REACH_SATURATION = twi.REACH_SATURATION
 #: precision appropriate to the event*, never demand false precision). Anything
 #: not named here targets :data:`DEFAULT_PRECISION_TARGET`, and a node already
 #: at or finer than its target mints no gap at all.
+#:
+#: This table IS owner ruling 3 of 2026-09-23 — *"a question MAY ask for higher
+#: fidelity when that would resolve many things … and their wording may name
+#: the fidelity they need"* — as it was already built, and it is left alone on
+#: purpose. Every kind that asks finer than a year is a kind other placements
+#: are read against (a birth, a death, a wedding, a child's birth, a
+#: graduation, a first meeting), which is leverage by construction rather than
+#: by arithmetic; the `precision_coarse` slot in :data:`KIND_SENTENCES` is
+#: where the wording names it (*"Do you know the {target} of …?"*). What ruling
+#: 3 needed built is the twin on the resolver's own sentence, which is a
+#: model's to write: `resolver.PROMPT` now tells it to ask for the LEAST
+#: fidelity that settles the moment and to name a finer grain only when the
+#: same answer reaches other moments too.
 PRECISION_TARGETS = {
     "birth": "day",
     "death": "day",
@@ -4027,6 +4040,28 @@ def _evidence_refs(group: dict) -> list[str]:
     return sorted({_source_key(claim) for claim in group["claims"] if _source_key(claim)})
 
 
+def _straddles_a_frame(record: object, frames: object) -> bool:
+    """Does this interval fall across a decade or an age-frame boundary?
+
+    Owner ruling 2 names both edges in one breath — *"straddles a frame
+    (decade/age-frame) boundary"* — because they are the same defect for a
+    reader: an interval that cannot say which side of an edge the moment falls
+    on puts the moment in two places on the page at once. The age-frame half is
+    `cross_dating.frames_touching`, which is already THE rule for that question
+    (`_frame_memberships` reads it and there is no second copy); the decade half
+    is the two bounds' own decades, which is what the legacy band list drew.
+    """
+    parsed = chrono.from_dict(record)
+    if parsed is None:
+        return False
+    low = chrono.year_of(parsed)
+    high = chrono.year_of(parsed, end=True)
+    if low is not None and high is not None and low // 10 != high // 10:
+        return True
+    touching = cd.frames_touching(frames or (), parsed)
+    return len(touching) > 1 or any(relation == "overlaps" for _band, relation in touching)
+
+
 def _resolution_suppresses_date_question(group: dict, *, unplaced: bool = False) -> bool:
     """A non-event is not a missing date assertion; an unfinished search is one.
 
@@ -4675,6 +4710,48 @@ def derive_calculated_timeline(
         items = [row for row in items
                  if collapsed_text(row.get("work_item_id")) not in dangling]
         for work_item_id in dangling:
+            components.pop(work_item_id, None)
+    # A DATE CARD ONLY WHEN IT CHANGES SOMETHING (owner ruling 2, 2026-09-23).
+    # `twi.date_card_changes_something` holds the ruling and the reasoning; this
+    # is only the wiring that hands it the five inputs, all of which the fold
+    # has already computed. Dropped HERE, beside the dangling-anchor drop and
+    # for the same reason: `resolves` is one of the five and has no value before
+    # `apply_gain`. Work items only — no node's placement moves, so
+    # `CALCULATION_RULE_VERSION` does not move either.
+    ordered_nodes = {edge.subject for edge in edges}
+    ordered_nodes |= {anchor for edge in edges for anchor in (edge.anchors or ())}
+    stakeless: set[str] = set()
+    for row in items:
+        node_id = collapsed_text(row.get("node_ref"))
+        # The window the ruling measures is the node's own PLACEMENT — the best
+        # value, or the containment window when that is all there is. The
+        # resolver's `probable_window` is deliberately not read here: the ledger
+        # is not a derivation input (ADR 0037), and
+        # `temporal_publication._without_stakeless_date_cards` applies the same
+        # predicate where that window does exist.
+        record = placed.get(node_id) or possibilities.get(node_id)
+        reason = twi.no_date_card_reason(
+            row,
+            window=chrono.span_months(record),
+            orders=node_id in ordered_nodes,
+            contradicted=node_id in contradicted_nodes,
+            straddles_frame=_straddles_a_frame(record, frames),
+        )
+        if reason is None:
+            continue
+        work_item_id = collapsed_text(row.get("work_item_id"))
+        if work_item_id:
+            stakeless.add(work_item_id)
+        diagnostics.append({
+            "finding": reason,
+            "node_id": node_id,
+            "work_item_id": work_item_id,
+            "event_kind": collapsed_text(row.get("event_kind")),
+        })
+    if stakeless:
+        items = [row for row in items
+                 if collapsed_text(row.get("work_item_id")) not in stakeless]
+        for work_item_id in stakeless:
             components.pop(work_item_id, None)
     keystone_rows = tg.keystones(items, dependencies)
 

@@ -95,11 +95,18 @@ moments nobody recorded, which is the entire 700-odd it is here for.
 
 WHAT IT REFUSES TO INVENT, by name:
 
-* **`when_hint` is never parsed.** It is free text ("sixth grade", "two weeks
-  after the wedding") and `chronology.parse_age` is a FIELD parser, not a
-  free-text detector: run over that field it reads *"two weeks after the
-  wedding"* as age 2 and *"1985"* as age 5. The hint rides as evidence and
-  dates nothing.
+* **`when_hint` is never parsed AS A DATE OR AN AGE.** It is free text
+  ("sixth grade", "two weeks after the wedding") and `chronology.parse_age` is
+  a FIELD parser, not a free-text detector: run over that field it reads *"two
+  weeks after the wedding"* as age 2 and *"1985"* as age 5. The hint rides as
+  evidence and dates nothing — with ONE named exception, added under the
+  owner's 2026-09-23 ruling and no wider than the ruling: a RECENCY cue
+  (`chronology.RECENCY_RUNGS`) read together with the telling's own capture
+  date. That is not free-text date parsing. It is a closed vocabulary of six
+  rungs matched against the moment's prose and against the question that
+  prompted the answer, and the interval it yields is bounded at both ends by
+  two facts the vault already holds: a word the person chose and the day they
+  said it. See :func:`recency_reading`.
 * **The free-text `anchor` is never an ordering claim.** The classifier's own
   prompt calls it "the nearest landmark", and *nearest* does not assert
   *during*. Only the structured `date.anchor_ref` becomes a `relative_order`
@@ -128,6 +135,7 @@ if str(SYSTEM_DIR) not in sys.path:
 
 import chronology as chrono  # noqa: E402
 import classify_story  # noqa: E402
+import cross_dating  # noqa: E402
 import event_identity as ei  # noqa: E402
 import landmark_projection as lp  # noqa: E402
 import temporal_claims as tc  # noqa: E402
@@ -204,6 +212,33 @@ OCCURRENCE_CLAIM_CONFIDENCE = 0.9
 #: the string; reading it from there is what keeps the fold's owner rule and
 #: this module's default the same person.
 OWNER_SUBJECT_REF = twi.OWNER_SUBJECT_REF
+
+#: The frontmatter keys a telling's CAPTURE DATE has been written under, best
+#: first. `process_answer` writes all three on a prompted answer
+#: (`captured_at` to the second, `answered_date` and `asked_at` to the day);
+#: an older answer file carries `captured_at` alone, and a hand-filed source
+#: may carry only `date`. First key that parses wins, so the most precise
+#: record of when the telling happened is the one the recency rung counts back
+#: from. `chronology.capture_day` does the parsing, so a timestamp shape this
+#: list has never seen is refused rather than guessed at.
+CAPTURE_DATE_KEYS = ("captured_at", "answered_date", "asked_at", "date")
+
+#: Where the PROMPTING QUESTION's words live. The owner's ruling puts the cue
+#: in *"the story OR the question that prompted the answer"*, and it is the
+#: question that carries it in the case the ruling was written for: `answers/
+#: O6.md`'s story has no time words at all and its question asks for *"a
+#: **recent** moment"*. `question_text` is what `process_answer` writes;
+#: `title` is the fallback for the older answers written before that key
+#: existed, which embed the question verbatim (*"Question A7 — Was there a
+#: moment…"*).
+QUESTION_TEXT_KEYS = ("question_text", "title")
+
+#: A recency placement is the person's own loose bound, so it is scored the way
+#: `landmark_projection.CONFIDENCE_SCORE` scores an `approximate` record they
+#: stated: below a named date, above an age statement's arithmetic. The record
+#: itself carries the same word (`chronology.from_recency`), so this number and
+#: that one cannot disagree.
+RECENCY_CLAIM_CONFIDENCE = lp.CONFIDENCE_SCORE["approximate"]
 
 #: Event-level keys a classification may carry that name WHO the event
 #: happened to. The current classify prompt asks for `subject` per event
@@ -416,7 +451,96 @@ def _age_band_text(value: object) -> str | None:
     return text if chrono.parse_age(text) is not None else None
 
 
-def temporal_reading(event: object) -> dict:
+def capture_context(vault_root: str | Path, source_path: object) -> dict:
+    """``{"captured": <ISO day>, "question_text": <str>}`` for one telling.
+
+    The one reader of a telling's own frontmatter in this module, and the only
+    reason it exists: the owner's recency ruling needs the DAY the telling was
+    recorded, and that day does not survive into
+    ``state/classifications/``. `classify_story.build_classification` keeps
+    ``source_path``, ``source_title`` and ``source_type`` and drops
+    ``captured_at``, ``answered_date`` and ``question_text``, so the capture
+    date has to come from the answer file itself.
+
+    Read through `classify_story.load_source_text`, which is the ONE loader for
+    an answer or a source (it wraps `lifehug_core.skip_leading_frontmatter_blocks`
+    so a stacked preamble reads the same here as everywhere else). Everything
+    unreadable degrades to ``{}`` — the same degradation
+    :func:`document_revision` already makes — and an event with no capture date
+    stays exactly the occurrence it was.
+    """
+    try:
+        path = store.store_path(vault_root, source_path)
+        metadata, _body = classify_story.load_source_text(path)
+    except (OSError, ValueError, TypeError, UnicodeDecodeError):
+        return {}
+    if not isinstance(metadata, dict):
+        return {}
+    captured = ""
+    for key in CAPTURE_DATE_KEYS:
+        if chrono.capture_day(metadata.get(key)) is not None:
+            captured = str(metadata.get(key))
+            break
+    question = ""
+    for key in QUESTION_TEXT_KEYS:
+        question = collapsed_text(metadata.get(key))
+        if question:
+            break
+    found = {}
+    if captured:
+        found["captured"] = captured
+    if question:
+        found["question_text"] = question
+    return found
+
+
+def recency_reading(event: object, capture: object = None) -> dict | None:
+    """A recency cue plus the capture date, as a STATED range. Owner ruling 1.
+
+        "'Recent' with a known capture date IS a placement, not a guess. Place
+        the moment as a STATED range [capture_date - 6 months, capture_date],
+        basis stated — it renders as 'placed by you', because the person is the
+        one saying it was recent." (owner, staging, 2026-09-23)
+
+    The moment this ruling was written for: `answers/O6.md`, captured
+    2026-07-14, answering *"What's a **recent** moment that was peak James…?"*.
+    The story has no time words, the classifier stamped ``when_hint: recent``,
+    and the substrate filed an ``occurrence`` — *when is not known* — which is
+    not what the person said. They said it was recent, and the vault knows what
+    day they said it on. Two facts, one interval.
+
+    The cue is looked for in the moment's own prose
+    (`cross_dating.moment_fields` — title, description, ``when_hint``, the ONE
+    reader of a moment's prose fields) and in the QUESTION that prompted the
+    answer, because a person answering *"a recent moment"* in kind has said the
+    word as surely as if they had typed it. Which rung fires is
+    `chronology.RECENCY_RUNGS`' decision and not this module's: there is ONE
+    recency vocabulary and every reader goes through it.
+
+    ``None`` — still an occurrence — when there is no cue, or no capture date.
+    Not a fabrication in either direction: without the capture date "recent"
+    bounds nothing, and without the cue there is nothing to bound.
+    """
+    row = capture if isinstance(capture, dict) else {}
+    captured = row.get("captured")
+    if not captured:
+        return None
+    record = chrono.from_recency(
+        captured,
+        *cross_dating.moment_fields(event),
+        collapsed_text(row.get("question_text")),
+    )
+    if record is None:
+        return None
+    return {
+        "claim_type": "date",
+        "temporal_value": record.to_dict(),
+        "basis": "explicit",
+        "confidence": RECENCY_CLAIM_CONFIDENCE,
+    }
+
+
+def temporal_reading(event: object, capture: object = None) -> dict:
     """What this moment asserts about time: ``{claim_type, temporal_value,
     basis, confidence}``. Deterministic, and never a fabrication.
 
@@ -431,8 +555,19 @@ def temporal_reading(event: object) -> dict:
        ``relative_order`` claim, ``explicit``; a missing relation defaults to
        ``within``, which is what `chronology.record_from_claim` already does
        with a bare anchor;
-    4. nothing datable -> an ``occurrence`` claim. It happened. When is not
+    4. a RECENCY cue plus the telling's capture date -> a ``date`` claim,
+       ``explicit``, basis ``stated`` (:func:`recency_reading`, owner ruling 1
+       of 2026-09-23). It sits BELOW the three above because a date, an age or
+       a landmark the person named is always tighter and always wins; it sits
+       ABOVE the occurrence because "recent, told on this day" is a placement
+       and an occurrence is the admission that there is none;
+    5. nothing datable -> an ``occurrence`` claim. It happened. When is not
        known, and saying so is the whole reason that type exists.
+
+    ``capture`` is :func:`capture_context`'s output for the telling this event
+    came out of. Absent — a source with no capture date, or any caller written
+    before the ruling — rung 4 cannot fire and the reading is byte-identical to
+    what it was, which is what keeps this change additive.
     """
     row = event if isinstance(event, dict) else {}
     claim = chrono.possible_date_claim(row.get("date"))
@@ -466,6 +601,9 @@ def temporal_reading(event: object) -> dict:
                 "basis": "explicit",
                 "confidence": ORDER_CLAIM_CONFIDENCE,
             }
+    recency = recency_reading(row, capture)
+    if recency is not None:
+        return recency
     return {
         "claim_type": tc.OCCURRENCE_CLAIM_TYPE,
         "temporal_value": None,
@@ -610,6 +748,7 @@ def event_claims(
     revision: object,
     source_path: object,
     document_places: object = (),
+    capture: object = None,
     now: object = None,
 ) -> list[dict]:
     """One classifier event -> its direct and contextual validated claims.
@@ -621,11 +760,16 @@ def event_claims(
     same id). It is the substrate's own minter, through
     `temporal_projection.derive_node_id`, with the moment's key as the
     discriminator — the "stable ordinal or slug" that function asks for.
+
+    ``capture`` is :func:`capture_context` for the telling, computed once per
+    classification by the caller rather than once per event: every event of one
+    story was recorded on the same day and prompted by the same question, and
+    re-reading the frontmatter per event would read one file N times.
     """
     import temporal_projection as tp  # noqa: PLC0415 — pure, but keeps the load light
 
     row = event if isinstance(event, dict) else {}
-    direct = {**temporal_reading(row), "reading_kind": "direct"}
+    direct = {**temporal_reading(row, capture), "reading_kind": "direct"}
     grounding = row.get("source_grounding")
     direct_grounded = False
     if (isinstance(grounding, dict)
@@ -963,6 +1107,11 @@ def migrate_classifier_moments(
         # Event identity I1: declared once per classification, not once per
         # event — every event of one story shares the story.
         story_revision = document_revision(root, source_path)
+        # Owner ruling 1 (2026-09-23): the recency rung needs the DAY the
+        # telling was recorded and the question that prompted it, and neither
+        # survives into the classification. Read once per story, for the same
+        # reason `story_revision` is.
+        capture = capture_context(root, source_path)
         events = classification_events(data)
         report["skipped_empty_description"] += len(
             (data or {}).get("events") or ()
@@ -974,7 +1123,7 @@ def migrate_classifier_moments(
         for event in events:
             claims = event_claims(
                 stem=stem, event=event, revision=revision,
-                source_path=source_path, now=now,
+                source_path=source_path, capture=capture, now=now,
             )
             if _restates_recorded_record(
                     claims, source_type=source_type,
