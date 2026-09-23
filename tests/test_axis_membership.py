@@ -14,6 +14,13 @@ Four tiers, one test class each:
 * anybody else's own event — ``none`` / ``not_family`` (rule 3);
 * before his birth — ``none`` / ``pre_birth`` (rule 4, v324's rule kept).
 
+AMENDED v338: rule 3 is a DECISION about a person whose relationship is KNOWN
+to be outside the immediate family, and v334 let it swallow every subject whose
+tier could not be read at all. Because ``not_family`` is what suppresses the
+date question downstream, a loss whose person had no ``relationship`` on the
+roster minted no "when?" card. The sixth reason ``relationship_unknown`` holds
+that case, beside ``subject_unresolved``, and both keep their questions.
+
 Synthetic data only; NEVER references ~/Workspace/dave.
 """
 
@@ -137,8 +144,20 @@ class VocabularyTests(unittest.TestCase):
         self.assertEqual(
             set(tp.AXIS_MEMBERSHIP_REASONS),
             {"lived", "immediate_family_in_lifetime", "pre_birth", "not_family",
-             "subject_unresolved"},
+             "subject_unresolved", "relationship_unknown"},
         )
+
+    def test_only_the_rulings_two_decisions_take_a_node_off_the_axis(self) -> None:
+        """v338. ``axis_membership: none`` has four reasons and only two of them
+        are DECISIONS; the tuple every consequence site reads names exactly
+        those two, and the two open questions are absent from it."""
+        self.assertEqual(tp.AXIS_DECIDED_OFF_AXIS_REASONS,
+                         ("not_family", "pre_birth"))
+        for reason in ("relationship_unknown", "subject_unresolved"):
+            with self.subTest(reason):
+                self.assertNotIn(reason, tp.AXIS_DECIDED_OFF_AXIS_REASONS)
+        self.assertTrue(
+            set(tp.AXIS_DECIDED_OFF_AXIS_REASONS) <= set(tp.AXIS_MEMBERSHIP_REASONS))
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +260,55 @@ class RosterTierTests(unittest.TestCase):
         self.assertEqual(self.tier(roster, "person/kodi-nixon"),
                          (axm.UNKNOWN_TIER, "none"))
 
+    def reason(self, roster: object, subject: str, *,
+               mention_texts: tuple[str, ...] = ()) -> str:
+        """The PUBLISHED reason this roster and this subject reach, end to end.
+
+        The three layers and the rule read together, because v338's defect lived
+        in the seam between them: the tier came out right and the reason did
+        not.
+        """
+        tier, _ = axm.subject_family_tier(
+            subject, tier_index=axm.family_tier_index(roster),
+            mention_texts=mention_texts,
+        )
+        return axm.axis_membership(
+            occurrence_subject_scope="other_person",
+            owner_timeline_relation="contextual_only",
+            family_tier=tier, before_owner_birth=False,
+        )[axm.AXIS_MEMBERSHIP_REASON_FIELD]
+
+    def test_a_roster_row_with_no_relationship_reads_relationship_unknown(self) -> None:
+        """v338, and the shape the hosted loss test handed in: one row, a name,
+        a slug, and no ``relationship`` — which on the owner's own vault is 9 of
+        11 person rows. Nobody has said who this is, so nothing is decided."""
+        roster = person_roster(roster_row("Lumen Vasquez"))
+        self.assertEqual(self.reason(roster, "person/lumen-vasquez"),
+                         "relationship_unknown")
+
+    def test_a_roster_row_that_says_friend_reads_not_family(self) -> None:
+        """Rule 3's premise, stated: the relationship is KNOWN and outside the
+        immediate set. This is the case v338 does NOT change."""
+        roster = person_roster(roster_row("Lumen Vasquez", relationship="friend"))
+        self.assertEqual(self.reason(roster, "person/lumen-vasquez"), "not_family")
+
+    def test_a_mention_that_says_grandmother_is_family_with_no_roster_at_all(self) -> None:
+        """The lexical layer still answers, and it answers FAMILY — the words
+        are the owner's own statement of the relation."""
+        self.assertEqual(axm.relation_word_tier("my grandmother"),
+                         axm.IMMEDIATE_FAMILY_TIER)
+        self.assertEqual(self.reason({}, "my grandmother"),
+                         "immediate_family_in_lifetime")
+
+    def test_a_bare_name_with_no_roster_at_all_reads_relationship_unknown(self) -> None:
+        """No roster, no relation word, nothing in apposition: the honest answer
+        is that nobody has said who this is. v334 called it ``not_family`` and
+        took its question away."""
+        for roster in ({}, (), person_roster()):
+            with self.subTest(type(roster).__name__):
+                self.assertEqual(self.reason(roster, "Lumen Vasquez"),
+                                 "relationship_unknown")
+
     def test_the_roster_shapes_a_seat_may_hand_the_fold_all_work(self) -> None:
         row = roster_row("Ruth", relationship="sibling")
         for snapshot in (person_roster(row), [row], (person_roster(row),)):
@@ -299,10 +367,35 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(self.row(family_tier=axm.IMMEDIATE_FAMILY_TIER),
                          ("family", "immediate_family_in_lifetime"))
 
-    def test_anybody_else_is_not_on_his_axis_at_all(self) -> None:
-        for tier in (axm.DISTANT_TIER, axm.UNKNOWN_TIER):
-            with self.subTest(tier):
-                self.assertEqual(self.row(family_tier=tier), ("none", "not_family"))
+    def test_a_known_relationship_outside_the_family_is_not_on_his_axis(self) -> None:
+        """Rule 3, and AMENDED v338 to the tier it actually decides: the
+        relationship must be KNOWN and outside the immediate set. Only
+        `DISTANT_TIER` is that statement."""
+        self.assertEqual(self.row(family_tier=axm.DISTANT_TIER),
+                         ("none", "not_family"))
+
+    def test_an_unknown_relationship_is_undecided_not_not_family(self) -> None:
+        """THE v338 DEFECT, at the rule. Under v334 an unreadable tier came out
+        ``not_family`` — rule 3's verdict, reached without rule 3's premise —
+        and downstream that is the reason that suppresses the date question. The
+        owner ruled (2026-09-23) that an unknown relationship is not that
+        decision: it reads like ``subject_unresolved``. Same membership as rule 3
+        (``none``: still not drawn on his axis until somebody says who this is),
+        a reason of its own, and the questions stay."""
+        self.assertEqual(self.row(family_tier=axm.UNKNOWN_TIER),
+                         ("none", "relationship_unknown"))
+        self.assertNotIn("relationship_unknown", tp.AXIS_DECIDED_OFF_AXIS_REASONS)
+
+    def test_the_two_undecided_reasons_read_the_same_way(self) -> None:
+        """Both are ``none``, and neither is one of the ruling's decisions —
+        which is the whole of what v338 asserts about them."""
+        unknown = self.row(family_tier=axm.UNKNOWN_TIER)
+        unresolved = self.row(occurrence_subject_scope="unresolved",
+                              owner_timeline_relation="unresolved")
+        self.assertEqual(unknown[0], unresolved[0], "none")
+        for _, reason in (unknown, unresolved):
+            with self.subTest(reason):
+                self.assertNotIn(reason, tp.AXIS_DECIDED_OFF_AXIS_REASONS)
 
     def test_before_his_birth_is_family_history(self) -> None:
         for tier in axm.FAMILY_TIERS:
@@ -454,6 +547,20 @@ class FoldTestCase(unittest.TestCase):
     def membership_ids(self, result) -> set:
         return {m["member_node_id"] for m in result.memberships}
 
+    def date_items(self, result, node: dict) -> list:
+        """Every ``precision_gap`` item about THIS node — the "when did this
+        happen?" card, which is what v334 suppressed."""
+        return [item for item in result.work_items
+                if item.get("node_ref") == node["node_id"]
+                and item.get("kind") == "precision_gap"]
+
+    def findings(self, result) -> list:
+        return [row.get("finding")
+                for row in (result.diagnostics or {}).get("findings") or ()]
+
+    def unplaced(self, result) -> list:
+        return (result.diagnostics or {}).get("unplaced") or []
+
 
 class FoldTests(FoldTestCase):
 
@@ -577,8 +684,191 @@ class FoldTests(FoldTestCase):
 
     def test_the_rule_version_moved_with_the_axis(self) -> None:
         """The same claims now calculate to a larger axis, so a projection
-        folded by the old rules is detectably stale rather than merely wrong."""
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:10")
+        folded by the old rules is detectably stale rather than merely wrong.
+
+        v338 moves it again, to `:11`: an unknown-tier node publishes a
+        different reason and keeps a work item it used to lose, which is the same
+        kind of change and needs the same signal — a v334 projection is not
+        merely mislabelled, it is missing cards.
+        """
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:11")
+
+
+# ---------------------------------------------------------------------------
+# v338 — an unknown relationship is undecided, not "not family"
+# ---------------------------------------------------------------------------
+
+
+class UnknownRelationshipKeepsItsQuestionTests(FoldTestCase):
+    """The v334 defect, at the fold, in the two shapes that caught it.
+
+    Both were hosted tests on the platform's v334 pin (lifehug-platform PR
+    #914, CI run 35920364976), ported here with synthetic names because the
+    rule belongs to the framework and a defect the framework can reproduce
+    should not need a host to notice it:
+
+    * ``test_a_generic_loss_discovery_question_is_offer_only`` — a loss whose
+      person is on the roster with no ``relationship``;
+    * ``test_ordinary_answer_replans_old_stories_and_publishes_real_timeline``
+      — the owner's own marriage, which names the spouse, and the spouse's
+      roster row carries no ``relationship`` either.
+
+    In both the tier is :data:`axis_membership.UNKNOWN_TIER`, v334 published
+    ``not_family`` for it, and ``not_family`` is what suppresses the date
+    question and drops the node from ``diagnostics["unplaced"]``.
+    """
+
+    #: The shape the hosted loss test hands in: a name, a slug, no relationship.
+    LUMEN = {"slug": "synthetic-person-lumen", "name": "Synthetic Person Lumen"}
+
+    def loss_of_lumen(self) -> dict:
+        return claim(
+            claim_type=tc.OCCURRENCE_CLAIM_TYPE,
+            subject_mention="Synthetic Person Lumen",
+            event_mention="Synthetic Person Lumen died.",
+            event_kind="death",
+            quote="Synthetic Person Lumen died.",
+            source="src-lumen-loss",
+        )
+
+    def test_a_loss_whose_person_has_no_stated_relationship_keeps_its_date_question(self) -> None:
+        """Hosted scenario 1. "Synthetic Person Lumen died." with one roster row
+        and no ``relationship``: the ordinary contextual date question must be
+        minted, on every surface. Under v334 it minted none."""
+        self.file_claims([self.loss_of_lumen()])
+        result = self.fold(roster_snapshot=person_roster(self.LUMEN))
+        node = self.row(result, "Synthetic Person Lumen")
+        self.assertEqual(node["occurrence_subject_scope"], "other_person")
+        self.assertEqual(node["axis_membership"], "none")
+        self.assertEqual(node["axis_membership_reason"], "relationship_unknown")
+        self.assertEqual(len(self.date_items(result, node)), 1,
+                         "the loss lost its 'when?' card")
+        # And the node is the owner's own debt again: nothing was decided, so
+        # something WILL be offered to him about it.
+        self.assertIn(node["node_id"], self.unplaced(result))
+        self.assertNotIn("off_owner_axis_no_question", self.findings(result))
+
+    def test_the_owners_own_marriage_naming_the_spouse_keeps_its_date_question(self) -> None:
+        """Hosted scenario 2, as its class rather than its fixture. The owner's
+        own marriage is told by naming the spouse, the spouse is a roster person
+        with no ``relationship``, so the node is ``other_person`` /
+        ``contextual_only`` over an unknown tier — and under v334 the moment
+        lost its work item entirely."""
+        self.file_claims([claim(
+            claim_type=tc.OCCURRENCE_CLAIM_TYPE,
+            subject_mention="Rowan Vale",
+            event_mention="Marriage to Rowan Vale",
+            event_kind="married",
+            quote="Marriage to Rowan Vale",
+            source="src-marriage-rowan",
+        )])
+        result = self.fold(roster_snapshot=person_roster(
+            {"slug": "rowan-vale", "name": "Rowan Vale"}))
+        node = self.row(result, "Marriage to Rowan Vale")
+        self.assertEqual(node["axis_membership_reason"], "relationship_unknown")
+        self.assertEqual(len(self.date_items(result, node)), 1)
+        self.assertIn(node["node_id"], self.unplaced(result))
+
+    def test_saying_who_the_person_is_is_what_moves_the_node(self) -> None:
+        """The same claims, three rosters: the relationship is the only input
+        that moves, and each of the three answers is a different one. This is
+        what makes ``relationship_unknown`` a WAITING state rather than a
+        verdict — an answer that settles the relation settles the axis too."""
+        self.file_claims([self.loss_of_lumen()])
+        for relationship, membership, reason in (
+            (None, "none", "relationship_unknown"),
+            ("friend", "none", "not_family"),
+            ("sibling", "family", "immediate_family_in_lifetime"),
+        ):
+            with self.subTest(relationship=relationship):
+                row = dict(self.LUMEN)
+                if relationship is not None:
+                    row["relationship"] = relationship
+                result = self.fold(roster_snapshot=person_roster(row))
+                node = self.row(result, "Synthetic Person Lumen")
+                self.assertEqual(node["axis_membership"], membership)
+                self.assertEqual(node["axis_membership_reason"], reason)
+                # ...and only the DECIDED one loses its card.
+                self.assertEqual(
+                    bool(self.date_items(result, node)),
+                    reason != "not_family",
+                )
+
+    def test_a_friends_undated_event_still_keeps_no_card_without_leverage(self) -> None:
+        """Rule 3 is untouched by v338, which is half of what makes it a fix
+        rather than a revert: a KNOWN friend's own undated milestone is still off
+        his axis, still mints no date question, and is still out of the unplaced
+        cohort with the diagnostic to say so."""
+        self.file_claims([claim(
+            claim_type=tc.OCCURRENCE_CLAIM_TYPE, subject_mention="Lumen Vasquez",
+            event_mention="Lumen Vasquez's move to Denver", event_kind="move",
+            source="src-friend-move",
+        )])
+        result = self.fold(roster_snapshot=person_roster(
+            roster_row("Lumen Vasquez", relationship="friend")))
+        node = self.row(result, "Lumen Vasquez")
+        self.assertEqual(node["axis_membership_reason"], "not_family")
+        self.assertEqual(self.date_items(result, node), [])
+        self.assertNotIn(node["node_id"], self.unplaced(result))
+        self.assertIn("off_owner_axis_no_question", self.findings(result))
+
+    def test_a_friends_undated_event_keeps_its_card_when_leverage_says_so(self) -> None:
+        """The other half of rule 3, also untouched: dating a friend's event
+        places one of the OWNER'S rows, so the date question is a question about
+        his life phrased about theirs and it is minted after all."""
+        self.file_claims([
+            claim(claim_type=tc.OCCURRENCE_CLAIM_TYPE,
+                  subject_mention="Lumen Vasquez",
+                  event_mention="Lumen Vasquez's move", event_kind="move",
+                  source="src-friend-move"),
+            claim(claim_type="relative_order", subject_mention="self",
+                  event_kind="moment", event_mention="the night I drove home",
+                  temporal_value={"relation": "after",
+                                  "anchors": ["Lumen Vasquez's move"]},
+                  source="src-after-the-move"),
+        ])
+        result = self.fold(roster_snapshot=person_roster(
+            roster_row("Lumen Vasquez", relationship="friend")))
+        node = self.row(result, "Lumen Vasquez")
+        self.assertEqual(node["axis_membership_reason"], "not_family")
+        self.assertTrue(self.date_items(result, node),
+                        "leverage should have kept the card")
+
+    def test_family_history_from_before_his_birth_is_unchanged(self) -> None:
+        """Rule 4, unchanged by v338 and asserted here because it is the other
+        reason the suppression reads: a pre-birth node keeps no card and stays
+        out of the unplaced cohort, whatever the relationship says."""
+        self.file_claims([dated("Grandma", "1932-09-16")])
+        result = self.fold()
+        node = self.row(result, "Grandma")
+        self.assertEqual(node["axis_membership_reason"], "pre_birth")
+        self.assertEqual(self.date_items(result, node), [])
+        self.assertNotIn(node["node_id"], self.unplaced(result))
+
+    def test_the_diagnostic_names_only_the_decided_reasons(self) -> None:
+        """`off_owner_axis_no_question` must stay ACCURATE: every one it reports
+        carries one of the ruling's two decisions as its reason, never an open
+        question dressed as a decision."""
+        self.file_claims([
+            self.loss_of_lumen(),
+            claim(claim_type=tc.OCCURRENCE_CLAIM_TYPE, subject_mention="a friend",
+                  event_mention="a friend's move to Denver", event_kind="move",
+                  source="src-a-friend"),
+            dated("Grandma", "1932-09-16"),
+        ])
+        result = self.fold(roster_snapshot=person_roster(self.LUMEN))
+        reported = [row for row in (result.diagnostics or {}).get("findings") or ()
+                    if row.get("finding") == "off_owner_axis_no_question"]
+        self.assertTrue(reported)
+        for row in reported:
+            with self.subTest(row.get("node_ids")):
+                self.assertIn(row.get("axis_membership_reason"),
+                              tp.AXIS_DECIDED_OFF_AXIS_REASONS)
+        # The unknown-relationship node is not among them.
+        lumen = self.row(result, "Synthetic Person Lumen")
+        self.assertNotIn(lumen["node_id"],
+                         [node_id for row in reported
+                          for node_id in row.get("node_ids") or ()])
 
 
 class ManifestTests(unittest.TestCase):

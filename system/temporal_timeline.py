@@ -181,7 +181,20 @@ from temporal_claims import (  # noqa: E402
 #: therefore calculate to a LARGER axis and to a retired "About someone else"
 #: group, for claims nobody edited, which is exactly what a rule-version bump is
 #: for.
-CALCULATION_RULE_VERSION = "timeline-rules:10"
+#:
+#: ``timeline-rules:11`` (v338): AN UNKNOWN RELATIONSHIP IS UNDECIDED. :10 read
+#: every subject whose family tier could not be read — a roster person with no
+#: ``relationship``, a name the roster has never heard of — as rule 3's
+#: ``not_family``, and ``not_family`` is the reason that suppresses the date
+#: question and drops the node from ``diagnostics["unplaced"]``. So a loss whose
+#: person carried no relationship minted no "when did they die?" card at all.
+#: Rule 3 is a DECISION about a relationship KNOWN to be outside the immediate
+#: family; the absence of that statement is not that decision (owner,
+#: 2026-09-23). The same claims now calculate to a projection where those nodes
+#: publish ``relationship_unknown``, keep their ``precision_gap`` and re-enter
+#: the unplaced cohort — a different published reason and a different work-item
+#: set for claims nobody edited.
+CALCULATION_RULE_VERSION = "timeline-rules:11"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -3086,6 +3099,24 @@ def _telling_refs(group: dict) -> tuple[str, ...]:
     return tuple(refs)
 
 
+def _decided_off_owner_axis(axis_row: object) -> bool:
+    """Did the 2026-09-23 ruling DECIDE this node off the owner's axis?
+
+    The one spelling of that question (v338). ``axis_membership`` is ``none``
+    for four different reasons and only two of them are decisions: rule 3
+    (``not_family``) and rule 4 (``pre_birth``), which are
+    `temporal_projection.AXIS_DECIDED_OFF_AXIS_REASONS`. The other two —
+    ``subject_unresolved`` and ``relationship_unknown`` — are open questions
+    wearing the ruling's default membership, and every consequence the ruling
+    attached to its decisions (no date question, out of the unplaced cohort)
+    must pass them by. Read by both consequence sites so they cannot drift.
+    """
+    row = axis_row if isinstance(axis_row, dict) else {}
+    return collapsed_text(row.get(axm.AXIS_MEMBERSHIP_FIELD)) == tp.AXIS_MEMBERSHIP_NONE \
+        and collapsed_text(row.get(axm.AXIS_MEMBERSHIP_REASON_FIELD)) \
+        in tp.AXIS_DECIDED_OFF_AXIS_REASONS
+
+
 def _owner_relevance(group: dict, *, best: object, entry_index: dict, owner: str,
                      birth: object) -> dict:
     """Whose occurrence this is, why it is on the owner's axis, and the proof.
@@ -4680,15 +4711,15 @@ def derive_calculated_timeline(
     # counting it as debt makes the number describe work that does not exist. A
     # node that still mints a leverage question re-enters `gain_universe` through
     # that item's own `node_ref`, so nothing an answer WOULD place is lost.
+    #
+    # Its two reasons are `tp.AXIS_DECIDED_OFF_AXIS_REASONS`, the same tuple
+    # `off_owner_axis_by_ruling` reads — one spelling, so the cohort and the
+    # question gate cannot disagree about what the ruling decided. A node whose
+    # relationship is merely UNKNOWN is still the owner's debt (v338): a
+    # question about it is still minted, so it is still work that exists.
     owner_axis_cohort = [
         node_id for node_id in groups
-        if not (
-            collapsed_text((relevance.get(node_id) or {}).get(
-                axm.AXIS_MEMBERSHIP_FIELD)) == tp.AXIS_MEMBERSHIP_NONE
-            and collapsed_text((relevance.get(node_id) or {}).get(
-                axm.AXIS_MEMBERSHIP_REASON_FIELD)) in (
-                    tp.AXIS_REASON_NOT_FAMILY, tp.AXIS_REASON_PRE_BIRTH)
-        )
+        if not _decided_off_owner_axis(relevance.get(node_id))
     ]
     unplaced_ids = placement.unplaced_node_ids(nodes, cohort_ids=owner_axis_cohort)
     dependencies = tg.dependency_index(
@@ -5149,17 +5180,24 @@ def _derive_work_items(
     def off_owner_axis_by_ruling(node_id: str) -> bool:
         """Did the 2026-09-23 ruling take this node OFF the owner's axis?
 
-        True only for its two decided exclusions — rule 3 (``not_family``: a
+        True only for its two DECIDED exclusions — rule 3 (``not_family``: a
         friend's divorce, a colleague's move; it stays in the substrate and on
-        that person's page) and rule 4 (``pre_birth``: family history). A subject
-        nobody has identified is NOT one of them: ``subject_unresolved`` is an
-        open question, not a decision, and suppressing its date question would
-        be the ruling silently closing something it did not rule on.
+        that person's page) and rule 4 (``pre_birth``: family history). The two
+        reasons that are not decisions are NOT among them, and v338 is the bug
+        report for forgetting the second of them:
+
+        * ``subject_unresolved`` — identity has not landed;
+        * ``relationship_unknown`` — it landed on a person nobody has placed in
+          or out of the family. Under v334 this read as rule 3, and the
+          consequence was a loss with no "when did they die?" card and an
+          owner's own marriage with no card either, because the spouse's roster
+          row happened to carry no ``relationship``.
+
+        Either way nothing has been decided about the node, and suppressing its
+        date question would be the ruling silently closing something it did not
+        rule on.
         """
-        row = axis_rows.get(node_id) or {}
-        return collapsed_text(row.get(axm.AXIS_MEMBERSHIP_FIELD)) == tp.AXIS_MEMBERSHIP_NONE \
-            and collapsed_text(row.get(axm.AXIS_MEMBERSHIP_REASON_FIELD)) in (
-                tp.AXIS_REASON_NOT_FAMILY, tp.AXIS_REASON_PRE_BIRTH)
+        return _decided_off_owner_axis(axis_rows.get(node_id))
 
     def sentence(item_kind, node_id, group, **extra):
         """This node's question through the ONE composer (D3)."""

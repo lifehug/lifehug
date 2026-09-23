@@ -171,23 +171,45 @@ AXIS_MEMBERSHIPS = (
 )
 
 #: WHY the membership above is what it is — the ruling's four clauses, plus the
-#: one honest fifth for a subject nobody has identified yet. ``lived`` is rule
+#: two honest reasons for the things nobody has decided yet. ``lived`` is rule
 #: 1, ``immediate_family_in_lifetime`` rule 2, ``not_family`` rule 3,
-#: ``pre_birth`` rule 4 (which is v324's own pre-birth rule under a name), and
-#: ``subject_unresolved`` says no tier could be read because identity has not
-#: landed — not a decision against the node, and the identity question stays
-#: open.
+#: ``pre_birth`` rule 4 (which is v324's own pre-birth rule under a name).
+#:
+#: The other two are NOT decisions and the difference is load-bearing (v338).
+#: ``subject_unresolved`` says identity has not landed. ``relationship_unknown``
+#: says identity HAS landed on a person and nobody has said who that person is
+#: to the owner — a roster row with no ``relationship`` and a name that carries
+#: no relation word, or a named subject the roster has never heard of. Rule 3 is
+#: a DECISION about somebody whose relationship is known to be outside the
+#: immediate family; an unknown relationship is not that decision, so it may
+#: not borrow rule 3's consequences. Both are ``none`` — the node is not drawn
+#: on the owner's axis until somebody says who this is, which is the ruling's
+#: own default and the person-page home — and both KEEP their questions, which
+#: is what tells them apart from ``not_family`` and ``pre_birth`` downstream.
 AXIS_REASON_LIVED = "lived"
 AXIS_REASON_IMMEDIATE_FAMILY = "immediate_family_in_lifetime"
 AXIS_REASON_PRE_BIRTH = "pre_birth"
 AXIS_REASON_NOT_FAMILY = "not_family"
 AXIS_REASON_SUBJECT_UNRESOLVED = "subject_unresolved"
+AXIS_REASON_RELATIONSHIP_UNKNOWN = "relationship_unknown"
 AXIS_MEMBERSHIP_REASONS = (
     AXIS_REASON_LIVED,
     AXIS_REASON_IMMEDIATE_FAMILY,
     AXIS_REASON_PRE_BIRTH,
     AXIS_REASON_NOT_FAMILY,
     AXIS_REASON_SUBJECT_UNRESOLVED,
+    AXIS_REASON_RELATIONSHIP_UNKNOWN,
+)
+
+#: The reasons that are the ruling's DECIDED exclusions, spelled once here so
+#: the fold's two suppression sites and any host cannot answer "did the ruling
+#: take this off his axis?" three ways. ``relationship_unknown`` and
+#: ``subject_unresolved`` are deliberately absent: nothing has been decided
+#: about them, so they keep their questions and their place in the unplaced
+#: cohort (v338; v334's defect was that the first of them was missing).
+AXIS_DECIDED_OFF_AXIS_REASONS = (
+    AXIS_REASON_NOT_FAMILY,
+    AXIS_REASON_PRE_BIRTH,
 )
 
 #: The evidence ref a FRAME membership cites. A frame membership is arithmetic
@@ -1727,6 +1749,7 @@ def surfaces_conflict(items: object) -> tuple[str, ...]:
 __all__ = [
     "AGE_FRAME_EVENT_KIND",
     "NAMED_ERA_EVENT_KIND",
+    "AXIS_DECIDED_OFF_AXIS_REASONS",
     "AXIS_MEMBERSHIPS",
     "AXIS_MEMBERSHIP_FAMILY",
     "AXIS_MEMBERSHIP_NONE",
@@ -1736,6 +1759,7 @@ __all__ = [
     "AXIS_REASON_LIVED",
     "AXIS_REASON_NOT_FAMILY",
     "AXIS_REASON_PRE_BIRTH",
+    "AXIS_REASON_RELATIONSHIP_UNKNOWN",
     "AXIS_REASON_SUBJECT_UNRESOLVED",
     "AXIS_RELATIONS",
     "CONFLICT_STATES",

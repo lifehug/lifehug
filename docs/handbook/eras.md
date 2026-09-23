@@ -345,12 +345,15 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:10 -->
-`timeline-rules:10` (v334, the owner ruling of 2026-09-23), where every node
-also publishes `axis_membership`/`axis_membership_reason` and the axis the frame
-memberships are gated on is that field: an immediate family member's own event
-during the owner's lifetime is drawn on his axis and takes its frames, where
-`contextual_only` used to leave it with none.
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:11 -->
+`timeline-rules:11` (v338). `timeline-rules:10` (v334, the owner ruling of
+2026-09-23) made every node publish `axis_membership`/`axis_membership_reason`
+and gated the frame memberships on that field: an immediate family member's own
+event during the owner's lifetime is drawn on his axis and takes its frames,
+where `contextual_only` used to leave it with none. `:11` corrects which nodes
+that ruling DECIDED against — a subject whose relationship nobody has stated now
+publishes `relationship_unknown` instead of `not_family`, and keeps the date
+question `not_family` was suppressing.
 
 **Legacy identity, never legacy authority.** A roster row whose name is a
 canonical band spelling (`My 20s`, `Childhood`, …) contributes *aliases*
