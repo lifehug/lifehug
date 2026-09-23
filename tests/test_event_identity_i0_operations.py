@@ -689,6 +689,59 @@ class EnvelopeIntegrityTests(unittest.TestCase):
         self.assertEqual(len(ei.load_event_identities(root)), 2)
 
 
+    def test_an_envelope_that_supersedes_on_disk_bindings_files_whole(self):
+        # v329 (owner's vault, 2026-09-21→23). Until this release the writer
+        # validated the envelope against ONLY the bindings it had just filed,
+        # while the envelope also names the bindings it SUPERSEDES — records
+        # already on disk that are nobody's to re-file. Every apply that
+        # superseded anything (the binder's `create` absorbing an earlier
+        # episode; every `merge`) therefore refused itself right after
+        # writing, and the hosted binder pass parked each file-claims job.
+        root = _vault(self, "ei-c2-supersedes-")
+        fixture = fixture_merge(root)
+        survivor = fixture["survivor"]["episode_id"]
+        moved = {
+            "telling_ref": TELLING_C, "episode_id": survivor, "relation": "same",
+            "origin": "confirmed", "rule_version": ei.IDENTITY_RULE_VERSION,
+            "created_at": LATER,
+        }
+        moved_id = ei.validate_event_identity(moved)["identity_id"]
+        operation = {**fixture["merge"], "creates_binding_ids": [moved_id]}
+        filed = ei.file_operation_envelope(root, operation=operation, bindings=[moved])
+        self.assertTrue(filed["operation_created"])
+        # The envelope the writer validated is the whole one: the new binding
+        # AND the superseded ones read back off the store.
+        self.assertEqual(
+            sorted(row["identity_id"] for row in filed["bindings"]), [moved_id]
+        )
+        whole = ei.load_operation_envelope(root, filed["operation"])
+        self.assertEqual(
+            sorted(row["identity_id"] for row in whole["bindings"]),
+            sorted([moved_id, *fixture["absorbed"]["binding_ids"]]),
+        )
+
+    def test_superseding_a_binding_the_store_does_not_hold_is_still_a_loud_refusal(self):
+        root = _vault(self, "ei-c2-supersedes-missing-")
+        fixture = fixture_merge(root)
+        survivor = fixture["survivor"]["episode_id"]
+        moved = {
+            "telling_ref": TELLING_C, "episode_id": survivor, "relation": "same",
+            "origin": "confirmed", "rule_version": ei.IDENTITY_RULE_VERSION,
+            "created_at": LATER,
+        }
+        moved_id = ei.validate_event_identity(moved)["identity_id"]
+        ghost = "eid:" + "f" * 24
+        operation = {
+            **fixture["merge"],
+            "creates_binding_ids": [moved_id],
+            "supersedes_binding_ids": [*fixture["absorbed"]["binding_ids"], ghost],
+        }
+        with self.assertRaises(ei.EventIdentityError) as caught:
+            ei.file_operation_envelope(root, operation=operation, bindings=[moved])
+        self.assertEqual(caught.exception.code, "identity_envelope_incomplete")
+        self.assertEqual(caught.exception.detail["missing_binding_ids"], [ghost])
+
+
 # --------------------------------------------------------------------------
 # Split and merge
 # --------------------------------------------------------------------------

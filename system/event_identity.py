@@ -2174,7 +2174,25 @@ def file_operation_envelope(
         filed.append(record)
         created_any = created_any or created
     operation_record, operation_created = file_episode_operation(vault_root, **dict(operation))
-    validate_envelope(operation_record, filed)
+    # The envelope names two kinds of binding: the ones this call just filed
+    # and the ones the operation SUPERSEDES, which are already on disk and are
+    # nobody's to re-file. `validate_envelope` wants every named record in
+    # hand, so the superseded ones are read back off the store here — a
+    # superseded id the store does not hold is still the loud
+    # `identity_envelope_incomplete`. (v329: until this release every apply
+    # that superseded anything — the binder's `create` that absorbs an
+    # earlier episode, every `merge` — refused ITSELF right after writing,
+    # and on the owner's vault the hosted binder pass failed on each
+    # file-claims job, parking the recorder's claims for days.)
+    supplied: list[dict] = list(filed)
+    named_supersedes = [
+        value for value in operation_record.get("supersedes_binding_ids") or ()
+        if value not in {row["identity_id"] for row in filed}
+    ]
+    if named_supersedes:
+        by_id = {row["identity_id"]: row for row in load_event_identities(vault_root)}
+        supplied.extend(by_id[value] for value in named_supersedes if value in by_id)
+    validate_envelope(operation_record, supplied)
     return {
         "operation": operation_record,
         "bindings": filed,
