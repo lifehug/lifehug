@@ -8,12 +8,14 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from typing import Sequence
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "system"))
 sys.path.insert(0, str(ROOT / "tests"))
 
+import episode_binder as eb  # noqa: E402
 import resolver  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_projection as tp  # noqa: E402
@@ -213,6 +215,109 @@ class FilingTests(unittest.TestCase):
         self.assertEqual(mine["temporal_value"]["basis"], "stated")
         self.assertEqual(mine["basis"], "explicit")
 
+
+
+class ReadingIsNotAnEventTests(unittest.TestCase):
+    """v333 defect A. A resolver reading is another reading of ONE telling.
+
+    Until this release the declaration was a best effort: `file_resolution`
+    declared the telling only when `targets` had found one, and where it had
+    not, `event_identity.telling_ref_for_claim` fell back to the claim's own
+    source id — so the reading became a telling nobody shares, the fold gave it
+    a node of its own, and the node it answered kept its card while the answer
+    sat on a duplicate beside it.
+    """
+
+    def setUp(self):
+        self.root = root_parent_tmp(self, ROOT, prefix="resolver-reading-")
+        (self.root / "answers").mkdir(parents=True)
+        (self.root / "state" / "temporal_claims").mkdir(parents=True)
+        (self.root / "answers" / "q3.md").write_text(
+            "---\ntitle: q3\ntype: prompted_answer\n---\n\nRowan's birth changed everything.\n", "utf-8")
+        self.event_ref = tp.derive_node_id(node_kind="event", event_kind="moment",
+                                           subject_refs=["self"], discriminator="q3")
+        self.resolved = {
+            "record": {"best": "2019-04-08", "earliest": "2019-04-08", "latest": "2019-04-08",
+                       "granularity": "day", "basis": "stated", "confidence": "certain",
+                       "anchors": [], "provenance": []},
+            "basis": "stated", "confidence": 0.95, "fact_key": "rowan_birth",
+            "citations": [{"doc": "story", "quote": "Rowan's birth"}], "reason": "Stated."}
+
+    def target(self, **overrides) -> dict:
+        row = {"node_id": "node:" + "a" * 24, "event_ref": self.event_ref,
+               "label": "Rowan's birth as turning point", "event_kind": "moment",
+               "subject": "self", "event": {}, "handles": [],
+               "telling_ref": "", "document_revision": None}
+        row.update(overrides)
+        return row
+
+    def test_the_reading_ref_names_the_event_ref_and_never_the_node_id(self):
+        """Keyed on `event_ref`, because a telling folded into an episode is
+        published under the EPISODE's node id while its claim names its own
+        event — and `episode_binder.reads_node` wants exactly one node named."""
+        self.assertEqual(resolver.reading_telling_ref(self.target()),
+                         "resolver:" + self.event_ref.split(":")[-1])
+
+    def test_a_reading_with_no_telling_to_reread_still_declares_one(self):
+        filed = resolver.file_resolution(self.root, self.target(), self.resolved,
+                                         story_path="answers/q3.md", model="m", now=NOW, prior={})
+        receipt = json.loads(Path(filed["receipt_path"]).read_text("utf-8"))
+        declared = receipt["extractor"]["telling_keys"]
+        self.assertEqual(declared, {filed["claim_id"]: resolver.reading_telling_ref(self.target())})
+        # And the binder recognizes it as a reading OF THAT NODE.
+        claim = {c["claim_id"]: c for c in ts.fold_active_index(self.root)["claims"]}[filed["claim_id"]]
+        self.assertEqual(eb.reads_node(declared[filed["claim_id"]], [claim]), self.event_ref)
+
+    def test_a_reading_of_a_known_telling_is_declared_under_that_telling(self):
+        target = self.target(telling_ref="classification:answers-q3#aaaaaaaaaaaa")
+        filed = resolver.file_resolution(self.root, target, self.resolved,
+                                         story_path="answers/q3.md", model="m", now=NOW, prior={})
+        receipt = json.loads(Path(filed["receipt_path"]).read_text("utf-8"))
+        self.assertEqual(receipt["extractor"]["telling_keys"],
+                         {filed["claim_id"]: "classification:answers-q3#aaaaaaaaaaaa"})
+
+
+class RestatementIsNotAQuestionTests(unittest.TestCase):
+    """v333 defect B, the resolver's half: an unplaced moment whose normalized
+    label and subject already name a PLACED node is a retelling, not a card."""
+
+    def node(self, node_id: str, label: str, *, placed: bool,
+             subjects: Sequence[str] = ("Wren Ashgrove",)) -> dict:
+        return {"node_id": node_id, "node_kind": "event", "label": label,
+                "event_kind": "moment", "usable_placement": placed,
+                "subject_refs": list(subjects), "input_claim_refs": []}
+
+    def test_an_unplaced_restatement_of_a_placed_node_is_found(self):
+        projection = {"nodes": [
+            self.node("node:" + "1" * 24, "Wren's birth", placed=False),
+            self.node("node:" + "2" * 24, "Wren's Birth ", placed=True),
+        ]}
+        found = resolver.restated_placed_nodes(projection)
+        self.assertEqual(found["node:" + "1" * 24]["node_id"], "node:" + "2" * 24)
+
+    def test_a_different_subject_is_a_different_moment(self):
+        projection = {"nodes": [
+            self.node("node:" + "1" * 24, "Wren's birth", placed=False),
+            self.node("node:" + "2" * 24, "Wren's birth", placed=True,
+                      subjects=("Juniper Ashgrove",)),
+        ]}
+        self.assertEqual(resolver.restated_placed_nodes(projection), {})
+
+    def test_two_placed_nodes_under_one_key_are_no_placement_to_inherit(self):
+        projection = {"nodes": [
+            self.node("node:" + "1" * 24, "Wren's birth", placed=False),
+            self.node("node:" + "2" * 24, "Wren's birth", placed=True),
+            self.node("node:" + "3" * 24, "Wren's birth", placed=True),
+        ]}
+        self.assertEqual(resolver.restated_placed_nodes(projection), {})
+
+    def test_a_period_node_is_never_a_restatement(self):
+        projection = {"nodes": [
+            self.node("node:" + "1" * 24, "Wren's birth", placed=False),
+            {**self.node("node:" + "2" * 24, "Wren's birth", placed=True),
+             "node_kind": "period"},
+        ]}
+        self.assertEqual(resolver.restated_placed_nodes(projection), {})
 
 class LegsTests(unittest.TestCase):
     """The two legs a host runs: a plan it buys, an envelope it hands back.
