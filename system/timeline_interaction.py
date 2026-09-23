@@ -1084,6 +1084,64 @@ def work_item_known_years(target: object) -> tuple[str, ...]:
     return tuple(years)
 
 
+def _work_item_subject_sentence(row: dict) -> str:
+    """The sentence naming WHOSE moment this is, or ``""``.
+
+    lifehug/lifehug#382, parity with the hosted platform's
+    `work_item_walk.render_card_aside` / `card_subject` (platform#903, the
+    2026-09-23 owner incident): a card on "Father's mission to New Zealand"
+    (`subject_ref` "James Edwin Taylor") asked "what year, or about how old
+    was your dad", the owner typed "19-21 years old", and the reply placed
+    the OWNER at nineteen. `render_work_item`'s own ``about: James Edwin
+    Taylor`` line names the subject in ONE WORD, and the model discounted
+    it. This sentence says the same thing the platform now says, in words,
+    so the local medium (`lifehug conversation`) reads a card answer the
+    way the hosted product does.
+
+    ``""`` — and the block renders exactly as it did before this sentence
+    existed — in three cases:
+
+    * **no subject at all** — most work items (a plain contradiction or
+      precision gap on the owner's own life) never carry `subject_ref`;
+    * **the subject IS the owner** — ``self`` (`temporal_work_items.
+      OWNER_SUBJECT_REF`) or a bare owner pronoun (`temporal_timeline.
+      is_owner_reference_only`, the same test `resolver._subject_is_owner`
+      applies; that function also matches the owner's own name against the
+      spine, which this leaf does not carry, so a subject spelled out as the
+      owner's full name is not caught here — an acceptable gap, since every
+      caller that mints a work item for the owner's own life spells the
+      subject ``self``);
+    * **the subject is a binder HANDLE, not a resolved person** —
+      `identity_resolution.is_unresolved_ref` ("which of the four Jameses?")
+      or `temporal_work_items.is_anchor_handle_ref` ("the move to
+      Orderville") — a handle nobody has resolved is not a person to
+      attribute an age to, exactly as the platform's `card_subject` refuses
+      one.
+    """
+    subject = str(row.get("subject_ref") or "").strip()
+    if not subject or subject.lower() == "self":
+        return ""
+    try:
+        import identity_resolution as _ident  # noqa: PLC0415
+        import temporal_work_items as _twi  # noqa: PLC0415
+        from temporal_timeline import is_owner_reference_only  # noqa: PLC0415
+    except Exception:  # noqa: BLE001 — a work-item problem never costs a turn
+        return ""
+    if _ident.is_unresolved_ref(subject) or _twi.is_anchor_handle_ref(subject):
+        return ""
+    if is_owner_reference_only(subject):
+        return ""
+    who = subject
+    return (
+        f"This moment is about {who}, not about the person you are talking "
+        f"with. An age, a grade, a year, a season or a before/after in their "
+        f'answer belongs to {who} unless they say otherwise — "19" is how '
+        f"old {who} was, never how old they were. Confirm it as {who}'s, and "
+        f"never ask what they themselves remember of a time they may not have "
+        f"lived."
+    )
+
+
 def render_work_item(target: object, *, limit: int = MAX_WORK_ITEM_EVIDENCE) -> str:
     """The `{work_item}` block: what conflicts, said in the person's own words.
 
@@ -1091,11 +1149,20 @@ def render_work_item(target: object, *, limit: int = MAX_WORK_ITEM_EVIDENCE) -> 
     things a grounded conversation needs — the disagreement and the sentences
     it came from — and never a transcript, never a claim id the person has no
     use for, and never a count of anything.
+
+    Additive (v332, `lifehug/lifehug#382`): when the target's subject names a
+    resolved person other than the owner, a sentence naming them is inserted
+    right after ``about:`` — see `_work_item_subject_sentence`. Absent a
+    subject, or when the subject is the owner or an unresolved binder handle,
+    the block is byte-identical to what it always rendered.
     """
     row = work_item_target(target)
     if row is None:
         return ""
     lines = [f"kind: {row['item_kind']}", f"about: {row['label']}"]
+    subject_sentence = _work_item_subject_sentence(row)
+    if subject_sentence:
+        lines.append(subject_sentence)
     statement = row.get("description") or row.get("prompt_intent") or ""
     if statement:
         lines.append(f"what is open: {statement}")
