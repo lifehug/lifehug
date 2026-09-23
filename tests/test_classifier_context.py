@@ -410,6 +410,83 @@ class StableFreshnessTests(ContextCase):
         )
         self.assertEqual([row["reason"] for row in full["targets"]], ["source_changed", "context_changed"])
 
+    def test_an_unfinished_search_on_an_unplaced_moment_is_refreshed_first(self):
+        """v333. The sweep is the only thing that can clear an `incomplete`
+        status, and a moment with no date of its own is stuck behind it. It
+        outranks every other pending reason rather than waiting out ~350 rows
+        at 50 a run — which is how the owner ended up looking at a Timeline row
+        neither he nor the sweep could settle (2026-09-23)."""
+        stuck = self.root / "sources" / "manual" / "z-stuck.md"
+        stuck.write_text("Grandma stepped in during the bullying.", encoding="utf-8")
+        told = self.root / "sources" / "manual" / "a-just-told.md"
+        told.write_text("A synthetic story the author just told.", encoding="utf-8")
+        current = {
+            cc._relative_source(self.root, source): cc.snapshot_metadata(
+                cc.build_context_snapshot(self.root, source)
+            )
+            for source in (stuck, told)
+        }
+        records = {
+            cc._relative_source(self.root, stuck): {
+                "classification_snapshot": {
+                    **current[cc._relative_source(self.root, stuck)],
+                    "context_digest": "sha256:" + "0" * 64,
+                },
+                "events": [{
+                    "title": "Grandma stepped in during bullying",
+                    "date": None,
+                    "timeline_resolution": {"status": "incomplete"},
+                }],
+            },
+            cc._relative_source(self.root, told): {
+                "classification_snapshot": {
+                    **current[cc._relative_source(self.root, told)],
+                    "source_revision": "sha256:" + "1" * 64,
+                }
+            },
+        }
+        report = cc.select_refresh_targets(
+            self.root, [stuck, told], classifications=records, limit=1
+        )
+        self.assertEqual(
+            [(row["source_path"], row["reason"]) for row in report["targets"]],
+            [(cc._relative_source(self.root, stuck), "context_changed")],
+        )
+        # The batch size does not move and the report shape is unchanged.
+        self.assertEqual((report["limit"], report["pending_count"], report["remaining_count"]), (1, 2, 1))
+        self.assertEqual(
+            {key for row in report["targets"] for key in row},
+            {"source_path", "reason", "snapshot"},
+        )
+        full = cc.select_refresh_targets(
+            self.root, [stuck, told], classifications=records, limit=50
+        )
+        self.assertEqual(
+            [row["source_path"] for row in full["targets"]],
+            [cc._relative_source(self.root, stuck), cc._relative_source(self.root, told)],
+        )
+
+    def test_an_incomplete_moment_that_dates_itself_does_not_jump_the_queue(self):
+        """The priority is for a moment nothing else can place. An unfinished
+        search over an event that states its own date is not one."""
+        record = {"events": [{
+            "title": "The shop opened",
+            "date": {"stated": "1996-06"},
+            "timeline_resolution": {"status": "incomplete"},
+        }]}
+        self.assertFalse(cc.unfinished_search_blocks_a_moment(record))
+        aged = {"events": [{"title": "x", "date": {"age": "12"},
+                            "timeline_resolution": {"status": "incomplete"}}]}
+        self.assertFalse(cc.unfinished_search_blocks_a_moment(aged))
+        dateless = {"events": [{"title": "x", "date": None,
+                                "timeline_resolution": {"status": "incomplete"}}]}
+        self.assertTrue(cc.unfinished_search_blocks_a_moment(dateless))
+        settled = {"events": [{"title": "x", "date": None,
+                               "timeline_resolution": {"status": "missing_evidence"}}]}
+        self.assertFalse(cc.unfinished_search_blocks_a_moment(settled))
+        self.assertFalse(cc.unfinished_search_blocks_a_moment(None))
+        self.assertFalse(cc.unfinished_search_blocks_a_moment({}))
+
     def test_target_selection_loads_canonical_catalog_once_for_many_sources(self):
         sources = []
         for index in range(100):

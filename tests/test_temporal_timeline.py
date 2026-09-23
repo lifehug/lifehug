@@ -759,40 +759,75 @@ class WorkItems(unittest.TestCase):
         self.assertNotIn(node_for(result, "move")["node_id"], asked)
         self.assertNotIn(node_for(result, "married")["node_id"], asked)
 
-    def test_incomplete_and_non_temporal_classifier_outcomes_do_not_ask_for_dates(self):
-        def emitted(status):
-            return classifier_claims.event_claims(
-                stem=f"story-{status}",
-                event={
-                    "title": f"{status} event",
-                    "description": "A synthetic event without a date.",
-                    "subject": "self",
-                    "date": None,
-                    "timeline_resolution": {"status": status},
-                },
-                revision=revision(status),
-                source_path=f"sources/manual/{status}.md",
-                now=NOW,
-            )[0]
+    @staticmethod
+    def _classifier_moment(status, *, stated=None, stem=None):
+        """One classifier event carrying an explicit resolution outcome."""
+        slug = stem or status
+        return classifier_claims.event_claims(
+            stem=f"story-{slug}",
+            event={
+                "title": f"{slug} event",
+                "description": "A synthetic event without a date.",
+                "subject": "self",
+                "date": {"stated": stated} if stated else None,
+                "timeline_resolution": {"status": status},
+            },
+            revision=revision(slug),
+            source_path=f"sources/manual/{slug}.md",
+            now=NOW,
+        )[0]
 
-        for status in ("incomplete", "not_temporal"):
-            with self.subTest(status=status):
-                result = derive(emitted(status))
-                self.assertFalse(items_of(result, "precision_gap"))
-                node = result.nodes[0]
-                self.assertEqual(node["timeline_resolution_status"], status)
-                published = pub.projection_payload(
-                    result,
-                    published_at=NOW,
-                    input_digest="sha256:" + "a" * 64,
-                    timings={},
-                )
-                self.assertEqual(
-                    published["nodes"][0]["timeline_resolution_status"], status
-                )
-
-        unresolved = emitted("missing_evidence")
+    def test_non_temporal_classifier_outcome_does_not_ask_for_a_date(self):
+        """`not_temporal` is a closed answer — a date question would invent one."""
+        result = derive(self._classifier_moment("not_temporal"))
+        self.assertFalse(items_of(result, "precision_gap"))
+        node = result.nodes[0]
+        self.assertEqual(node["timeline_resolution_status"], "not_temporal")
+        published = pub.projection_payload(
+            result,
+            published_at=NOW,
+            input_digest="sha256:" + "a" * 64,
+            timings={},
+        )
+        self.assertEqual(
+            published["nodes"][0]["timeline_resolution_status"], "not_temporal"
+        )
+        unresolved = self._classifier_moment("missing_evidence")
         self.assertEqual(len(items_of(derive(unresolved), "precision_gap")), 1)
+
+    def test_unfinished_search_on_an_unplaced_moment_still_asks_its_question(self):
+        """v333. An unfinished search is not an answer, and a status row the
+        person cannot act on is a dead-end: the moment asks the same question a
+        `missing_evidence` moment does, and KEEPS its `incomplete` status."""
+        result = derive(self._classifier_moment("incomplete"))
+        asked = items_of(result, "precision_gap")
+        self.assertEqual(len(asked), 1)
+        node = result.nodes[0]
+        self.assertEqual(node["timeline_resolution_status"], "incomplete")
+        self.assertEqual(asked[0]["node_ref"], node["node_id"])
+        self.assertTrue(asked[0]["prompt_intent"])
+        # Same kind, same requested field as the `missing_evidence` twin — one
+        # question, not a second vocabulary for an unfinished search.
+        twin = items_of(derive(self._classifier_moment("missing_evidence")), "precision_gap")
+        self.assertEqual(
+            (asked[0]["kind"], asked[0]["requested_field"]),
+            (twin[0]["kind"], twin[0]["requested_field"]),
+        )
+        published = pub.projection_payload(
+            result,
+            published_at=NOW,
+            input_digest="sha256:" + "a" * 64,
+            timings={},
+        )
+        self.assertEqual(
+            published["nodes"][0]["timeline_resolution_status"], "incomplete"
+        )
+
+    def test_unfinished_search_on_a_placed_moment_asks_nothing(self):
+        """Already drawn: an unfinished search is not a precision complaint."""
+        result = derive(self._classifier_moment("incomplete", stated="1992-04-05", stem="dated"))
+        self.assertFalse(items_of(result, "precision_gap"))
+        self.assertEqual(result.nodes[0]["timeline_resolution_status"], "incomplete")
 
     def test_linked_event_keeps_independent_order_without_raw_handle_question(self):
         event = {
