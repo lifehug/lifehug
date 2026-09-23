@@ -23,6 +23,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from typing import Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "system"))
@@ -1295,6 +1296,390 @@ class VaultTests(unittest.TestCase):
         self.assertTrue(outcome["counts"]["pairs"])
         self.assertIn("DRY RUN", "\n".join(outcome["report"]))
 
+
+
+class ExactIdentityTests(unittest.TestCase):
+    """v333 — the R2 family, over the five duplicate clusters the owner saw.
+
+    Synthetic names throughout, and one fixture shape per incident case:
+
+    * a resolver READING that landed beside the node it answered instead of on
+      it (defect A) — the owner's "Harvey's birth as turning point" 2021-10-11
+      sitting next to the same label, unplaced, still asking;
+    * one subject's ONE birth told twice (two "Dottie's birth" nodes, both
+      unplaced, while a third held the answer);
+    * the same label said twice (nine marriage nodes at one date);
+    * one moment RESTATED in other words (seven "Isaac's first check" nodes,
+      one of them minted by answering the card about it).
+    """
+
+    OWNER_BIRTH = "1980-05-02"
+
+    def claim(self, telling: str, *, label: str, kind: str = "moment",
+              subject: str = "self", dated: str | None = None,
+              participants: Sequence[str] = (), event_ref: str | None = None,
+              source_kind: str = "conversation", claim_type: str | None = None) -> list:
+        node = event_ref or tp.derive_node_id(
+            node_kind="event", event_kind=kind, subject_refs=[subject], discriminator=telling)
+        common = {"subject_mention": subject, "event_kind": kind, "source": telling,
+                  "quote": f"{label}, as somebody said it", "event_mention": label,
+                  "event_ref": node, "source_kind": source_kind}
+        rows = []
+        if dated is None:
+            rows.append(_claim(claim_type=claim_type or "occurrence", **common))
+        else:
+            rows.append(_claim(claim_type=claim_type or "date",
+                               temporal_value=_value(dated), **common))
+        for name in participants:
+            rows.append(_claim(claim_type="occurrence", **{**common, "subject_mention": name}))
+        return rows
+
+    def reading(self, node_ref: str, *, label: str, dated: str,
+                subject: str = "self", suffix: str | None = None) -> list:
+        """A resolver reading, filed the way `resolver.file_resolution` files one:
+        `system_derived`, its own `<name>:<24 hex>` telling ref, one node named."""
+        hexes = suffix or node_ref.split(":")[-1]
+        return self.claim(f"resolver:{hexes}", label=label, dated=dated, subject=subject,
+                          event_ref=node_ref, source_kind="system_derived", claim_type="date")
+
+    def plan(self, claims: list, **kwargs) -> eb.BinderPlan:
+        kwargs.setdefault("now", NOW)
+        return eb.plan(claims, **kwargs)
+
+    def groups_of(self, result: eb.BinderPlan) -> list:
+        return [set(group["members"]) for group in result.exact_groups]
+
+    # -- R2a: a reading of a node IS that node ---------------------------
+
+    def test_a_resolver_reading_is_bound_to_the_node_it_read(self):
+        """Defect A, as identity rather than as a filing accident.
+
+        The reading and the telling share no document, no place and no
+        participant — which is exactly why R1 judged the owner's own pair
+        `proposal` on `two_independent_signals` and left the card up.
+        """
+        story = self.claim("classification:answers-q3#aaaaaaaaaaaa",
+                           label="Rowan's birth as turning point")
+        node = story[0]["event_ref"]
+        result = self.plan(story + self.reading(node, label="Rowan's birth as turning point",
+                                               dated="2019-04-08"))
+        self.assertEqual(self.groups_of(result),
+                         [{"classification:answers-q3#aaaaaaaaaaaa",
+                           f"resolver:{node.split(':')[-1]}"}])
+        group = result.exact_groups[0]
+        self.assertIn(eb.RULE_ID_DERIVED_READING, group["rule_ids"])
+        # R1 by itself reaches nothing here — the family is not a widening of it.
+        self.assertEqual(result.envelopes, [])
+
+    def test_reads_node_needs_all_three_clauses(self):
+        story = self.claim("classification:answers-q3#aaaaaaaaaaaa", label="A turning point")
+        node = story[0]["event_ref"]
+        rows = self.reading(node, label="A turning point", dated="2019-04-08")
+        self.assertEqual(eb.reads_node(rows[0]["source_ref"]["source_id"], rows), node)
+        # not system_derived
+        person = [dict(row, source_kind="conversation") for row in rows]
+        self.assertEqual(eb.reads_node(rows[0]["source_ref"]["source_id"], person), "")
+        # a ref with a `#` names one event inside one source, not a whole node
+        self.assertEqual(eb.reads_node("classification:answers-q3#aaaaaaaaaaaa", rows), "")
+        # two nodes named is a reading of neither
+        second = self.claim("x", label="Another", dated="2019-04-08")[0]
+        self.assertEqual(
+            eb.reads_node(rows[0]["source_ref"]["source_id"], rows + [second]), "")
+
+    def test_a_reading_keeps_its_node_even_when_a_clique_takes_its_telling(self):
+        """R2a chains freely and nothing a later rung does takes a reading away.
+
+        The two "Wren's birth" tellings form a clique; each one's reading joins
+        through R2a, so all four land in ONE episode — which on the owner's
+        vault is the difference between both Dottie cards closing and neither.
+        """
+        first = self.claim("classification:answers-a15#bbbbbbbbbbbb",
+                           label="Wren's birth", participants=["Wren Ashgrove"])
+        second = self.claim("classification:sources-conversations-msg-c1#cccccccccccc",
+                            label="Wren's birth", participants=["Wren Ashgrove"])
+        rows = (first + second
+                + self.reading(first[0]["event_ref"], label="Wren's birth", dated="2016-01-15")
+                + self.reading(second[0]["event_ref"], label="Wren's birth", dated="2016-01-15"))
+        result = self.plan(rows)
+        self.assertEqual(len(result.exact_groups), 1)
+        self.assertEqual(len(result.exact_groups[0]["members"]), 4)
+
+    # -- R2b: one subject, one milestone ---------------------------------
+
+    def test_one_subjects_one_birth_is_one_episode(self):
+        rows = (self.claim("classification:answers-a#111111111111", label="Wren's birth",
+                           participants=["Wren Ashgrove"])
+                + self.claim("classification:answers-b#222222222222",
+                             label="Wren's arrival at the hospital", kind="birth",
+                             participants=["Wren Ashgrove"], dated="2016-01-15"))
+        result = self.plan(rows)
+        self.assertEqual(len(result.exact_groups), 1)
+        self.assertIn(eb.RULE_ID_MILESTONE, result.exact_groups[0]["rule_ids"])
+
+    def test_a_birth_and_a_death_of_one_person_are_never_one_moment(self):
+        """The guard the clone bought: "Grandpa James Edwin Taylor Sr.'s death"
+        and "James Edwin Taylor Sr's birth" share three tokens, all his name."""
+        rows = (self.claim("classification:answers-a#111111111111",
+                           label="Grandpa Alder Quill Sr.'s death",
+                           participants=["Alder Quill"], dated="2011-02-03")
+                + self.claim("classification:answers-b#222222222222",
+                             label="Alder Quill Sr's birth",
+                             participants=["Alder Quill"], dated="1931-07-19"))
+        self.assertEqual(self.plan(rows).exact_groups, [])
+
+    def test_two_different_peoples_births_never_meet(self):
+        rows = (self.claim("classification:answers-a#111111111111", label="Wren's birth",
+                           participants=["Wren Ashgrove"])
+                + self.claim("classification:answers-b#222222222222", label="Juniper's birth",
+                             participants=["Juniper Ashgrove"]))
+        self.assertEqual(self.plan(rows).exact_groups, [])
+
+    def test_a_milestone_about_nobody_but_the_owner_binds_nothing(self):
+        """The owner is on every telling, so agreeing about him is no evidence."""
+        rows = (self.claim("classification:answers-a#111111111111", label="A quiet birth")
+                + self.claim("classification:answers-b#222222222222", label="A quiet birth"))
+        self.assertEqual(self.plan(rows).exact_groups, [])
+
+    # -- R2c: the same label, about the same people ----------------------
+
+    def test_the_same_label_about_the_same_person_is_one_episode(self):
+        rows = (self.claim("classification:answers-a#111111111111",
+                           label="Ash and Wren marry young", participants=["Wren Ashgrove"])
+                + self.claim("classification:answers-b#222222222222",
+                             label="Ash and Wren marry young", participants=["Wren Ashgrove"],
+                             dated="2007-01-11"))
+        result = self.plan(rows)
+        self.assertEqual(len(result.exact_groups), 1)
+        self.assertIn(eb.RULE_ID_SAME_LABEL, result.exact_groups[0]["rule_ids"])
+
+    def test_one_repeatable_telling_refuses_the_whole_label_bucket(self):
+        """Three classifier tellings labelled "Joined Ridgeline" all carry the
+        `moment` wildcard while the landmark telling beside them says `job`, and
+        a life may hold two stints at one employer. The veto is the BUCKET's."""
+        rows = (self.claim("classification:answers-a#111111111111",
+                           label="Joined Ridgeline Freight", participants=["Wren Ashgrove"])
+                + self.claim("classification:answers-b#222222222222",
+                             label="Joined Ridgeline Freight", participants=["Wren Ashgrove"])
+                + self.claim("landmark:entry-ridgeline", label="Joined Ridgeline Freight",
+                             kind="job", participants=["Wren Ashgrove"], dated="2009-06"))
+        self.assertEqual(self.plan(rows).exact_groups, [])
+
+    def test_contradicting_dates_are_never_bound(self):
+        rows = (self.claim("classification:answers-a#111111111111", label="Wren's birth",
+                           participants=["Wren Ashgrove"], dated="2016-01-15")
+                + self.claim("classification:answers-b#222222222222", label="Wren's birth",
+                             participants=["Wren Ashgrove"], dated="1999-01-15"))
+        self.assertEqual(self.plan(rows).exact_groups, [])
+
+    # -- R2d: one moment restated ----------------------------------------
+
+    def test_a_restated_moment_binds_on_three_shared_tokens(self):
+        """The Isaac cluster's shape: labels that agree about nothing but the
+        person, the thing and the ordinal — and a card answer that minted an
+        eighth node for the moment the card was about."""
+        rows = (self.claim("classification:answers-d13#111111111111",
+                           label="Ridley Vance's first investment check",
+                           participants=["Ridley Vance"])
+                + self.claim("classification:answers-h1#222222222222",
+                             label="Ridley's $300K first check", participants=["Ridley Vance"])
+                + self.claim("classification:sources-conversations-msg-card#333333333333",
+                             label="Ridley's first check for Northwind",
+                             participants=["Ridley"]))
+        result = self.plan(rows)
+        self.assertEqual(len(result.exact_groups), 1)
+        self.assertEqual(len(result.exact_groups[0]["members"]), 3)
+        self.assertIn(eb.RULE_ID_RESTATEMENT, result.exact_groups[0]["rule_ids"])
+
+    def test_three_shared_tokens_that_are_all_a_name_are_not_a_restatement(self):
+        rows = (self.claim("classification:answers-a#111111111111",
+                           label="Alder Quill Sterling remembered",
+                           participants=["Alder Quill Sterling"])
+                + self.claim("classification:answers-b#222222222222",
+                             label="Alder Quill Sterling forgotten",
+                             participants=["Alder Quill Sterling"]))
+        for group in self.plan(rows).exact_groups:
+            self.assertNotIn(eb.RULE_ID_RESTATEMENT, group["rule_ids"])
+
+    def test_two_shared_tokens_are_below_the_restatement_floor(self):
+        rows = (self.claim("classification:answers-a#111111111111",
+                           label="Meeting Ridley Vance", participants=["Ridley Vance"])
+                + self.claim("classification:answers-b#222222222222",
+                             label="Ridley Vance's first investment check",
+                             participants=["Ridley Vance"]))
+        self.assertEqual(self.plan(rows).exact_groups, [])
+
+    # -- the safeguards --------------------------------------------------
+
+    def test_a_human_not_same_refuses_every_rung(self):
+        first = self.claim("classification:answers-a#111111111111", label="Wren's birth",
+                           participants=["Wren Ashgrove"])
+        second = self.claim("classification:answers-b#222222222222", label="Wren's birth",
+                            participants=["Wren Ashgrove"], dated="2016-01-15")
+        self.assertEqual(len(self.plan(first + second).exact_groups), 1)
+        # The person says they are different things, on the pair itself.
+        decided = ei.validate_event_identity({
+            "telling_ref": "classification:answers-a#111111111111",
+            "episode_id": ei.episode_id_for(ei.operation_digest(
+                authority="stated", op="create", rule_version=eb.RULE_VERSION,
+                member_refs=["classification:answers-b#222222222222"])),
+            "relation": "not_same", "origin": "stated", "created_at": NOW,
+            "evidence": {"telling_quote": "not the same", "episode_quote": "no"},
+        })
+        member = ei.validate_event_identity({
+            "telling_ref": "classification:answers-b#222222222222",
+            "episode_id": decided["episode_id"], "relation": "same", "origin": "stated",
+            "created_at": NOW,
+            "evidence": {"telling_quote": "the other one", "episode_quote": "yes"},
+        })
+        result = self.plan(first + second, episode_records={
+            "operations": [], "bindings": [decided, member]})
+        self.assertEqual(result.exact_groups, [])
+        self.assertEqual([row["refused"] for row in result.exact_refused][:1],
+                         ["the person already said these are different things"])
+
+    def test_an_adopted_episode_is_never_moved(self):
+        first = self.claim("classification:answers-a#111111111111", label="Wren's birth",
+                           participants=["Wren Ashgrove"])
+        second = self.claim("classification:answers-b#222222222222", label="Wren's birth",
+                            participants=["Wren Ashgrove"], dated="2016-01-15")
+        operation_id = ei.operation_digest(authority="human", op="create",
+                                           rule_version=eb.RULE_VERSION,
+                                           member_refs=["classification:answers-b#222222222222"])
+        episode_id = ei.episode_id_for(operation_id)
+        binding = ei.validate_event_identity({
+            "telling_ref": "classification:answers-b#222222222222", "episode_id": episode_id,
+            "relation": "same", "origin": "confirmed", "operation_id": operation_id,
+            "created_at": NOW,
+            "evidence": {"telling_quote": "mine", "episode_quote": "mine"},
+        })
+        operation = ei.validate_episode_operation({
+            "authority": "human", "op": "create", "episode_id": episode_id,
+            "members": ["classification:answers-b#222222222222"],
+            "creates_binding_ids": [binding["identity_id"]],
+            "rule_version": eb.RULE_VERSION, "created_at": NOW,
+        })
+        result = self.plan(first + second, episode_records={
+            "operations": [operation], "bindings": [binding]})
+        self.assertEqual(result.exact_groups, [])
+        self.assertTrue(any("may not move it" in row["refused"]
+                            for row in result.exact_refused))
+
+    def test_a_group_is_a_clique_and_never_a_chain(self):
+        """The clone's 104-telling episode: `A` names Wren, `B` names Wren AND
+        Juniper, `C` names Juniper — a component joins all three and a clique
+        does not, because `A` and `C` have agreed about nobody.
+        """
+        rows = (self.claim("classification:answers-a#111111111111", label="Wren's birth",
+                           participants=["Wren Ashgrove"])
+                + self.claim("classification:answers-b#222222222222",
+                             label="Wren and Juniper's birth",
+                             participants=["Wren Ashgrove", "Juniper Ashgrove"])
+                + self.claim("classification:answers-c#333333333333", label="Juniper's birth",
+                             participants=["Juniper Ashgrove"]))
+        for group in self.plan(rows).exact_groups:
+            self.assertNotEqual(set(group["members"]), {
+                "classification:answers-a#111111111111",
+                "classification:answers-b#222222222222",
+                "classification:answers-c#333333333333"})
+
+    def test_the_family_never_files_over_a_group_already_bound(self):
+        """Convergence, and the reason it is a rule rather than an accident: a
+        second create finds nothing to supersede, so its bindings differ from
+        the first's by `supersedes` — which IS in the binding digest — and the
+        fold refuses the pair as `identity_conflict`."""
+        rows = (self.claim("classification:answers-a#111111111111", label="Wren's birth",
+                           participants=["Wren Ashgrove"])
+                + self.claim("classification:answers-b#222222222222", label="Wren's birth",
+                             participants=["Wren Ashgrove"], dated="2016-01-15"))
+        first = self.plan(rows)
+        self.assertEqual(len(first.exact_groups), 1)
+        records = {"operations": [row["operation"] for row in first.exact_envelopes],
+                   "bindings": [b for row in first.exact_envelopes for b in row["bindings"]]}
+        second = self.plan(rows, episode_records=records)
+        self.assertEqual(second.exact_groups, [])
+        self.assertEqual(second.exact_envelopes, [])
+
+    def test_every_byte_of_a_filed_binding_is_a_function_of_its_members(self):
+        """So two callers that agree about the members file one record.
+        `resolver --bind-restatements` and `bind-episodes --apply` can both
+        reach one group, and `file_event_identity` is create-or-keep over
+        canonical BYTES."""
+        rows = (self.claim("classification:answers-a#111111111111", label="Wren's birth",
+                           participants=["Wren Ashgrove"])
+                + self.claim("classification:answers-b#222222222222", label="Wren's birth",
+                             participants=["Wren Ashgrove"], dated="2016-01-15"))
+        result = self.plan(rows)
+        for binding in result.exact_envelopes[0]["bindings"]:
+            self.assertEqual(binding["rule_id"], eb.RULE_ID_EXACT)
+            self.assertEqual(binding["candidates"], [])
+            self.assertEqual(binding["evidence"]["signals"], [])
+
+    def test_the_dry_run_prints_every_rung_and_every_refusal(self):
+        rows = (self.claim("classification:answers-a#111111111111", label="Wren's birth",
+                           participants=["Wren Ashgrove"])
+                + self.claim("classification:answers-b#222222222222", label="Wren's birth",
+                             participants=["Wren Ashgrove"], dated="2016-01-15"))
+        result = self.plan(rows)
+        lines = "\n".join(eb.describe(result))
+        self.assertIn("exact_identity links:", lines)
+        self.assertIn("one episode by", lines)
+        counts = result.counts["exact_identity"]
+        self.assertEqual(set(counts["links_by_rule"]), set(eb.EXACT_IDENTITY_RULE_IDS))
+        self.assertEqual(counts["groups"], 1)
+
+    def test_the_milestone_table_covers_every_once_per_subject_kind(self):
+        """ONE HOME: `identity_resolution` owns the list and this table reads it,
+        so a kind added there cannot silently fall out of the rung."""
+        from identity_resolution import ONCE_PER_SUBJECT_EVENT_KINDS
+
+        self.assertEqual(set(eb.MILESTONE_OF_EVENT_KIND), set(ONCE_PER_SUBJECT_EVENT_KINDS))
+        self.assertFalse(set(ONCE_PER_SUBJECT_EVENT_KINDS) & set(eb.REPEATABLE_EVENT_KINDS))
+        for kind in ONCE_PER_SUBJECT_EVENT_KINDS:
+            self.assertIn(eb.MILESTONE_OF_EVENT_KIND[kind],
+                          set(eb.MILESTONE_OF_VERB_STEM.values()))
+
+    def test_the_run_is_deterministic(self):
+        rows = (self.claim("classification:answers-a#111111111111", label="Wren's birth",
+                           participants=["Wren Ashgrove"])
+                + self.claim("classification:answers-b#222222222222", label="Wren's birth",
+                             participants=["Wren Ashgrove"], dated="2016-01-15"))
+        first, second = self.plan(rows), self.plan(rows)
+        self.assertEqual([g["members"] for g in first.exact_groups],
+                         [g["members"] for g in second.exact_groups])
+        self.assertEqual(first.exact_envelopes, second.exact_envelopes)
+
+
+class ExactIdentityVaultTests(unittest.TestCase):
+    """`--apply` files the family's creates through the ordinary writers."""
+
+    def setUp(self):
+        self.root = root_parent_tmp(self, ROOT, prefix="binder-r2-")
+        (self.root / "state" / "temporal_claims").mkdir(parents=True)
+        helper = ExactIdentityTests()
+        rows = (helper.claim("classification:answers-a#111111111111", label="Wren's birth",
+                             participants=["Wren Ashgrove"])
+                + helper.claim("classification:answers-b#222222222222", label="Wren's birth",
+                               participants=["Wren Ashgrove"], dated="2016-01-15"))
+        by_source: dict[str, list] = {}
+        for row in rows:
+            by_source.setdefault(row["source_ref"]["source_id"], []).append(row)
+        for source_id in sorted(by_source):
+            batch = by_source[source_id]
+            ts.write_receipt(self.root, {"source_ref": batch[0]["source_ref"],
+                                         "extractor_version": batch[0]["extractor_version"],
+                                         "claims": batch}, now=NOW)
+        ts.rebuild_active_index(self.root)
+
+    def test_apply_files_the_family_and_replay_writes_nothing(self):
+        first = eb.bind_episodes(self.root, apply=True, now=NOW)
+        self.assertEqual(len(first["filed"]["exact_envelopes"]), 1)
+        self.assertTrue(first["filed"]["created"])
+        # The records read back, and the fold admits them.
+        records = ef.load_episode_records(self.root)
+        self.assertEqual(len(records["operations"]), 1)
+        second = eb.bind_episodes(self.root, apply=True, now="2027-01-01T00:00:00Z")
+        self.assertEqual(second["plan"].exact_groups, [])
+        self.assertEqual(second["filed"]["exact_envelopes"], [])
 
 class DeterminismTests(unittest.TestCase):
     def test_two_runs_over_shuffled_claims_decide_the_same_thing(self):

@@ -42,6 +42,7 @@ Synthetic data only; this module NEVER references any real vault.
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -62,7 +63,12 @@ import landmark_projection as lp  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_store as store  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
-from identity_resolution import REPEATABLE_EVENT_KINDS  # noqa: E402
+from identity_resolution import (  # noqa: E402
+    ONCE_PER_SUBJECT_EVENT_KINDS,
+    OWNER_SUBJECT_MENTIONS,
+    REPEATABLE_EVENT_KINDS,
+    is_unresolved_ref,
+)
 from temporal_claims import (  # noqa: E402
     TemporalContractError,
     collapsed_text,
@@ -218,6 +224,130 @@ UNFAMILIED_KINDS_ARE_ASKED = (
     "a kind that is in no family is never bound by R1 and is always asked; "
     "the family table is a floor on certainty, not a list of what may exist"
 )
+
+
+# --------------------------------------------------------------------------
+# R2 — the EXACT-IDENTITY rungs: one fact, one episode (v333)
+# --------------------------------------------------------------------------
+
+#: Why there is a second family of rungs at all, stated where the first one is.
+#:
+#: R1 is a SIMILARITY rung: it retrieves a handful of candidates, scores
+#: independent signals and refuses anything under its floor. That floor is
+#: right for "are these two stories the same afternoon" and it is the wrong
+#: question for a duplicate that is not a resemblance but an ARITHMETIC fact —
+#: the same node read twice, the same person's birth told twice, the same
+#: sentence classified twice. On the owner's vault R1 judged 44,528 pairs and
+#: bound none of them, while the timeline asked "When did Dottie's birth
+#: happen?" beside a node that already said 15 January 2018.
+#:
+#: So these rungs do not score. Each one names an EXACT key two tellings either
+#: share or do not, sweeps the tellings into buckets under that key, and binds
+#: inside a bucket. They are cheap (one pass, bounded buckets), they are
+#: conservative in the one direction that matters (a key that does not match
+#: produces no pair at all, so a miss stays cheap), and they are reversible:
+#: every one of them is refused by an active or entailed `not_same`, so a
+#: person's own `Different` still wins, and none of them may move an adopted or
+#: human-authority episode (G1, :data:`CLUSTER_RULE_TEXT`).
+EXACT_IDENTITY_RULE_TEXT = (
+    "R1 asks whether two tellings RESEMBLE each other and refuses below its "
+    "floor. The R2 family asks whether they are the same thing by arithmetic — "
+    "the same node read twice, one subject's one birth, one label said twice, "
+    "one moment restated — binds on an exact key and never on a score, and is "
+    "refused by a human `not_same` exactly as R1 is."
+)
+
+#: A resolver reading of a node is not a second event (v333 defect A). The
+#: resolver answers a question ABOUT a node and files its date as a claim; when
+#: that claim declares no telling, `event_identity.telling_ref_for_claim` falls
+#: back to the claim's own source id and the reading becomes a telling of its
+#: own — so the answer lands on a node of its own and the node it answered
+#: keeps its card. This rung says what the record already says: a telling every
+#: one of whose claims is `system_derived`, whose ref is a bare `<name>:<24
+#: hex>`, and which names exactly ONE node as its event, is a READING of that
+#: node and belongs to whatever episode that node's telling belongs to.
+RULE_ID_DERIVED_READING = "R2a"
+
+#: One subject's one birth, one death, one marriage to one named person
+#: (`identity_resolution.ONCE_PER_SUBJECT_EVENT_KINDS`).
+RULE_ID_MILESTONE = "R2b"
+
+#: The same label, said twice, about the same people.
+RULE_ID_SAME_LABEL = "R2c"
+
+#: One moment restated in other words — the seven "Isaac's first check" nodes.
+RULE_ID_RESTATEMENT = "R2d"
+
+#: The FAMILY's id, and the one that goes on a filed binding — never the
+#: individual rung's. The clone is why: `resolver --bind-restatements` and
+#: `bind-episodes --apply` can both reach the same group, and
+#: `event_identity.file_event_identity` is a create-or-keep over canonical
+#: BYTES — so two legs that agreed about the members and disagreed about which
+#: rung to name produced `identity_envelope_incomplete`, an envelope naming
+#: bindings the vault had kept under other bytes. Everything a filed binding
+#: says is therefore a function of its MEMBERS alone, and which rung found them
+#: lives in the plan, the dry-run lines and the report, where a reader wanting
+#: that detail is already looking.
+RULE_ID_EXACT = "R2"
+
+#: Every rung in the family, in the order they are swept. The order is the
+#: order of CERTAINTY: an arithmetic reading first, a once-per-life fact next,
+#: an identical label next, a restatement last.
+EXACT_IDENTITY_RULE_IDS = (
+    RULE_ID_DERIVED_READING,
+    RULE_ID_MILESTONE,
+    RULE_ID_SAME_LABEL,
+    RULE_ID_RESTATEMENT,
+)
+
+#: :data:`RULE_ID_DERIVED_READING`'s shape test. A telling ref with a `#` names
+#: one event inside one source and is never a whole-node reading.
+_DERIVED_READING_REF_RE = re.compile(r"^[a-z][a-z0-9_]*:[0-9a-f]{24}$")
+
+#: The claim source kind a derived reading is made of.
+DERIVED_READING_SOURCE_KIND = "system_derived"
+
+#: `event_kind` -> the milestone it is, so `birth` and `child_born` are one
+#: milestone and `death` and `loss` are one. Keyed on
+#: `identity_resolution.ONCE_PER_SUBJECT_EVENT_KINDS` and swept against it by
+#: `test_event_identity_i2_binder.py`, so a kind added there cannot silently
+#: fall out of this table.
+MILESTONE_OF_EVENT_KIND = {
+    "birth": "birth",
+    "child_born": "birth",
+    "death": "death",
+    "loss": "death",
+    "married": "married",
+}
+
+#: The same milestone read out of the LABEL, through the module's own
+#: event-verb table — because the classifier's kind for "a thing that happened"
+#: is the `moment` wildcard, so "Dottie's birth" carries no `birth` kind at all
+#: and the verb is the only place the milestone is written down.
+MILESTONE_OF_VERB_STEM = {"born": "birth", "die": "death", "marry": "married"}
+
+#: A roster entity ref's person prefix (`episode_containers` mints
+#: `<roster type>/<key>`), so a rung can ask "which PEOPLE does this telling
+#: name" without asking about places, themes or organisations.
+PERSON_ENTITY_PREFIX = "person/"
+
+#: :data:`RULE_ID_RESTATEMENT`'s floor: how many significant label tokens two
+#: labels must SHARE before a restatement is a restatement. Three, and one of
+#: them must be the named entity the bucket is keyed on — so "Isaac writes
+#: first check" and "Isaac's first check for Etherfuse" share `isaac`, `first`
+#: and `check` and are one moment, while "Meeting Isaac Saldana" shares
+#: `isaac` and `saldana` with them and stays its own.
+RESTATEMENT_SHARED_TOKENS = 3
+
+#: And how many each side must HAVE, so a two-word label is never swallowed by
+#: a longer one that happens to contain it.
+RESTATEMENT_MIN_TOKENS = 3
+
+#: A bucket bigger than this is not swept. A named entity that appears in
+#: hundreds of labels is a life's centre of gravity, not a discriminator, and a
+#: quadratic sweep over it would be both slow and the one place this family
+#: could start guessing.
+RESTATEMENT_BUCKET_CAP = 128
 
 
 # --------------------------------------------------------------------------
@@ -571,6 +701,18 @@ class TellingView:
     #: it. `None` for a point-dated moment, which is not a container.
     span: object = None
     span_open_ended: bool = False
+    #: v333, the R2 family. Every node ref this telling's claims name as their
+    #: `event_ref` — the fold's own answer to "which event is this claim
+    #: about", read rather than re-derived.
+    node_refs: frozenset = frozenset()
+    #: The node this telling is a DERIVED READING of, or `""`
+    #: (:data:`RULE_ID_DERIVED_READING`).
+    reads_node: str = ""
+    #: The word tokens of every NON-OWNER person this telling names, from the
+    #: roster where the roster resolves one and from the telling's own
+    #: participant set where it does not. The owner is dropped for the reason
+    #: :data:`INDEPENDENT_SIGNALS` drops him: he is on every telling.
+    people: frozenset = frozenset()
 
     def as_dict(self) -> dict:
         return {
@@ -590,6 +732,9 @@ class TellingView:
             "place_entities": sorted(self.place_entities),
             "opens_a_span": self.span is not None,
             "span_open_ended": self.span_open_ended,
+            "node_refs": sorted(self.node_refs),
+            "reads_node": self.reads_node,
+            "people": sorted(self.people),
             "eligible": self.eligible,
             "ineligible_reason": self.ineligible_reason,
         }
@@ -770,6 +915,20 @@ class BinderPlan:
     #: already see and already drag out — and a silent keep would be
     #: indistinguishable from a rung that found nothing.
     containment_kept_stronger: list = field(default_factory=list)
+    #: v333, the R2 family. Every exact-identity link the rungs found, the
+    #: components they became, and the ones a `not_same` or G1 refused — all
+    #: three, because a dry run that printed only what it would file could not
+    #: be reviewed for what it declined.
+    exact_links: list = field(default_factory=list)
+    exact_groups: list = field(default_factory=list)
+    exact_refused: list = field(default_factory=list)
+    #: The R2 family's own `create` envelopes, kept APART from R1's
+    #: :attr:`envelopes` rather than appended to them. Two families decide here
+    #: and a caller — a test, a dry run, a receipt — must be able to ask what
+    #: each one did; one list would make "R1 bound nothing" unaskable, which is
+    #: the very sentence the v333 incident turned on. `apply_plan` files both,
+    #: in this order, through the same writers.
+    exact_envelopes: list = field(default_factory=list)
     #: The authority the run filed under (`episode_fold_contract`'s flag).
     containment_authority: str = ec.DEFAULT_CONTAINMENT_AUTHORITY
     #: `{container_key: Container}` the run reasoned over, kept for a caller
@@ -798,6 +957,20 @@ class BinderPlan:
             ],
             "proposals": list(self.proposals),
             "questions": list(self.questions),
+            "exact_identity_rule_ids": list(EXACT_IDENTITY_RULE_IDS),
+            "exact_links": [row.as_dict() for row in self.exact_links],
+            "exact_groups": [
+                {"members": list(row["members"]), "tellings": list(row["tellings"]),
+                 "rule_ids": list(row["rule_ids"]), "reasons": list(row["reasons"])}
+                for row in self.exact_groups
+            ],
+            "exact_refused": list(self.exact_refused),
+            "exact_envelopes": [
+                {"operation": row["operation"], "bindings": row["bindings"],
+                 "rule_ids": row["rule_ids"],
+                 "aliases_created": row["operation"]["aliases_created"]}
+                for row in self.exact_envelopes
+            ],
             "overmerges": list(self.overmerges),
             "bridges": list(self.bridges),
             "reaudits": list(self.reaudits),
@@ -926,6 +1099,139 @@ def _documents_of(telling_ref: str, claims: Sequence[object]) -> frozenset:
     return frozenset(found)
 
 
+def _node_refs_of(claims: Sequence[object]) -> frozenset:
+    """Every `node:` ref these claims name as their own `event_ref`.
+
+    The fold's own field, read and not re-derived: `event_ref` is where an
+    extractor writes down which event its claim is about, and for a claim filed
+    ABOUT a projection node it is that node's id.
+    """
+    found = set()
+    for claim in claims or ():
+        row = claim if isinstance(claim, dict) else {}
+        ref = collapsed_text(row.get("event_ref"))
+        if ref.startswith("node:"):
+            found.add(ref)
+    return frozenset(found)
+
+
+def reads_node(telling_ref: object, claims: Sequence[object]) -> str:
+    """The node this telling is a DERIVED READING of, or ``""``.
+
+    Three clauses, and all three are needed (:data:`RULE_ID_DERIVED_READING`):
+
+    * every claim is `system_derived` — a reading is something this program
+      worked out, never something a person said;
+    * the ref is a bare ``<name>:<24 hex>`` with no ``#`` — a ref with a ``#``
+      names one event inside one source, which is a telling and not a reading;
+    * it names exactly ONE node. A reading that named two would be a reading of
+      neither, and guessing which is the defect this rung exists to end.
+
+    Deliberately NOT a list of extractor names. `resolver` is the one that
+    files these today, and a rung keyed on its name would have to be edited for
+    the second one — whereas the three clauses above are what makes a reading a
+    reading whoever files it.
+    """
+    ref = collapsed_text(telling_ref)
+    rows = [claim for claim in (claims or ()) if isinstance(claim, dict)]
+    if not rows or not _DERIVED_READING_REF_RE.fullmatch(ref):
+        return ""
+    if any(collapsed_text(row.get("source_kind")) != DERIVED_READING_SOURCE_KIND
+           for row in rows):
+        return ""
+    nodes = _node_refs_of(rows)
+    return next(iter(nodes)) if len(nodes) == 1 else ""
+
+
+def person_tokens(mentions: object, participants: object = (),
+                  index: object = None) -> frozenset:
+    """The word tokens of every NON-OWNER person this telling names.
+
+    Two sources, narrowest first, and the second one is there because the first
+    leaves a hole the owner's vault actually has:
+
+    * the ROSTER, because a roster match turns "Isaac" and "Isaac Saldana" into
+      one person rather than two strings;
+    * the telling's own PARTICIPANT mentions, because that vault's entity index
+      holds ELEVEN people and `Isaac`, `Dottie` and `Katie` — three of the five
+      duplicate clusters the v333 incident is about — are in none of them, while
+      every one of them is written down as somebody's `participant_set`.
+
+    Tokens rather than whole keys, for the same reason: one telling says `isaac`
+    and the next says `isaac saldana`, and a rule that compared whole keys would
+    call one person two.
+
+    Deliberately NOT the label's own proper nouns, even filtered through a
+    vocabulary of every name the vault uses. That version was written and run on
+    the clone: the vault's participant sets hold `arizona`, `redlands` and
+    `young` as readily as `isaac`, so "a birth happens once to one person, and
+    both tellings are arizona's" chained 104 tellings — four people's births and
+    two towns — into one episode. Who was there is a field; what a sentence
+    happens to contain is not.
+
+    Also deliberately NOT an `identity_resolution.is_unresolved_ref` handle.
+    `event_identity.telling_signature` writes a claim's raw `subject_ref` into
+    `participant_set` unfiltered, and a bare first name the roster cannot
+    resolve carries the handle `unresolved:<name>` there (the same shared
+    name census `identity_resolution.shared_name_token_refs` is uncertain
+    about) rather than a `person/` ref. Tokenizing that handle would read
+    `unresolved:james` as the token `james` — the ONE name two different
+    people share — so two different unresolved Jameses would look like one
+    resolved person to this rung and a milestone or restatement rung could
+    bind their tellings on that coincidence alone. An unresolved subject
+    names nobody in particular here, so it contributes no token.
+    """
+    names: set[str] = set()
+    for ref in ec.resolve_entity_set(mentions, index) | ec.resolve_entity_set(participants, index):
+        if collapsed_text(ref).startswith(PERSON_ENTITY_PREFIX):
+            name = index.name_of(ref) if hasattr(index, "name_of") else ""
+            names.add(collapsed_text(name) or collapsed_text(ref).split("/", 1)[1])
+    names.update(
+        collapsed_text(value) for value in participants or ()
+        if not is_unresolved_ref(value)
+    )
+    tokens: set[str] = set()
+    for name in names:
+        if normalized_mention_key(name) in OWNER_SUBJECT_MENTIONS:
+            continue
+        for token in label_tokens(name):
+            if len(token) >= LABEL_TOKEN_MIN_CHARS and token not in OWNER_SUBJECT_MENTIONS:
+                tokens.add(token)
+    return frozenset(tokens)
+
+
+def _milestone_conflict(left: "TellingView", right: "TellingView") -> bool:
+    """Do these two tellings name DIFFERENT once-per-subject milestones?
+
+    A birth is not a death, whatever else two labels have in common. Without
+    this, the founder vault's `R2d` read "Grandpa James Edwin Taylor Sr.'s
+    death" and "James Edwin Taylor Sr's birth" as one moment, because the three
+    tokens they share are all his name and the classifier's kind for both is the
+    `moment` wildcard.
+    """
+    a, b = milestone_of(left), milestone_of(right)
+    return bool(a) and bool(b) and a != b
+
+
+def milestone_of(view: "TellingView") -> str:
+    """Which once-per-subject milestone this telling is, or ``""``.
+
+    The `event_kind` when it names one; otherwise the LABEL's own verb, because
+    the classifier's kind for "a thing that happened" is the `moment` wildcard
+    and "Dottie's birth" carries no `birth` kind anywhere.
+    """
+    kind = collapsed_text(view.event_kind)
+    if kind in MILESTONE_OF_EVENT_KIND:
+        return MILESTONE_OF_EVENT_KIND[kind]
+    if is_repeatable(kind):
+        return ""
+    for token in label_tokens(view.label):
+        milestone = MILESTONE_OF_VERB_STEM.get(EVENT_VERB_STEMS.get(token, ""))
+        if milestone:
+            return milestone
+    return ""
+
+
 def _bounds_of(claims: Sequence[object]) -> tuple[object, bool]:
     """``(the telling's stated interval, whether it is dated at all)``.
 
@@ -1022,6 +1328,10 @@ def telling_views(claims: object, *, manifest: object = None,
         views[telling_ref] = TellingView(
             telling_ref=telling_ref,
             event_kind=event_kind,
+            node_refs=_node_refs_of(rows_here),
+            reads_node=reads_node(telling_ref, rows_here),
+            people=person_tokens(tuple(mentions) + tuple(subject_mentions),
+                                 participants, entity_index),
             label=label,
             stem=label_stem(label, participants, event_kind=event_kind),
             tokens=proper_noun_tokens(label),
@@ -2119,6 +2429,571 @@ def possible_overmerge_work_items(result: BinderPlan, *, now: object = None) -> 
 #: every membership is individually attributable, union-find may PROPOSE and
 #: never apply. Two tellings joining one unit in a single run would be a
 #: three-member group nobody decided pairwise, so both become proposals.
+# --------------------------------------------------------------------------
+# The R2 family — the exact-identity rungs (:data:`EXACT_IDENTITY_RULE_TEXT`)
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ExactLink:
+    """Two tellings one R2 rung says are the same event, and why.
+
+    A LINK, not a pair: nothing here is scored, nothing here is surfaced as a
+    question, and a rung that finds no link produces no row at all — which is
+    what keeps the family's failure mode "nothing happened" rather than "a
+    guess happened".
+    """
+
+    rule_id: str
+    left: str
+    right: str
+    key: str
+    reason: str
+
+    @property
+    def members(self) -> tuple:
+        return tuple(sorted((self.left, self.right)))
+
+    def as_dict(self) -> dict:
+        return {"rule_id": self.rule_id, "members": list(self.members),
+                "key": self.key, "reason": self.reason}
+
+
+def _dates_agree(left: object, right: object) -> bool:
+    """Do two tellings' bounds leave any date they could BOTH be?
+
+    An undated side agrees with everything — it is the whole reason these
+    rungs exist, since the unplaced retelling is the one asking for a date.
+    Two dated sides must intersect: `chronology.intersect` returns ``None``
+    for disjoint inputs, and disjoint bounds are a contradiction no
+    deterministic rung may bind through.
+    """
+    if left is None or right is None:
+        return True
+    return chrono.intersect(left, right) is not None
+
+
+def _same_people(left: frozenset, right: frozenset) -> bool:
+    """Do two tellings name the same non-owner people?
+
+    NESTED rather than equal, and non-empty on both sides. Nested because one
+    telling says `isaac` and the next says `isaac saldana`, and a rule that
+    demanded equality would call one person two. Non-empty because the empty
+    set is every person at once: two tellings that name nobody but the owner
+    have agreed about nothing (:data:`INDEPENDENT_SIGNALS`' own rule).
+    """
+    if not left or not right:
+        return False
+    return left <= right or right <= left
+
+
+def derived_reading_links(views: Mapping[str, TellingView]) -> list:
+    """:data:`RULE_ID_DERIVED_READING` — a reading of a node IS that node.
+
+    One pass. Every telling that reads exactly one node is linked to every
+    telling whose claims name that same node as their own event — and never to
+    another reading, because two readings of one node are already linked to it
+    and a third edge would say nothing new.
+    """
+    by_node: dict[str, list] = {}
+    for telling_ref in sorted(views):
+        view = views[telling_ref]
+        if not view.eligible or view.reads_node:
+            continue
+        for ref in sorted(view.node_refs):
+            by_node.setdefault(ref, []).append(telling_ref)
+    rows: list = []
+    for telling_ref in sorted(views):
+        view = views[telling_ref]
+        if not view.eligible or not view.reads_node:
+            continue
+        for other in by_node.get(view.reads_node, ()):  # already sorted
+            rows.append(ExactLink(
+                rule_id=RULE_ID_DERIVED_READING, left=telling_ref, right=other,
+                key=view.reads_node,
+                reason=(f"{telling_ref} is a derived reading of {view.reads_node}, "
+                        f"which {other} tells"),
+            ))
+    return rows
+
+
+def milestone_links(views: Mapping[str, TellingView]) -> list:
+    """:data:`RULE_ID_MILESTONE` — one subject, one milestone, one episode."""
+    buckets: dict[tuple, list] = {}
+    for telling_ref in sorted(views):
+        view = views[telling_ref]
+        if not view.eligible:
+            continue
+        milestone = milestone_of(view)
+        if not milestone or not view.people:
+            continue
+        for token in sorted(view.people):
+            buckets.setdefault((milestone, token), []).append(telling_ref)
+    rows: list = []
+    seen: set[tuple] = set()
+    for (milestone, token), refs in sorted(buckets.items()):
+        for index, left in enumerate(refs):
+            for right in refs[index + 1:]:
+                pair = (left, right)
+                if pair in seen:
+                    continue
+                a, b = views[left], views[right]
+                if not _same_people(a.people, b.people):
+                    continue
+                if not kinds_compatible(a.event_kind, b.event_kind):
+                    continue
+                if not _dates_agree(a.bounds, b.bounds):
+                    continue
+                seen.add(pair)
+                rows.append(ExactLink(
+                    rule_id=RULE_ID_MILESTONE, left=left, right=right,
+                    key=f"{milestone}:{token}",
+                    reason=(f"a {milestone} happens once to one person, and both "
+                            f"tellings are {token}'s"),
+                ))
+    return rows
+
+
+def same_label_links(views: Mapping[str, TellingView]) -> list:
+    """:data:`RULE_ID_SAME_LABEL` — the same words, about the same people.
+
+    Three guards keep this off a coincidence, and the first one is the one the
+    founder vault taught:
+
+    * **a bucket holding ONE repeatable-kind telling is refused whole.** Not
+      "the repeatable telling is skipped" — skipping it is how three classifier
+      tellings labelled "Joined Ridgeline", all carrying the `moment` wildcard,
+      became one episode while the landmark telling beside them said `job` and
+      a life may hold two stints at one employer. What makes the FACT
+      repeatable is the strongest kind anybody gave it, so the veto is the
+      bucket's and not the row's.
+    * **both sides must name the same non-owner person, non-emptily.** An
+      identical label about nobody in particular is a coincidence waiting to
+      happen — "Christmas morning" is every Christmas morning — and the people
+      are what make it one fact.
+    * a label of one significant token is not an identity, so both sides carry
+      at least :data:`RESTATEMENT_MIN_TOKENS` minus one, and the dates must not
+      contradict.
+    """
+    buckets: dict[str, list] = {}
+    repeatable: set[str] = set()
+    for telling_ref in sorted(views):
+        view = views[telling_ref]
+        if not view.eligible:
+            continue
+        key = normalized_mention_key(view.label)
+        if not key:
+            continue
+        if is_repeatable(view.event_kind):
+            repeatable.add(key)
+            continue
+        if len(view.tokens) < RESTATEMENT_MIN_TOKENS - 1 or not view.people:
+            continue
+        buckets.setdefault(key, []).append(telling_ref)
+    rows: list = []
+    for key, refs in sorted(buckets.items()):
+        if len(refs) < 2 or key in repeatable:
+            continue
+        for index, left in enumerate(refs):
+            for right in refs[index + 1:]:
+                a, b = views[left], views[right]
+                if not kinds_compatible(a.event_kind, b.event_kind):
+                    continue
+                if not _dates_agree(a.bounds, b.bounds) or _milestone_conflict(a, b):
+                    continue
+                if not _same_people(a.people, b.people):
+                    continue
+                rows.append(ExactLink(
+                    rule_id=RULE_ID_SAME_LABEL, left=left, right=right, key=key,
+                    reason=f"both tellings are labelled {a.label!r}",
+                ))
+    return rows
+
+
+def restatement_links(views: Mapping[str, TellingView], *, index: object = None) -> list:  # noqa: ARG001
+    """:data:`RULE_ID_RESTATEMENT` — one moment said again in other words.
+
+    The rung the owner's seven "Isaac's first check" nodes need, and the only
+    one in the family whose key is not the whole identity — so it is the one
+    with the most guards:
+
+    * the bucket is a PERSON this telling names (:func:`person_tokens`), never a
+      bare word, so `check` and `first` cannot make a bucket and a sweep stays
+      bounded — and never the roster alone, which on the owner's vault has never
+      heard of Isaac;
+    * a bucket over :data:`RESTATEMENT_BUCKET_CAP` is skipped entirely — a name
+      in hundreds of labels is a life's centre of gravity, not a discriminator;
+    * both sides carry at least :data:`RESTATEMENT_MIN_TOKENS` significant
+      tokens and SHARE at least :data:`RESTATEMENT_SHARED_TOKENS` of them, one
+      of which must be the bucket's own entity token;
+    * the people agree, the kinds are in one family, no repeatable kind takes
+      part, and the dates do not contradict.
+    """
+    buckets: dict[str, list] = {}
+    repeatable: set[str] = set()
+    for telling_ref in sorted(views):
+        view = views[telling_ref]
+        if not view.eligible:
+            continue
+        if is_repeatable(view.event_kind):
+            # :func:`same_label_links`' first guard, for the same reason: the
+            # strongest kind anybody gave a name is what makes it repeatable.
+            repeatable.update(view.people)
+            continue
+        if len(view.tokens) < RESTATEMENT_MIN_TOKENS or not view.people:
+            continue
+        for token in sorted(view.people):
+            buckets.setdefault(token, []).append(telling_ref)
+    rows: list = []
+    seen: set[tuple] = set()
+    for token, refs in sorted(buckets.items()):
+        if len(refs) < 2 or len(refs) > RESTATEMENT_BUCKET_CAP or token in repeatable:
+            continue
+        for position, left in enumerate(refs):
+            for right in refs[position + 1:]:
+                pair = (left, right)
+                if pair in seen:
+                    continue
+                a, b = views[left], views[right]
+                shared = a.tokens & b.tokens
+                if token not in shared or len(shared) < RESTATEMENT_SHARED_TOKENS:
+                    continue
+                # At least one shared token must be something OTHER than a
+                # name. Three tokens of one person's name are three tokens of
+                # one person, not one moment — that is how "Grandpa James Edwin
+                # Taylor Sr.'s death" and "James Edwin Taylor Sr's birth" met.
+                if not shared - (a.people | b.people):
+                    continue
+                if not kinds_compatible(a.event_kind, b.event_kind):
+                    continue
+                if not _dates_agree(a.bounds, b.bounds) or _milestone_conflict(a, b):
+                    continue
+                if not _same_people(a.people, b.people):
+                    continue
+                seen.add(pair)
+                rows.append(ExactLink(
+                    rule_id=RULE_ID_RESTATEMENT, left=left, right=right,
+                    key="+".join(sorted(shared)),
+                    reason=(f"{a.label!r} and {b.label!r} share "
+                            f"{', '.join(sorted(shared))}"),
+                ))
+    return rows
+
+
+def exact_identity_links(views: Mapping[str, TellingView], *,
+                         entity_index: object = None) -> list:
+    """Every R2 link, every rung, in :data:`EXACT_IDENTITY_RULE_IDS` order."""
+    return [
+        *derived_reading_links(views),
+        *milestone_links(views),
+        *same_label_links(views),
+        *restatement_links(views, index=entity_index),
+    ]
+
+
+def link_refusal(link: ExactLink, units: Mapping[str, Candidate], *,
+                 active: Mapping[str, tuple], entailed: Sequence[tuple]) -> str:
+    """Why this link may not be filed, or ``""``.
+
+    Two refusals and both are the ones R1 already obeys, read here for a pair
+    of TELLINGS rather than for a telling and a candidate:
+
+    * a `not_same` the person filed, or one C3 entails from one they filed —
+      so a human `Different` still wins over every rung in this family;
+    * G1: a deterministic rule may file proposals against an episode a person
+      adopted or made, and may never move it (:data:`CLUSTER_RULE_TEXT`).
+    """
+    pairs = {tuple(sorted(pair)) for pair in entailed or ()}
+    if link.members in pairs:
+        return "the person already said these are different things"
+    for this, other in ((link.left, link.right), (link.right, link.left)):
+        other_unit = units.get(unit_of(other, units))
+        for row in active.get(this) or ():
+            if collapsed_text(row.get("relation")) != "not_same":
+                continue
+            if other_unit is not None and \
+                    collapsed_text(row.get("episode_id")) == other_unit.episode_id:
+                return "the person already said these are different things"
+    for ref in link.members:
+        unit = units.get(unit_of(ref, units))
+        if unit is not None and not _growable(unit):
+            return (f"{unit.episode_id} was adopted or made by a person; a "
+                    f"deterministic rung may not move it")
+    return ""
+
+
+def exact_identity_groups(links: Sequence[ExactLink], views: Mapping[str, TellingView],
+                          units: Mapping[str, Candidate], *,
+                          active: Mapping[str, tuple], entailed: Sequence[tuple],
+                          refused: list | None = None) -> list:
+    """The groups the accepted links make — and the shape is the whole rule.
+
+    R1 refuses to group at all (:data:`NON_TRANSITIVE_RULE_TEXT`) because a
+    third telling choosing the same candidate is, in a similarity score,
+    evidence of ambiguity. This family groups, but not by transitivity, and the
+    clone is what settled the difference between the two:
+
+    * :data:`RULE_ID_DERIVED_READING` chains FREELY. It is arithmetic — a
+      reading names exactly one node — so a reading, the telling of that node
+      and that node's other readings are one thing by construction, and nothing
+      a later rung does may take a reading away from the node it read.
+    * every other rung must form a CLIQUE. A component would chain: on the
+      owner's vault `R2b` linked "Harvey's birth as turning point" to "Orion's
+      birth in Redlands" through tellings that shared one name token each, and
+      the transitive closure was 104 tellings — four people's births and two
+      towns — in one episode. A clique says every member named every other
+      member, which is the non-transitivity doctrine kept at group scale, and it
+      cut that 104 back to the births it is actually about.
+
+    The cliques are grown greedily over the tellings in sorted order, so one run
+    twice gives one answer; a telling belongs to at most one group.
+    """
+    kept: list = []
+    for link in links:
+        why = link_refusal(link, units, active=active, entailed=entailed)
+        if why:
+            if refused is not None:
+                refused.append({**link.as_dict(), "refused": why})
+            continue
+        kept.append(link)
+
+    readings: dict[str, set] = {}
+    neighbours: dict[str, set] = {}
+    rule_of: dict[tuple, set] = {}
+    reason_of: dict[tuple, str] = {}
+    for link in kept:
+        pair = link.members
+        rule_of.setdefault(pair, set()).add(link.rule_id)
+        reason_of.setdefault(pair, link.reason)
+        if link.rule_id == RULE_ID_DERIVED_READING:
+            readings.setdefault(link.left, set()).add(link.right)
+            readings.setdefault(link.right, set()).add(link.left)
+        else:
+            neighbours.setdefault(link.left, set()).add(link.right)
+            neighbours.setdefault(link.right, set()).add(link.left)
+
+    # --- R2a first, and absolutely: the reading components -----------------
+    parent: dict[str, str] = {}
+
+    def find(ref: str) -> str:
+        parent.setdefault(ref, ref)
+        while parent[ref] != ref:
+            parent[ref] = parent[parent[ref]]
+            ref = parent[ref]
+        return ref
+
+    for ref, others in readings.items():
+        for other in others:
+            left, right = find(ref), find(other)
+            if left != right:
+                parent[left] = right
+    reading_group: dict[str, set] = {}
+    for ref in sorted(parent):
+        reading_group.setdefault(find(ref), set()).add(ref)
+
+    # --- then the cliques, over the tellings that are not readings ---------
+    taken: set[str] = set()
+    cliques: list = []
+    for telling_ref in sorted(neighbours):
+        if telling_ref in taken or views.get(telling_ref) is None:
+            continue
+        clique = {telling_ref}
+        for other in sorted(neighbours[telling_ref]):
+            if other in taken or views.get(other) is None:
+                continue
+            if all(other in neighbours.get(member, ()) for member in clique):
+                clique.add(other)
+        if len(clique) < 2:
+            continue
+        taken |= clique
+        cliques.append(clique)
+
+    # --- one group per clique, plus every reading of every member ----------
+    groups_by_member: list = []
+    placed: set[str] = set()
+    for clique in cliques:
+        members = set(clique)
+        for ref in clique:
+            members |= reading_group.get(find(ref), set()) if ref in parent else set()
+        groups_by_member.append(members)
+        placed |= members
+    for root in sorted(reading_group):
+        rows = reading_group[root]
+        if rows & placed:
+            continue
+        groups_by_member.append(set(rows))
+        placed |= rows
+
+    # --- expand each group to whole EXISTING episodes, then coalesce -------
+    # Expansion is :data:`CLUSTER_RULE_TEXT`'s: the deterministic act is one
+    # `create` over the whole cluster, so a group that takes in one member of an
+    # episode takes in all of it or it orphans the rest.
+    #
+    # Coalescing is what the clone taught. Two cliques that expand into ONE
+    # existing episode are two creates naming one telling, and the fold refuses
+    # that by name — `identity_conflict: carries 2 active same bindings`. They
+    # are merged instead, and that is not the transitivity this function
+    # otherwise refuses: what joins them is an episode SOMEBODY ALREADY DECIDED,
+    # so the merge grows one existing decision rather than inventing a new one.
+    expanded: list = []
+    for tellings in groups_by_member:
+        members = set(tellings)
+        for ref in tellings:
+            unit = units.get(unit_of(ref, units))
+            if unit is not None:
+                members.update(unit.members)
+        if len(members) >= 2:
+            expanded.append((set(tellings), members))
+    coalesced: list = []
+    for tellings, members in expanded:
+        for position, (other_tellings, other_members) in enumerate(coalesced):
+            if members & other_members:
+                coalesced[position] = (other_tellings | tellings, other_members | members)
+                break
+        else:
+            coalesced.append((tellings, members))
+    merged = True
+    while merged:
+        merged = False
+        for left in range(len(coalesced)):
+            for right in range(left + 1, len(coalesced)):
+                if coalesced[left][1] & coalesced[right][1]:
+                    coalesced[left] = (coalesced[left][0] | coalesced[right][0],
+                                       coalesced[left][1] | coalesced[right][1])
+                    del coalesced[right]
+                    merged = True
+                    break
+            if merged:
+                break
+
+    groups: list = []
+    for tellings, members in coalesced:
+        # CONVERGENCE. A group whose every member already sits in ONE episode is
+        # a decision this family has already filed, and re-filing it is not a
+        # no-op: the first create superseded each member's previous binding and
+        # the second would find nothing to supersede, so the two records differ
+        # by `supersedes` — which IS in the binding digest — and the fold refuses
+        # the pair by name (`identity_conflict: … asserted by 2 active records`).
+        # The clone earned this line the hard way, on the second leg of a run.
+        episodes = {collapsed_text((efc.grouping_binding(ref, active) or {}).get("episode_id"))
+                    for ref in members}
+        if len(episodes) == 1 and "" not in episodes:
+            continue
+        rules: set[str] = set()
+        reasons: list[str] = []
+        for pair, ids in rule_of.items():
+            if set(pair) <= set(tellings):
+                rules |= ids
+                reasons.append(reason_of[pair])
+        groups.append({
+            "members": tuple(sorted(members)),
+            "tellings": tuple(sorted(tellings)),
+            "rule_ids": tuple(rule for rule in EXACT_IDENTITY_RULE_IDS if rule in rules),
+            "reasons": tuple(sorted(set(reasons)))[:4],
+        })
+    groups.sort(key=lambda row: row["members"])
+    return groups
+
+
+def group_envelope(group: Mapping[str, object], *, views: Mapping[str, TellingView],
+                   active: Mapping[str, tuple], now: object = None) -> dict:
+    """The one `create` an R2 component becomes.
+
+    :func:`create_envelope`'s arithmetic, over an explicit member set instead of
+    over one pair: the operation id digests the members and nothing else, and
+    every episode the create retires is named in ``aliases_created``.
+
+    Every byte of it is a function of the MEMBER SET — including the rule id
+    (:data:`RULE_ID_EXACT`) and the evidence quotes — so two callers that agree
+    about the members file the same record and the second one keeps the first's
+    bytes rather than promising records the vault holds under other ones.
+    """
+    members = tuple(group["members"])  # type: ignore[arg-type]
+    rule_ids = tuple(group.get("rule_ids") or ())  # type: ignore[union-attr]
+    rule_id = RULE_ID_EXACT
+    operation_id = ei.operation_digest(
+        authority="deterministic", op="create", rule_version=RULE_VERSION,
+        member_refs=list(members),
+    )
+    episode_id = ei.episode_id_for(operation_id)
+    superseded: dict[str, str] = {}
+    aliases: set[str] = set()
+    for telling_ref in members:
+        row = efc.grouping_binding(telling_ref, active)
+        if row is None:
+            continue
+        previous = collapsed_text(row.get("episode_id"))
+        if previous and previous != episode_id:
+            superseded[telling_ref] = collapsed_text(row.get("identity_id"))
+            aliases.add(previous)
+
+    reasons = list(group.get("reasons") or ())  # type: ignore[union-attr]
+    # Member-determined, every one of them (:data:`RULE_ID_EXACT`).
+    anchor = next((views[ref].label for ref in members
+                   if ref in views and views[ref].label), "")
+    bindings = []
+    for telling_ref in members:
+        row = views.get(telling_ref)
+        bindings.append({
+            "telling_ref": telling_ref,
+            "episode_id": episode_id,
+            "relation": efc.GROUPING_RELATION,
+            "origin": "deterministic",
+            "rule_version": RULE_VERSION,
+            "rule_id": rule_id,
+            "operation_id": operation_id,
+            # Empty, and member-determined like everything else here: the
+            # episodes this create retires are named on the OPERATION, in
+            # `aliases_created`, and naming them a second time on each binding
+            # would make a re-run's bytes depend on what the last run left.
+            "candidates": [],
+            "evidence": {
+                "telling_quote": row.label if row else "",
+                "episode_quote": anchor,
+                "signals": [],
+            },
+            "created_at": now,
+        })
+    binding_ids = [ei.validate_event_identity(row)["identity_id"] for row in bindings]
+    for position, telling_ref in enumerate(members):
+        if telling_ref in superseded:
+            bindings[position]["supersedes"] = superseded[telling_ref]
+            binding_ids[position] = ei.validate_event_identity(bindings[position])["identity_id"]
+    kinds = {views[ref].event_kind for ref in members if ref in views} - {""}
+    dated = sorted(ref for ref in members
+                   if ref in views and views[ref].dated and views[ref].event_kind)
+    canonical = ""
+    for ref in dated:
+        if views[ref].event_kind != KIND_WILDCARD:
+            canonical = views[ref].event_kind
+            break
+    if not canonical:
+        for kind in KIND_PRECEDENCE:
+            if kind in kinds:
+                canonical = kind
+                break
+    operation = {
+        "authority": "deterministic",
+        "op": "create",
+        "episode_id": episode_id,
+        "members": list(members),
+        "creates_binding_ids": binding_ids,
+        "supersedes_binding_ids": sorted(superseded.values()),
+        "aliases_created": sorted(aliases),
+        "canonical_event_kind": canonical or (min(kinds) if kinds else KIND_WILDCARD),
+        "rule_version": RULE_VERSION,
+        "created_at": now,
+    }
+    return {
+        "operation": ei.validate_episode_operation(operation),
+        "bindings": [ei.validate_event_identity(row) for row in bindings],
+        "pair": "+".join(rule_ids) or RULE_ID,
+        "rule_ids": list(rule_ids),
+        "reasons": reasons,
+    }
+
+
+
 NON_TRANSITIVE_RULE_TEXT = (
     "R1 decides one PAIR at a time. A bind is accepted only when both sides "
     "chose each other and no third telling chose the same unit in the same "
@@ -2230,6 +3105,28 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
             active=active, views=views, now=now,
         ))
 
+    # --- v333: the R2 family, AFTER R1 and before the pairs collapse -------
+    # After R1 on purpose. R1's own binds are the narrow, scored ones and they
+    # are accepted first; the exact rungs then run over the SAME views and the
+    # same active bindings, and a member R1 just moved is already inside the
+    # unit these rungs expand to — so the two families cannot file two creates
+    # for one telling. A component that overlaps a member R1 accepted this run
+    # is skipped rather than merged, because R1's envelope already named that
+    # member and a second create would supersede a binding written in the same
+    # breath (:data:`EXACT_IDENTITY_RULE_TEXT`).
+    result.exact_links = exact_identity_links(views, entity_index=entity_index)
+    result.exact_refused = []
+    result.exact_groups = [
+        group for group in exact_identity_groups(
+            result.exact_links, views, units, active=active, entailed=entailed,
+            refused=result.exact_refused,
+        )
+        if not (set(group["members"]) & {ref for members in accepted for ref in members})
+    ]
+    for group in result.exact_groups:
+        result.exact_envelopes.append(
+            group_envelope(group, views=views, active=active, now=now))
+
     # --- ONE row per pair, from here on ------------------------------------
     # Everything above needed both directions; nothing below does. A question
     # surface that showed the same pair twice would be counting its own
@@ -2255,6 +3152,10 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
     # a unit whose identity moves in the same run would orphan the records the
     # same run wrote.
     moving = {ref for members in accepted for ref in members}
+    # v333: and every telling the R2 family is about to move, for the same
+    # reason — a container id minted from a unit whose identity moves in the
+    # same run would orphan the records this run wrote.
+    moving |= {ref for group in result.exact_groups for ref in group["members"]}
     result.containers = ec.containers(views, units, excluded_refs=moving)
     result.containment_ambiguities = []
     result.containment_negatives = []
@@ -2336,6 +3237,27 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
     return result
 
 
+def exact_identity_counts(result: BinderPlan) -> dict:
+    """The R2 family's own tally: links per rung, components, tellings, refusals."""
+    by_rule: dict[str, int] = {rule: 0 for rule in EXACT_IDENTITY_RULE_IDS}
+    for link in result.exact_links:
+        by_rule[link.rule_id] = by_rule.get(link.rule_id, 0) + 1
+    groups_by_rule: dict[str, int] = {rule: 0 for rule in EXACT_IDENTITY_RULE_IDS}
+    for group in result.exact_groups:
+        for rule in group["rule_ids"]:
+            groups_by_rule[rule] = groups_by_rule.get(rule, 0) + 1
+    return {
+        "links_by_rule": by_rule,
+        "groups": len(result.exact_groups),
+        "groups_by_rule": groups_by_rule,
+        "tellings": sum(len(group["members"]) for group in result.exact_groups),
+        "episodes": len(result.exact_envelopes),
+        "refused": len(result.exact_refused),
+        "largest_group": max((len(group["members"]) for group in result.exact_groups),
+                             default=0),
+    }
+
+
 def plan_counts(result: BinderPlan, units: Mapping[str, Candidate]) -> dict:
     """§8.1's report, tallied ONCE over the collapsed pairs.
 
@@ -2409,6 +3331,9 @@ def plan_counts(result: BinderPlan, units: Mapping[str, Candidate]) -> dict:
         # §8.1's headline: a `same`-bound telling is never asked WHEN, so this
         # is how many "when did this happen?" questions the apply would end.
         "when_items_that_would_disappear": joined,
+        # v333: the R2 family's own tally, kept apart from R1's so "which
+        # family bound this" is answerable off the summary alone.
+        "exact_identity": exact_identity_counts(result),
     }
 
 
@@ -2485,6 +3410,23 @@ def describe(result: BinderPlan, *, applied: bool = False) -> list:
         f"{name}={counts.get('containment_by_rule', {}).get(name, 0)}"
         for name in ec.DETERMINISTIC_CONTAINMENT_RULE_IDS
     ))
+    exact = counts.get("exact_identity") or {}
+    lines.append("  exact_identity links: " + ", ".join(
+        f"{name}={(exact.get('links_by_rule') or {}).get(name, 0)}"
+        for name in EXACT_IDENTITY_RULE_IDS
+    ))
+    lines.append(f"  exact_identity groups: {exact.get('groups', 0)} over "
+                 f"{exact.get('tellings', 0)} tellings "
+                 f"(largest {exact.get('largest_group', 0)}, "
+                 f"refused {exact.get('refused', 0)})")
+    for group in result.exact_groups:
+        lines.append("  + one episode by " + "/".join(group["rule_ids"]) + ": "
+                     + ", ".join(group["members"]))
+        for reason in group["reasons"]:
+            lines.append(f"      because {reason}")
+    for row in result.exact_refused:
+        lines.append(f"  - {row['rule_id']} declined {', '.join(row['members'])}: "
+                     f"{row['refused']}")
     lines.append("  verdicts: " + ", ".join(
         f"{name}={counts['verdicts'].get(name, 0)}" for name in VERDICTS
     ))
@@ -2667,10 +3609,12 @@ def apply_plan(vault_root: str | Path, result: BinderPlan) -> dict:
     """
     _require(isinstance(result, BinderPlan), "binder_apply_needs_a_plan",
              "apply files a BinderPlan; run `plan()` first")
-    filed = {"envelopes": [], "proposals": [], "upgraded": [],
+    filed = {"envelopes": [], "exact_envelopes": [row["operation"]["operation_id"]
+                                                 for row in result.exact_envelopes],
+             "proposals": [], "upgraded": [],
              "kept_stronger": list(result.containment_kept_stronger),
              "not_upgraded": [], "created": 0}
-    for row in result.envelopes:
+    for row in (*result.envelopes, *result.exact_envelopes):
         outcome = ei.file_operation_envelope(
             vault_root, operation=row["operation"], bindings=row["bindings"],
         )
@@ -2805,9 +3749,36 @@ __all__ = [
     "VERDICTS",
     "VERDICT_PRECEDENCE",
     "VERDICT_REASONS",
+    "DERIVED_READING_SOURCE_KIND",
+    "EXACT_IDENTITY_RULE_IDS",
+    "EXACT_IDENTITY_RULE_TEXT",
+    "MILESTONE_OF_EVENT_KIND",
+    "MILESTONE_OF_VERB_STEM",
+    "PERSON_ENTITY_PREFIX",
+    "RESTATEMENT_BUCKET_CAP",
+    "RESTATEMENT_MIN_TOKENS",
+    "RESTATEMENT_SHARED_TOKENS",
+    "RULE_ID_DERIVED_READING",
+    "RULE_ID_EXACT",
+    "RULE_ID_MILESTONE",
+    "RULE_ID_RESTATEMENT",
+    "RULE_ID_SAME_LABEL",
     "BinderPlan",
     "Candidate",
     "Condition",
+    "ExactLink",
+    "derived_reading_links",
+    "exact_identity_counts",
+    "exact_identity_groups",
+    "exact_identity_links",
+    "group_envelope",
+    "link_refusal",
+    "milestone_links",
+    "milestone_of",
+    "person_tokens",
+    "reads_node",
+    "restatement_links",
+    "same_label_links",
     "EpisodeBinderError",
     "Pair",
     "TellingView",

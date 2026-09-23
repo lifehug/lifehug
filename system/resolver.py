@@ -76,6 +76,30 @@ PRIOR_EXTRACTOR_VERSIONS = ("resolver/rule:1", "resolver/rule:2")
 SOURCE_ID_PREFIX = "resolver:"
 SUPERSEDE_SCOPE = "resolver_resolution"
 
+#: v333, defect A. A resolver reading is ANOTHER READING OF ONE TELLING and
+#: never an event of its own — and until this release that was a best effort:
+#: :func:`file_resolution` declared the telling it re-read only when
+#: :func:`targets` had found one, and where it had not, the claim carried no
+#: declaration at all. `event_identity.telling_ref_for_claim` then fell back to
+#: the claim's own `source_ref.source_id`, the reading became a telling nobody
+#: else shares, the fold gave it a node of its own — and the node it answered
+#: kept its "when did this happen?" card while the answer sat on a duplicate
+#: beside it. On the owner's vault that is `node:e6f9cc1e…` "Harvey's birth as
+#: turning point" placed 11 October 2021 next to `node:1f65aa7a…`, the same
+#: label, unplaced, still asking.
+#:
+#: So the declaration is now unconditional. When the target names the telling
+#: this reading re-reads, that is the declaration. When it does not,
+#: :func:`reading_telling_ref` mints one that names the NODE the reading is
+#: about — which `episode_binder.reads_node` recognizes as a derived reading, so
+#: the binder's `R2a` rung puts it back on that node's episode even for a
+#: receipt filed before this release.
+READING_IS_NOT_AN_EVENT = (
+    "a resolver reading is another reading of one telling; it is declared under "
+    "that telling, or under a ref naming the node it read, and never left to "
+    "fall back to its own source id"
+)
+
 #: A MOMENT THAT NEVER HAPPENED IS NOT A DATING PROBLEM (ADR 0037's amendment,
 #: lifehug#365 item 5). The classifier reads a story and files what reads like
 #: an occurrence; some of what it reads is not one. Four shapes, and the set is
@@ -435,11 +459,16 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",),
     claims = {row.get("claim_id"): row for row in index.get("claims") or ()}
     events = _classification_events(root)
     revisions: dict[str, str | None] = {}
+    # v333 (:data:`RESTATEMENT_IS_NOT_A_QUESTION`). Worked out ONCE, before the
+    # sweep, so asking is refused rather than asked and then withdrawn.
+    restated = restated_placed_nodes(projection)
     by_source: dict[str, list[dict]] = collections.defaultdict(list)
     for node in projection.get("nodes") or ():
         if node.get("node_kind") == "period":
             continue
         if node.get("usable_placement") and node.get("node_id") not in include_placed:
+            continue
+        if node.get("node_id") in restated and node.get("node_id") not in include_placed:
             continue
         if node.get("occurrence_subject_scope") not in scopes and \
                 collapsed_text(node.get("owner_timeline_relation")) not in tp.AXIS_RELATIONS:
@@ -983,6 +1012,21 @@ def prior_resolver_claims(index: dict) -> dict[str, list[str]]:
     return dict(found)
 
 
+def reading_telling_ref(target: dict) -> str:
+    """``resolver:<24 hex>`` naming the NODE this reading is about.
+
+    The fallback half of :data:`READING_IS_NOT_AN_EVENT`, and it is keyed on the
+    target's ``event_ref`` rather than on its ``node_id`` on purpose: a telling
+    folded into an episode is published under the EPISODE's node id, while the
+    claim filed about it names the telling's own event — so keying on the node
+    id would mint a ref naming a node the reading's own `event_ref` never
+    mentions, and `episode_binder.reads_node` (which requires exactly one named
+    node) would not recognize it.
+    """
+    node = collapsed_text(target.get("event_ref")) or collapsed_text(target.get("node_id"))
+    return f"{SOURCE_ID_PREFIX}{node.split(':')[-1]}"
+
+
 def file_resolution(root: Path, target: dict, resolved: dict, *, story_path: str, model: str, now: str,
                     prior: dict[str, list[str]] | None = None) -> dict:
     """One receipt with one ``date`` claim on the event's own node; retire its raw handle."""
@@ -1013,11 +1057,13 @@ def file_resolution(root: Path, target: dict, resolved: dict, *, story_path: str
 
     extractor = {"name": "resolver", "rule_version": EXTRACTOR_VERSION.rsplit(":", 1)[-1], "model": model,
                  "deterministic": model == "deterministic", "basis": resolved["basis"], "fact_key": resolved["fact_key"]}
-    if target.get("telling_ref"):
-        extractor = ei.declare_tellings(
-            extractor, telling_keys={claim["claim_id"]: target["telling_ref"]},
-            document_revision=target.get("document_revision"),
-        )
+    # UNCONDITIONAL (:data:`READING_IS_NOT_AN_EVENT`). A reading with no telling
+    # to re-read is still not an event of its own.
+    extractor = ei.declare_tellings(
+        extractor,
+        telling_keys={claim["claim_id"]: target.get("telling_ref") or reading_telling_ref(target)},
+        document_revision=target.get("document_revision"),
+    )
     # A reading of this node filed by an earlier resolver rule is retired first;
     # the new receipt stands beside it, never over it.
     if prior is None:
@@ -1073,11 +1119,11 @@ def file_handle_bind(root: Path, target: dict, bind: dict, *, story_path: str, m
     }, now=now)
     extractor = {"name": "resolver", "rule_version": EXTRACTOR_VERSION.rsplit(":", 1)[-1], "model": model,
                  "deterministic": False, "basis": "handle_bind", "fact_key": "handle_bind"}
-    if target.get("telling_ref"):
-        extractor = ei.declare_tellings(
-            extractor, telling_keys={claim["claim_id"]: target["telling_ref"]},
-            document_revision=target.get("document_revision"),
-        )
+    extractor = ei.declare_tellings(
+        extractor,
+        telling_keys={claim["claim_id"]: target.get("telling_ref") or reading_telling_ref(target)},
+        document_revision=target.get("document_revision"),
+    )
     path = store.write_receipt(root, {
         "source_ref": source_ref, "extractor_version": EXTRACTOR_VERSION,
         "extractor": extractor, "claims": [claim],
@@ -1122,6 +1168,150 @@ def file_not_an_event(root: Path, target: dict, verdict: dict, *, now: str) -> d
     return {"retracted": sorted(claim_ids),
             "correction_id": correction.correction_id,
             "correction_path": correction.relative_path}
+
+
+#: v333, defect B, the resolver's half. A card that asks for a date the vault
+#: already holds is worse than no card: the owner types the answer, the answer
+#: lands on a node of its own, and the next publication asks again. So before
+#: anything is asked, an unplaced node whose normalized label and subject match
+#: a node the projection has already PLACED is not a question — it is the same
+#: moment, said twice. The resolver refuses to ask it and emits a `same_as`
+#: row; :func:`file_same_as` turns that row into the ordinary deterministic
+#: `same` binding `episode_binder` would have filed, through
+#: `event_identity`'s own writers, so the two nodes become one episode and the
+#: unplaced one inherits the placement it was asking for.
+#:
+#: Conservative on purpose, and in three ways: the labels must be IDENTICAL once
+#: normalized (a resemblance is the binder's business, not the resolver's), the
+#: subjects must agree, and a pair a person has already called `not_same` is
+#: refused by the binder's own :func:`episode_binder.link_refusal`, which this
+#: leg calls rather than reimplements.
+RESTATEMENT_IS_NOT_A_QUESTION = (
+    "an unplaced moment whose normalized label and subject already name a "
+    "placed node is a retelling, not a question: the resolver binds it instead "
+    "of asking, and a human `not_same` still refuses the bind"
+)
+
+
+def _subject_key(node: dict) -> tuple:
+    refs = [collapsed_text(ref) for ref in (node.get("subject_refs") or ()) if collapsed_text(ref)]
+    return tuple(sorted({_norm(ref) for ref in refs} - {""}))
+
+
+def restated_placed_nodes(projection: dict) -> dict[str, dict]:
+    """``{unplaced node id: the placed node it restates}``.
+
+    One pass over the projection, keyed on ``(normalized label, subject)``. A
+    key that names more than one placed node is SKIPPED — two placements to
+    inherit is no placement at all, and guessing between them is the defect
+    this rule exists to end.
+    """
+    placed: dict[tuple, list] = {}
+    unplaced: list[dict] = []
+    for node in projection.get("nodes") or ():
+        if collapsed_text(node.get("node_kind")) == "period":
+            continue
+        label = _norm(node.get("label"))
+        if not label:
+            continue
+        key = (label, _subject_key(node))
+        if node.get("usable_placement"):
+            placed.setdefault(key, []).append(node)
+        else:
+            unplaced.append(node)
+    found: dict[str, dict] = {}
+    for node in unplaced:
+        rows = placed.get((_norm(node.get("label")), _subject_key(node))) or []
+        if len(rows) != 1:
+            continue
+        other = rows[0]
+        if other["node_id"] == node["node_id"]:
+            continue
+        found[node["node_id"]] = {
+            "node_id": other["node_id"],
+            "label": collapsed_text(other.get("label")),
+            "reason": (f"{collapsed_text(node.get('label'))!r} is already placed as "
+                       f"{other['node_id']}"),
+        }
+    return found
+
+
+def _tellings_of(node: dict, index: dict, by_claim: dict) -> list[str]:
+    refs = []
+    for claim_id in node.get("input_claim_refs") or ():
+        telling_ref = collapsed_text(by_claim.get(collapsed_text(claim_id)))
+        if telling_ref and telling_ref not in refs:
+            refs.append(telling_ref)
+    return refs
+
+
+def file_same_as(root: Path, *, now: str) -> dict:
+    """File every :func:`restated_placed_nodes` pair as one `same` binding.
+
+    Through `episode_binder`'s OWN grouping and `event_identity`'s own writers —
+    never by hand. The grouping matters as much as the writing: the first version
+    of this filed one envelope per pair and the clone refused it by name
+    (`identity_conflict: resolver:9508e174… carries 2 active same bindings`),
+    because both of the owner's "Dottie's birth" nodes restate the SAME placed
+    node and one telling cannot belong to two episodes. `exact_identity_groups`
+    is where that is already solved — it refuses a pair a person called
+    `not_same`, expands a group to whole existing episodes, and coalesces groups
+    that meet — so this leg builds the links and hands them over.
+
+    Returns a report; writes nothing when there is nothing to write, and
+    re-publishes only when it wrote.
+    """
+    import episode_binder as eb  # noqa: PLC0415
+    import episode_fold as ef  # noqa: PLC0415
+    import event_identity as ei  # noqa: PLC0415
+    import temporal_publication as pub  # noqa: PLC0415
+
+    projection = pub.read_projection(root) or {}
+    pairs = restated_placed_nodes(projection)
+    report = {"pairs": len(pairs), "filed": 0, "refused": [], "skipped": 0, "episodes": []}
+    if not pairs:
+        return report
+    index = store.fold_active_index(root)
+    claims = [row for row in (index.get("claims") or ()) if isinstance(row, dict)]
+    by_claim = ef.claim_telling_index(claims, ei.read_telling_manifest(root))
+    nodes = {node["node_id"]: node for node in projection.get("nodes") or ()}
+    views = eb.telling_views(claims, entity_index=eb.ec.load_entity_index(root))
+    records = ef.load_episode_records(root)
+    normalized = ef.normalize_episode_records(records)
+    active = eb.efc.active_binding_index(normalized["bindings"])
+    entailed = eb.efc.entailed_not_same(normalized["bindings"])
+    units = eb.candidates(views, episode_records=records)
+
+    links: list = []
+    for node_id in sorted(pairs):
+        other = pairs[node_id]
+        mine = [ref for ref in _tellings_of(nodes.get(node_id) or {}, index, by_claim)
+                if ref in views]
+        theirs = [ref for ref in _tellings_of(nodes.get(other["node_id"]) or {}, index, by_claim)
+                  if ref in views]
+        if not mine or not theirs:
+            report["skipped"] += 1
+            continue
+        for left in mine:
+            for right in theirs:
+                if left != right:
+                    links.append(eb.ExactLink(
+                        rule_id=eb.RULE_ID_SAME_LABEL, left=left, right=right,
+                        key=_norm(other["label"]), reason=other["reason"]))
+    groups = eb.exact_identity_groups(
+        links, views, units, active=active, entailed=entailed,
+        refused=report["refused"],
+    )
+    for group in groups:
+        envelope = eb.group_envelope(group, views=views, active=active, now=now)
+        outcome = ei.file_operation_envelope(
+            root, operation=envelope["operation"], bindings=envelope["bindings"])
+        report["filed"] += 1 if outcome["created"] else 0
+        report["episodes"].append(envelope["operation"]["episode_id"])
+    report["groups"] = len(groups)
+    if report["filed"]:
+        _republish(root)
+    return report
 
 
 # --------------------------------------------------------------------------
@@ -2263,6 +2453,10 @@ def main() -> int:
                         help="v325: also ask every settled unknown that has no estimate yet for one (one-time backfill)")
     parser.add_argument("--eval", type=Path, help="JSON list of {question, expected:{earliest,latest}, hint}")
     parser.add_argument("--refile", action="store_true", help="re-file ledger answers without a model call, then publish")
+    parser.add_argument("--bind-restatements", action="store_true",
+                        help="v333: file every unplaced moment whose normalized label and subject already name a "
+                             "PLACED node as one `same` binding, then publish; no model call "
+                             "(RESTATEMENT_IS_NOT_A_QUESTION)")
     # The two legs a host runs separately (ADR 0037). --plan reads and writes
     # nothing under the vault; --from-response files an envelope of answers
     # exactly as the local --execute run files its own.
@@ -2300,6 +2494,9 @@ def main() -> int:
         return 0
     if args.refile:
         print(json.dumps(refile_from_ledger(root, now=now, only_sources=set(args.source) or None), indent=1))
+        return 0
+    if args.bind_restatements:
+        print(json.dumps(file_same_as(root, now=now), indent=1, ensure_ascii=False))
         return 0
     if args.eval:
         graded = answer_questions(root, _json(args.eval, []), model=model)

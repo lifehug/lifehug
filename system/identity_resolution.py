@@ -256,6 +256,36 @@ REPEATABLE_EVENT_KINDS = (
     "span",
 )
 
+#: The other side of that coin, and the one the DUPLICATE class needs: event
+#: kinds a life holds AT MOST ONCE for one subject. A person is born once and
+#: dies once; a marriage to one named person happens once. So two tellings of
+#: one of these about the SAME subject are two tellings of one fact — never two
+#: facts — and the deterministic identity binder may join them without asking
+#: (`episode_binder.RULE_ID_MILESTONE`).
+#:
+#: `married` is in the list although a life can hold a second marriage, because
+#: the rule that reads this tuple requires the NON-OWNER people named on both
+#: sides to agree: "married Katie" and "married Anne" name different subjects
+#: and never meet. `graduation` is deliberately ABSENT for the mirror-image
+#: reason — high school and college are two graduations of one subject and
+#: nothing in the label distinguishes their subjects.
+ONCE_PER_SUBJECT_EVENT_KINDS = (
+    "birth",
+    "child_born",
+    "death",
+    "loss",
+    "married",
+)
+
+#: Mentions that name the OWNER rather than anybody else. The owner is on every
+#: telling, so agreeing about him is not evidence about which event a telling is
+#: about (`episode_binder.INDEPENDENT_SIGNALS`' own reason) — these are dropped
+#: before a subject is compared.
+OWNER_SUBJECT_MENTIONS = frozenset({
+    "self", "me", "i", "myself", "narrator", "the narrator",
+    "author", "the author", "owner", "the owner",
+})
+
 #: Which surfaces an identity work item may reach. §6.3 sends ambiguous
 #: identity to Mirror; §2.5 defers Mirror's daily-question convergence to the
 #: issue tracked separately, so ``daily_question`` is deliberately absent.
@@ -1459,6 +1489,8 @@ __all__ = [
     "relationship_qualified_candidates",
     "shared_name_token_refs",
     "RELATIONSHIP_EVENT_KINDS",
+    "ONCE_PER_SUBJECT_EVENT_KINDS",
+    "OWNER_SUBJECT_MENTIONS",
     "REPEATABLE_EVENT_KINDS",
     "RESOLUTIONS",
     "RESOLUTION_REASONS",
