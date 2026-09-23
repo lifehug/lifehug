@@ -742,6 +742,30 @@ class EnvelopeIntegrityTests(unittest.TestCase):
         self.assertEqual(caught.exception.detail["missing_binding_ids"], [ghost])
 
 
+    def test_the_fold_reads_the_binding_store_once_for_every_envelope(self):
+        # v331. On the owner's vault the day the binder first filed (320
+        # operations, 1,493 bindings) `publish` re-read every binding file per
+        # operation and blew the hosted 240 s budget; the fold now hands the
+        # set it already read to every envelope check.
+        from unittest import mock
+
+        import episode_fold
+
+        root = _vault(self, "ei-c2-read-once-")
+        for members in ((TELLING_A,), (TELLING_B,), (TELLING_C,)):
+            fixture_create(root, members=members)
+        real = ei.load_event_identities
+        with mock.patch.object(ei, "load_event_identities", side_effect=real) as loads:
+            records = episode_fold.load_episode_records(root)
+        self.assertEqual(len(records["operations"]), 3)
+        self.assertEqual(len(records["bindings"]), 3)
+        self.assertEqual(loads.call_count, 1)
+        # And a supplied set that lacks a named binding is still the loud refusal.
+        with self.assertRaises(ei.EventIdentityError) as caught:
+            ei.load_operation_envelope(root, records["operations"][0], bindings=[])
+        self.assertEqual(caught.exception.code, "identity_envelope_incomplete")
+
+
 # --------------------------------------------------------------------------
 # Split and merge
 # --------------------------------------------------------------------------
