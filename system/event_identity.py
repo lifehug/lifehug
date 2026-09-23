@@ -2130,11 +2130,23 @@ def validate_envelope(operation: object, bindings: Sequence[object]) -> dict:
     return {"operation": record, "bindings": [supplied[key] for key in sorted(supplied)]}
 
 
-def load_operation_envelope(vault_root: str | Path, operation: object) -> dict:
-    """Read one envelope back off disk, refusing loudly if it is incomplete."""
+def load_operation_envelope(
+    vault_root: str | Path, operation: object, *, bindings: Sequence[object] | None = None
+) -> dict:
+    """Read one envelope back off disk, refusing loudly if it is incomplete.
+
+    ``bindings`` (v331) is the vault's binding set already in hand, as
+    :func:`load_event_identities` returns it; ``None`` reads the store. The
+    fold validates EVERY operation's envelope (`episode_fold
+    .load_episode_records`) and used to re-read every binding file for each
+    one — 320 operations × 1,493 bindings on the owner's vault the day the
+    binder first filed there (2026-09-23), which took `publish` from ~40 s to
+    past the hosted 240 s budget and parked every compile. One read, shared.
+    """
     record = validate_episode_operation(operation)
     found: list[dict] = []
-    by_id = {row["identity_id"]: row for row in load_event_identities(vault_root)}
+    rows = load_event_identities(vault_root) if bindings is None else bindings
+    by_id = {row["identity_id"]: row for row in rows}  # type: ignore[index]
     named = list(record["creates_binding_ids"]) + list(record["supersedes_binding_ids"])
     missing = sorted({value for value in named if value not in by_id})
     _require(

@@ -679,7 +679,10 @@ def load_episode_records(vault_root: str | Path, *, manifest: object = None) -> 
     operations = ei.load_episode_operations(vault_root)
     bindings = ei.load_event_identities(vault_root)
     for operation in operations:
-        ei.load_operation_envelope(vault_root, operation)
+        # v331: the binding set read ONCE above is the one every envelope is
+        # checked against — the fold is O(operations + bindings), not their
+        # product (see `load_operation_envelope`).
+        ei.load_operation_envelope(vault_root, operation, bindings=bindings)
     ei.validate_identity_set(bindings)
     return {
         "operations": operations,
