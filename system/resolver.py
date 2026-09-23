@@ -832,7 +832,7 @@ def verify(item: dict, *, story: str, passages: dict[str, dict], sp: dict, story
     }, "ok"
 
 
-def verify_estimate(item: dict, *, sp: dict) -> tuple[dict | None, str]:
+def verify_estimate(item: dict, *, sp: dict, subject: object = None) -> tuple[dict | None, str]:
     """v325. ``(normalized estimate, reason)``; ``None`` when there is none worth keeping.
 
     An estimate is what the model believes when the vault cannot tell: a bounded
@@ -842,6 +842,14 @@ def verify_estimate(item: dict, *, sp: dict) -> tuple[dict | None, str]:
     family history, not a guess about this life) — and never against a quote,
     because it is not a claim. It is stored beside the question, published as
     the dot's ``probable_window``, and files nothing.
+
+    v330: the pre-birth floor is the OWNER's. ``subject`` is the target's
+    subject (:func:`_subject_is_owner`); a moment that happened to somebody
+    else — the father's mission, a grandparent's move — may well fall before
+    the owner was born, and dropping its window as ``pre_birth`` threw away
+    exactly the estimate the vault could make (2026-09-23, the owner's vault:
+    "James Edwin Taylor was born 4 June 1954 … early-to-mid 1970s" → dropped).
+    ``None`` reads as the owner, which is what every caller before v330 meant.
     """
     raw = item.get("estimate")
     if not isinstance(raw, dict):
@@ -855,7 +863,7 @@ def verify_estimate(item: dict, *, sp: dict) -> tuple[dict | None, str]:
         return None, "estimate_reversed"
     birth = collapsed_text(sp.get("birth"))
     try:
-        if birth and int(record.latest[:4]) < int(birth[:4]):
+        if birth and int(record.latest[:4]) < int(birth[:4]) and _subject_is_owner(subject, sp):
             return None, "pre_birth"
     except ValueError:
         return None, "estimate_unparseable"
@@ -1343,8 +1351,30 @@ class _Read:
         return (self.ledger.get("nodes") or {}).get(node_id) or {}
 
     def include_paths(self, rows: list[dict]) -> list[str]:
-        """The triggering stories whose passages these rows' prompt must carry."""
-        return sorted({self.revisit[t["node_id"]]["trigger"] for t in rows if t["node_id"] in self.revisit})
+        """The triggering stories whose passages these rows' prompt must carry.
+
+        v330: a trigger that is a CONVERSATION message brings the rest of its
+        card session along (:func:`_session_siblings`). The person answers a
+        card across several messages — "19-21 years old", then "he was 19-21,
+        not me", then his birthday — and only the last carried a year; a
+        prompt that saw that one alone reasoned from "missionaries
+        traditionally serve at 19" instead of from what the person said.
+        """
+        out: set[str] = set()
+        for t in rows:
+            info = self.revisit.get(t["node_id"])
+            if not info:
+                continue
+            out.add(info["trigger"])
+            out.update(self.session_siblings(info["trigger"]))
+        return sorted(out)
+
+    def session_siblings(self, source_path: str) -> list[str]:
+        """The OTHER messages of the card session ``source_path`` belongs to, cached."""
+        cache = self.__dict__.setdefault("_siblings", {})
+        if source_path not in cache:
+            cache[source_path] = _session_siblings(self.root, source_path)
+        return cache[source_path]
 
     def open_rows_for(self, source_path: str) -> list[dict]:
         """The open questions a TRIGGERING story's own prompt lists (v325)."""
@@ -1383,6 +1413,30 @@ def _wide_resolution(row: dict) -> bool:
         return False
     width = _width_years(row.get("answer"))
     return width is not None and width >= REFINE_MIN_YEARS
+
+
+def _session_siblings(root: Path, source_path: str) -> list[str]:
+    """Every other file beside ``source_path`` whose frontmatter names the SAME
+    ``session_ref`` — the earlier and later messages of one card conversation.
+    ``[]`` when the file has no session, does not exist, or sits alone."""
+    path = root / source_path
+    if not path.is_file():
+        return []
+    meta, _body = split_frontmatter(_read(path))
+    wanted = collapsed_text(meta.get("session_ref"))
+    if not wanted:
+        return []
+    out: list[str] = []
+    for sibling in sorted(path.parent.glob("*.md")):
+        if sibling == path:
+            continue
+        try:
+            other, _ = split_frontmatter(_read(sibling))
+        except Exception:  # noqa: BLE001 — a file that will not parse is not a message
+            continue
+        if collapsed_text(other.get("session_ref")) == wanted:
+            out.append(sibling.relative_to(root).as_posix())
+    return out
 
 
 def _work_item_of_session(session_ref: object) -> str:
@@ -1783,7 +1837,7 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
         if entry["status"] in ("unknown", "unverified"):
             # v325: what the model believes while the vault cannot tell. Kept
             # beside the question, never filed; the page draws it as sky.
-            estimate, estimate_why = verify_estimate(item, sp=read.spine)
+            estimate, estimate_why = verify_estimate(item, sp=read.spine, subject=target.get("subject"))
             if estimate is None and entry["status"] == "unverified":
                 # The answer failed a mechanical check, so it files nothing —
                 # but it is still the model's reading of where this falls, and
@@ -1792,7 +1846,7 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
                     {"estimate": {**(item.get("answer") or {}), "confidence": 0.3,
                                   "basis": [{"kind": "story", "text": (collapsed_text(item.get("reason"))
                                                                         or "the resolver's own reading, not verified")[:MAX_ESTIMATE_TEXT]}]}},
-                    sp=read.spine)
+                    sp=read.spine, subject=target.get("subject"))
             if estimate is not None:
                 entry["estimate"] = estimate
                 report["estimates"] += 1
@@ -1954,16 +2008,18 @@ def adopt_proposals_as_estimates(read: "_Read", *, sp: dict) -> int:
     moment falls, and a dot over it beats a dot over the whole life. Returns
     how many rows gained an estimate; the caller saves the ledger."""
     adopted = 0
-    for row in (read.ledger.get("nodes") or {}).values():
+    for node_id, row in (read.ledger.get("nodes") or {}).items():
         if not isinstance(row, dict) or row.get("status") != "unverified" or isinstance(row.get("estimate"), dict):
             continue
         proposed = row.get("proposed")
         if not isinstance(proposed, dict):
             continue
+        known = read.by_node.get(node_id)
         estimate, _why = verify_estimate({"estimate": {
             **proposed, "confidence": 0.3,
             "basis": [{"kind": "story", "text": (collapsed_text(row.get("reason"))
-                                                 or "the resolver's own reading, not verified")[:MAX_ESTIMATE_TEXT]}]}}, sp=sp)
+                                                 or "the resolver's own reading, not verified")[:MAX_ESTIMATE_TEXT]}]}},
+            sp=sp, subject=known[1].get("subject") if known else None)
         if estimate is not None:
             row["estimate"] = estimate
             row.pop("estimate_dropped", None)

@@ -982,6 +982,45 @@ class RevisitTests(LegsTests):
         self.assertEqual(resolver.verify_estimate({"estimate": {"earliest": "1996", "latest": "1998"}}, sp=sp),
                          (None, "estimate_without_basis"))
 
+    def test_an_estimate_before_the_owners_birth_stands_when_the_moment_is_somebody_elses(self):
+        # v330. The father's mission fell before the owner was born; that is
+        # not "family history, not a guess about this life" — it is the guess.
+        sp = spine()
+        estimate = {"estimate": {"earliest": "1973", "latest": "1975", "confidence": 0.5,
+                                 "basis": [{"kind": "story", "text": "born 4 June 1954; served at 19-21"}]}}
+        self.assertEqual(resolver.verify_estimate(estimate, sp=sp, subject="James Edwin Taylor")[1], "ok")
+        self.assertEqual(resolver.verify_estimate(estimate, sp=sp, subject="self"), (None, "pre_birth"))
+        self.assertEqual(resolver.verify_estimate(estimate, sp=sp, subject=sp["owner_name"]), (None, "pre_birth"))
+        self.assertEqual(resolver.verify_estimate(estimate, sp=sp), (None, "pre_birth"))
+
+    def test_a_conversation_trigger_carries_the_cards_earlier_messages(self):
+        import temporal_publication as pub
+
+        self.story("a1", "The shop opened at some point after we moved.",
+                   [("shop", "after", ["the move to Cedarport"])])
+        self.publish()
+        rows = (pub.read_work_items(self.root) or {})["work_items"]
+        work_item_id = next(row["work_item_id"] for row in rows if row.get("node_ref") == self.nodes["shop"])
+        session = f'session_ref: "conversation:cand:work_item:{work_item_id}"\n'
+        (self.root / "answers" / "a2.md").write_text(
+            "---\ntitle: a2\ntype: conversation_message\n" + session + "---\n\nIt was the summer I turned nine.\n", "utf-8")
+        (self.root / "answers" / "a3.md").write_text(
+            "---\ntitle: a3\ntype: conversation_message\n" + session + "---\n\nNo wait, I was born in 1987.\n", "utf-8")
+        (self.root / "answers" / "a4.md").write_text(
+            "---\ntitle: a4\ntype: conversation_message\n"
+            'session_ref: "conversation:cand:work_item:work:000000000000000000000000"\n---\n\nUnrelated card.\n', "utf-8")
+        self.publish()
+        self.settle_unknown("shop", "Which year did the shop open?")
+        read = resolver._Read(self.root, triggers={"answers/a3.md"})
+        self.assertEqual(read.session_siblings("answers/a3.md"), ["answers/a2.md"])
+        self.assertEqual(read.session_siblings("answers/a1.md"), [])
+        plan = resolver.plan_items(self.root, limit=5, only_sources={"answers/a3.md"}, restrict=True, read=read)
+        item = self.item_for(plan, "answers/a1.md")
+        self.assertEqual(item["include_paths"], ["answers/a2.md", "answers/a3.md"])
+        self.assertIn("the summer I turned nine", item["prompt"])
+        self.assertIn("born in 1987", item["prompt"])
+        self.assertNotIn("Unrelated card", item["prompt"])
+
     def test_an_unknown_keeps_its_estimate_and_the_page_floats_the_dot_over_it(self):
         import temporal_publication as pub
 
