@@ -140,9 +140,15 @@ that asks for one rather than silently filing five-sixths of the act.
   subject the roster cannot place is read from the words: a relation word
   ("Mom", "Grandpa") means somebody else, a scene you told about them is
   yours to have lived (`lived_effect`), their own milestone needs evidence,
-  and anything wholly before your birth is family history. **Merged** —
-  design §2.5/§2.6, ADR 0030 decision 7 and its 2026-09-21 amendment,
-  `temporal_timeline._owner_relevance`, `tests/test_eras_e2.py`.
+  and anything wholly before your birth is family history. Since v334 those
+  two facts no longer decide by themselves whether the row is DRAWN on your
+  axis: a third, `axis_membership`, answers that from your roster's
+  relationship field and your birth date, and immediate family's own events in
+  your lifetime are drawn on your axis as moments about them. **Merged** —
+  design §2.5/§2.6, ADR 0030 decision 7 and its 2026-09-21 and 2026-09-23
+  amendments, `temporal_timeline._owner_relevance`,
+  `system/axis_membership.py`, `tests/test_eras_e2.py`,
+  `tests/test_axis_membership.py`.
 - **`life_view`** — the reading a node gets once it is placed against the
   life clip: lived history inside the clip, `contradictory` when it falls
   wholly before the supported birth interval (with a Mirror row citing the
@@ -334,12 +340,17 @@ the one containment rung, having found it could never fire from the landmark
 ladder, and whose refusal E-L2b (v277) completed with the rung's own condition
 6, `no_human_decision_on_pair`: once a person has taken a telling OUT of a
 container, no rebuild, sweep or rule bump puts it back — and event identity I1 took
-`timeline-rules:5` when grouping learned to read the identity layer, so the
-version in force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:9 -->
-`timeline-rules:9`, where a subject mention the roster cannot place is no
-longer the owner by default — a relative's own milestone leaves the axis and a
-scene the owner told about them stays on it as `lived_effect`.
+`timeline-rules:5` when grouping learned to read the identity layer.
+`timeline-rules:9` (v324) made a subject mention the roster cannot place no
+longer the owner by default — a relative's own milestone left the axis and a
+scene the owner told about them stayed on it as `lived_effect`. The version in
+force is
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:10 -->
+`timeline-rules:10` (v334, the owner ruling of 2026-09-23), where every node
+also publishes `axis_membership`/`axis_membership_reason` and the axis the frame
+memberships are gated on is that field: an immediate family member's own event
+during the owner's lifetime is drawn on his axis and takes its frames, where
+`contextual_only` used to leave it with none.
 
 **Legacy identity, never legacy authority.** A roster row whose name is a
 canonical band spelling (`My 20s`, `Childhood`, …) contributes *aliases*

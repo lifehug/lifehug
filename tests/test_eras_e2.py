@@ -719,16 +719,27 @@ class OwnerRelevanceTests(VaultTestCase):
         member_ids = {m["member_node_id"] for m in result.memberships}
         self.assertIn(node["node_id"], member_ids)
 
-    def test_a_relatives_own_milestone_needs_evidence_and_leaves_the_axis(self) -> None:
+    def test_a_relatives_own_milestone_needs_evidence_and_is_still_not_lived(self) -> None:
         """A kinded life event of theirs is THEIR milestone: with no landmark
-        entry granting it, `contextual_only` and no membership at all."""
+        entry granting it, `contextual_only` — the E2 relation is unchanged.
+
+        AMENDED v334 (owner ruling 2026-09-23). What changed is what that
+        relation IMPLIES about the axis, which is now a field of its own. A
+        grandmother is immediate family and this move is in his lifetime, so the
+        row is drawn on his axis as a moment about her and takes its frame; it
+        is `contextual_only` and `family`, and those are answers to two
+        different questions. `tests/test_axis_membership.py` owns the tiers.
+        """
         self.file_claims([owner_birth(), dated("my grandma", "1995-10-04", event_kind="move")])
         result = self.fold()
         node = self.node(result, event_kind="move")
         self.assertEqual(node["occurrence_subject_scope"], "other_person")
         self.assertEqual(node["owner_timeline_relation"], "contextual_only")
+        self.assertEqual(node["axis_membership"], "family")
+        self.assertEqual(node["axis_membership_reason"],
+                         "immediate_family_in_lifetime")
         member_ids = {m["member_node_id"] for m in result.memberships}
-        self.assertNotIn(node["node_id"], member_ids)
+        self.assertIn(node["node_id"], member_ids)
 
     def test_an_owner_headed_mention_is_still_the_owner(self) -> None:
         """"narrator's family" names relatives and is about the OWNER — the
@@ -765,10 +776,21 @@ class OwnerRelevanceTests(VaultTestCase):
         self.assertEqual(node["occurrence_subject_scope"], "other_person")
         self.assertEqual(node["owner_timeline_relation"], "lived_effect")
 
-    def test_a_relatives_marriage_straddling_his_birth_is_never_inside_childhood(self) -> None:
-        """"Mom married dad at 21 · 1979-1981" drawn under "Childhood · ages
-        0-12" was the second half of the founder's report. It is family
-        history: off the axis, and in no frame."""
+    def test_a_relatives_marriage_straddling_his_birth_is_his_mothers_moment(self) -> None:
+        """AMENDED v334 (owner ruling 2026-09-23), and this is the one row where
+        the amendment REVERSES what v324 made visible — recorded here rather
+        than smoothed over.
+
+        v324 took "Mom married dad at 21 · 1979-1981" out of "Childhood · ages
+        0-12" as family history. The 2026-09-23 ruling says an immediate family
+        member's own event during his lifetime belongs on his axis, drawn as a
+        moment about them, and rule 4's pre-birth test is kept EXACTLY as v324
+        defined it: `_before_birth` is *wholly* before the supported birth
+        interval. A 1979-1981 reading straddles 1981-07-11, so it is not wholly
+        before, so it is his mother's moment on his axis and it takes the frame
+        its date falls in. On the owner's own vault this row carries no date at
+        all and therefore draws nowhere; a dated one would now draw.
+        """
         self.file_claims([owner_birth(), claim(
             claim_type="date", subject_mention="Mom", event_kind="married",
             temporal_value=chrono.DateRecord(
@@ -779,8 +801,9 @@ class OwnerRelevanceTests(VaultTestCase):
         result = self.fold()
         node = self.node(result, event_kind="married")
         self.assertEqual(node["owner_timeline_relation"], "contextual_only")
-        rows = [m for m in result.memberships if m["member_node_id"] == node["node_id"]]
-        self.assertEqual(rows, [])
+        self.assertEqual(node["axis_membership"], "family")
+        self.assertEqual(node["axis_membership_reason"],
+                         "immediate_family_in_lifetime")
 
     def test_a_scene_wholly_before_his_birth_is_family_history(self) -> None:
         """Nobody lives through what happened before they existed, however the
@@ -820,8 +843,13 @@ class OwnerRelevanceTests(VaultTestCase):
         node = next(row for row in result.nodes if row["node_id"] == self.NODE)
         self.assertEqual(node["occurrence_subject_scope"], "other_person")
         self.assertEqual(node["owner_timeline_relation"], "contextual_only")
+        # AMENDED v334: her milestone, and she is his mother, so it is drawn on
+        # his axis as a moment about HER and takes her frame. The age refinement
+        # this test owns is untouched — it still decides the RELATION, which is
+        # what stops her age being read off his birth.
+        self.assertEqual(node["axis_membership"], "family")
         rows = [m for m in result.memberships if m["member_node_id"] == self.NODE]
-        self.assertEqual(rows, [])
+        self.assertTrue(rows)
 
     def test_negative_the_same_moment_with_a_date_only_is_a_scene_he_lived(self) -> None:
         """Seen failing first: the AGE claim is the whole difference. Dated and
@@ -893,8 +921,10 @@ class OwnerRelevanceTests(VaultTestCase):
         result = self.fold()
         node = next(row for row in result.nodes if row["node_id"] == self.NODE)
         self.assertEqual(node["owner_timeline_relation"], "contextual_only")
-        member_ids = {m["member_node_id"] for m in result.memberships}
-        self.assertNotIn(self.NODE, member_ids)
+        # AMENDED v334: still HIS milestone rather than a scene the owner lived —
+        # which is what this test is about — and a grandfather is immediate
+        # family, so the row is drawn on the owner's axis as a moment about him.
+        self.assertEqual(node["axis_membership"], "family")
 
     def test_a_death_before_he_was_born_is_still_family_history(self) -> None:
         """The one exemption from the exemption: nobody lives through a loss
@@ -953,7 +983,7 @@ class OwnerRelevanceTests(VaultTestCase):
                     tt._mention_names_another_person({"subject": mention, "claims": []}))  # noqa: SLF001
 
     def test_the_rule_version_is_nine(self) -> None:
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:9")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:10")
 
     def test_the_owners_own_life_domains_never_reach_the_subject_question(self) -> None:
         """residences/schools/work/military/birth are the owner's own life —
