@@ -315,6 +315,72 @@ it is a router in front of the model — the shape this ADR's complexity budget
 says to avoid — and the general fix above already files the dates; it stays
 a possible refinement.
 
+## Amendment (v339, 2026-09-23): the `birth` landmark is the owner's own birth
+
+**What happened.** The v326 amendment above closes with a deferral: *routing a
+vital-record-shaped paste to the people/landmark recorder so `born`/`died` land
+on the roster person directly*. Two days later something routed one there
+anyway. The same two FamilySearch cards — James Edwin Taylor Sr, born
+17 October 1930, and Darvin Burrows Beauchamp, born 30 September 1929 — reached
+a landmark-record filing (`maintenance:reflect:…:landmark-record`, owner's vault
+`fd04e792` and `b6982658`) and were filed as **`birth`** landmark records.
+
+`birth` is the one domain with no identity rung: `questions.yaml` declares
+`birth.identity_kind:` empty and `birth.collection: singleton`, because a birth
+landmark is the owner's own birthday and there is nobody else in it. So both
+records keyed on the same empty `entry_key` as the owner's own stated
+1981-07-11 and folded into ONE entry. `merge_landmark_entry`'s `{**prior,
+**incoming}` let the later record's raw grains overwrite his, so the drawing
+read `30 September 1929` beside a `date` of `1981-07-11`; `_attach_dates`
+reconciled all three claims onto his entry, so both grandfathers' births became
+his own `date_alternates`; and because `entry_subject_mention` mints
+`OWNER_BIRTH_MENTION` for this domain *unconditionally*, the fold filed three
+`self` birth claims and asked him *"Two dates are claimed for your birth — 11
+July 1981 and 30 September 1929. Which is right?"*.
+
+**Decision.** Item 10's rule gains a fourth reason, and it is a statement about
+a domain rather than about a record's completeness:
+
+16. **A `birth` landmark record is the owner's own birth.** A record that names
+    somebody who is not the owner, or that carries a year at least fifteen from
+    the year the owner STATED, is a relative's birth: it belongs to `family`,
+    which has a `who` rung for exactly this, and it never touches the owner's
+    entry. `landmark_projection.birth_landmark_not_owner` is the one
+    definition, returning `birth_landmark_not_owner`
+    (`NOT_A_LANDMARK_REASONS`), and it is read at the same two seats item 10
+    already uses: REFUSED AT FILING by `timeline.save_landmark`, which routes a
+    NAMED relative's birth to `family` and raises the typed
+    `BirthLandmarkNotOwner` for an unnamed one — a refusal the host can read is
+    a question the host can ask (*"whose birth is that?"*), and a silent merge
+    is the one outcome the rule exists to make impossible — and SKIPPED AT DRAW
+    by `project_landmark_entries`, before the group exists, so a vault that
+    already holds the records heals on its next redraw. Un-drawing a record is
+    not retracting it: the claims stay in the substrate and are superseded by a
+    correction, which is the only thing that can make a standing claim stop
+    standing.
+
+    The year bound needs a stated birth to measure against
+    (`owner_stated_birth` — the first `basis: "stated"` birth claim in filing
+    order), so a vault whose owner has not said when he was born still records
+    a birth on a name alone. Fifteen years is under the shortest plausible
+    generation gap and far over any correction a person makes to their own
+    birthday; the real records were 52 and 51 years out.
+
+17. **A weaker-basis claim never respells the winner's date grains.** For every
+    domain, not just this one: `year`/`month`/`day` are the entry's date in the
+    ladder's own words, so a claim that lost the reconciliation *on basis*
+    (`chronology.BASIS_WEIGHT` — stated 6.0 over anchor 4.0) does not get to
+    rewrite them (`landmarks_interaction._keep_grains_of_the_better_supported_claim`).
+    Two claims of EQUAL basis merge exactly as they did before, so "actually I
+    was born on the 12th" still moves the grain, and v222's rule is untouched —
+    the losing claim is still kept as an alternate to be asked about.
+
+**Considered and not built.** Making the FOLD ignore a `self` birth claim that
+already stands would have healed an affected vault without a correction, and it
+is the wrong direction: a standing claim is retracted by a correction, not by a
+reader. An affected vault therefore needs `temporal_store.supersede_claims`
+beside the redraw, which is what the owner's vault got.
+
 ## Consequences
 
 - The classifier's validator is no longer the place where placement is won or
