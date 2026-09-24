@@ -551,6 +551,12 @@ IDENTITY_FIELDS = ("label", "name")
 _PLACEHOLDER_LABELS = frozenset({"that one", "unknown", "unnamed", "n/a",
                                  "none", "someone", "?", "-", "—"})
 
+#: The same frozenset under a PUBLIC name, so a reader in another module
+#: (v339: `landmark_projection.third_party_birth_subject`) asks this one
+#: definition instead of keeping a second list of non-names. Not a copy — the
+#: same object.
+PLACEHOLDER_LABELS = _PLACEHOLDER_LABELS
+
 
 def identity_rung(row: object) -> str | None:
     """The rung whose answer IS what the entry is called, or None.
@@ -1830,6 +1836,20 @@ def merge_landmark_entry(existing: object, record: object) -> dict:
     One definition, so the store and every future caller agree
     (recurring-defect doctrine).
 
+    **And the raw date GRAINS follow the date** (v339). ``{**prior,
+    **incoming}`` reconciles ``date`` properly and then let the incoming
+    record's ``year``/``month``/``day`` — the SAME fact in the ladder's own
+    words — overwrite the prior's regardless of which claim won, so an entry
+    could read ``30 September 1929`` beside a ``date`` of ``1981-07-11``.
+    That is what the owner's `birth` entry read after two grandfathers'
+    ``anchor``-basis births were filed into it (v339's incident,
+    `landmark_projection.birth_landmark_not_owner`). STATED BEATS ANCHOR: a
+    weaker-basis claim that lost the reconciliation does not get to respell
+    the grains of the one that won. See
+    :func:`_keep_grains_of_the_better_supported_claim`, which is deliberately
+    narrow — two claims of equal basis merge exactly as they did before, so an
+    ordinary correction of one's own birthday still lands.
+
     **The DATE fields are the exception to the dict merge** (v222, B4).
     ``{**prior, **incoming}`` is right for a city and an address — a later
     rung is a fuller answer to the same question — and it was quietly wrong
@@ -1861,6 +1881,7 @@ def merge_landmark_entry(existing: object, record: object) -> dict:
         prior.get("date"), _alternates_of(prior, DATE_ALTERNATES_KEY), incoming.get("date"))
     _set_or_drop(merged, "date", best)
     _set_or_drop(merged, DATE_ALTERNATES_KEY, alternates or None)
+    _keep_grains_of_the_better_supported_claim(merged, prior, incoming, best)
 
     prior_span = prior.get("span") if isinstance(prior.get("span"), dict) else {}
     incoming_span = incoming.get("span") if isinstance(incoming.get("span"), dict) else {}
@@ -1883,6 +1904,41 @@ def merge_landmark_entry(existing: object, record: object) -> dict:
     _set_or_drop(merged, SPAN_ALTERNATES_KEY, span_alternates or None)
     return merged
 
+
+
+def _keep_grains_of_the_better_supported_claim(merged: dict, prior: dict,
+                                               incoming: dict, best: object) -> None:
+    """v339. A weaker-basis loser never respells the winner's date grains.
+
+    :data:`_DATE_GRAIN_RUNGS` (``birth``/``year``/``month``/``day``) is the
+    entry's date IN THE LADDER'S WORDS — the same assertion as ``date``, one
+    rung at a time — so the two must agree. When the incoming record's own
+    date claim is the entry's date, its grains are the entry's grains and
+    nothing here applies. When it LOST and lost on BASIS
+    (`chronology.BASIS_WEIGHT`: ``stated`` 6.0 beats ``anchor`` 4.0), its
+    grains are a different claim's spelling and the prior's stand.
+
+    The basis test is what keeps this narrow. Two ``stated`` claims a day
+    apart tie on basis, so "actually I was born on the 12th" merges exactly as
+    it did before v339 — the grain moves to ``12`` even though
+    `chronology.reconcile` breaks the tie on EDTF text and keeps the 11th as
+    ``date``. Only a claim that is worse EVIDENCE is held off, which is the
+    one thing the incident needed and nothing more.
+    """
+    incoming_date = incoming.get("date")
+    if not isinstance(incoming_date, dict) or not isinstance(best, dict):
+        return
+    if chrono.claim_identity(incoming_date) == chrono.claim_identity(best):
+        return
+    incoming_weight = chrono.BASIS_WEIGHT.get(str(incoming_date.get("basis") or ""), 0.0)
+    best_weight = chrono.BASIS_WEIGHT.get(str(best.get("basis") or ""), 0.0)
+    if incoming_weight >= best_weight:
+        return
+    for rung in _DATE_GRAIN_RUNGS:
+        if rung in prior:
+            merged[rung] = prior[rung]
+        else:
+            merged.pop(rung, None)
 
 
 def _alternates_of(holder: object, key: object) -> list:

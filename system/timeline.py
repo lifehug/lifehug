@@ -1210,6 +1210,15 @@ def save_landmark(domain: str, record: object, *, digest_override: str | None = 
     # post-upgrade write, so a record can never land in a half-flipped vault.
     landmark_projection.flip_if_needed(root, load_landmarks())
 
+    # THE `birth` DOMAIN IS THE OWNER'S OWN BIRTH (v339). Refused at FILING
+    # here so nothing new lands, and skipped at DRAW in
+    # `landmark_projection.project_landmark_entries` so what already landed
+    # heals — the same two seats `unnamed_organization` has.
+    rerouted = _birth_landmark_is_the_owners(root, key, record)
+    if rerouted is not None:
+        return save_landmark(rerouted["domain"], rerouted,
+                             digest_override=digest_override)
+
     entry_key = landmarks_interaction.landmark_entry_key(record, row)
     for existing in load_landmarks().get(key) or ():
         if landmarks_interaction.landmark_entry_key(existing, row) == entry_key:
@@ -1252,6 +1261,64 @@ def save_landmark(domain: str, record: object, *, digest_override: str | None = 
     if same_key:
         return same_key[0]
     return landmarks_interaction.merge_landmark_entry(None, record)
+
+
+class BirthLandmarkNotOwner(ValueError):
+    """v339. A ``birth`` record that is somebody else's birth, refused by name.
+
+    A TYPED refusal, not a shrug: ``reason`` is
+    `landmark_projection.BIRTH_LANDMARK_NOT_OWNER`, the same word the draw
+    seat skips on and the same closed vocabulary
+    `landmark_projection.NOT_A_LANDMARK_REASONS` declares, and ``record`` is
+    what was refused. It is raised only where there is NOBODY to file the
+    birth under — a date a lifetime from the owner's with no name attached, as
+    both of the incident's records were by the time they reached this seat —
+    because a refusal the host can read is a question the host can ask
+    (*"whose birth is that?"*), and a silent merge is the one outcome the rule
+    exists to make impossible.
+    """
+
+    def __init__(self, record: object, reason: str) -> None:
+        self.record = record
+        self.reason = reason
+        super().__init__(
+            f"{reason}: a birth landmark is the owner's own birth, and this "
+            f"record is not the owner's — file it under `family` with the "
+            f"person's name, or ask whose birth it is"
+        )
+
+
+def _birth_landmark_is_the_owners(root: object, domain: str,
+                                  record: dict) -> dict | None:
+    """Route or refuse a ``birth`` record that is not the owner's (v339).
+
+    ``None`` — the ordinary case — means "file it as asked". A dict is a
+    `family` record to file INSTEAD (the named relative's birth). A refusal
+    raises :class:`BirthLandmarkNotOwner`.
+
+    The rule and the reason both live in `landmark_projection`
+    (:func:`landmark_projection.birth_landmark_not_owner`) so the write seat
+    and the draw seat cannot disagree about what a third-party birth is; this
+    function only supplies the vault context the rule needs — the owner's
+    STATED birth, read off the already-filed records, and the owner's own
+    spellings — and decides between the two outcomes.
+    """
+    if domain != landmark_projection.OWNER_BIRTH_DOMAIN:
+        return None
+    owner_names = landmark_projection.owner_names_for(root)
+    stated = landmark_projection.owner_stated_birth(
+        landmark_projection.load_landmark_sources(root))
+    reason = landmark_projection.birth_landmark_not_owner(
+        record, owner_birth=stated, owner_names=owner_names)
+    if reason is None:
+        return None
+    subject = landmark_projection.third_party_birth_subject(
+        record, owner_names=owner_names)
+    if subject:
+        rerouted = landmark_projection.relative_birth_record(record, subject)
+        if rerouted is not None:
+            return rerouted
+    raise BirthLandmarkNotOwner(record, reason)
 
 
 def _retire_answered_timeline_candidates(domain: str, record: dict) -> list[str]:

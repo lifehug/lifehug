@@ -2220,7 +2220,21 @@ def cmd_landmark_record(args: argparse.Namespace) -> int:
     if validated is None:
         print("error: nothing to record")
         return 1
-    saved = _timeline.save_landmark(validated["domain"], validated)
+    try:
+        saved = _timeline.save_landmark(validated["domain"], validated)
+    except _timeline.BirthLandmarkNotOwner as exc:
+        # v339. A TYPED refusal, printed by name so the caller — a host, a
+        # maintenance job, a person at a terminal — reads a question rather
+        # than a success. The `birth` domain is the owner's own birth; a
+        # relative's birth belongs to `family`, under their name.
+        print(f"error: {exc.reason}: {exc}")
+        return 1
+    if saved.get("domain") and saved.get("domain") != validated["domain"]:
+        # Routed: a NAMED third party's birth was filed where it belongs.
+        print(f"recorded {saved['domain']}: {saved.get('label') or saved.get('who')} "
+              f"— a birth landmark is the owner's own, so this one was filed "
+              f"as a relative's")
+        return 0
     if saved.get("none"):
         print(f"recorded {validated['domain']}: none — the domain is complete")
         return 0

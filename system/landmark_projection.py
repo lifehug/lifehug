@@ -82,6 +82,7 @@ here. This module draws the LADDER's file, at the ladder's own shape.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -201,10 +202,264 @@ PARTICIPATION_EPISODE_RULE_TEXT = (
 NONE_TERMINAL = "none_terminal"
 SKIPPED_ANSWER = "skipped_answer"
 UNNAMED_ORGANIZATION = "unnamed_organization"
-NOT_A_LANDMARK_REASONS = (NONE_TERMINAL, SKIPPED_ANSWER, UNNAMED_ORGANIZATION)
+#: v339 (lifehug#394). A ``birth`` record that is somebody ELSE's birth. See
+#: :func:`birth_landmark_not_owner` for the rule and the incident.
+BIRTH_LANDMARK_NOT_OWNER = "birth_landmark_not_owner"
+NOT_A_LANDMARK_REASONS = (NONE_TERMINAL, SKIPPED_ANSWER, UNNAMED_ORGANIZATION,
+                          BIRTH_LANDMARK_NOT_OWNER)
+
+# --------------------------------------------------------------------------
+# v339: the `birth` domain is the OWNER's own birth and nothing else
+# --------------------------------------------------------------------------
+#
+# THE INCIDENT (owner's vault, staging, 2026-09-23 20:34 UTC, commit
+# b6982658 "Landmark: birth"). The owner pasted two of his grandfathers'
+# vital records into a Timeline card conversation on 2026-09-21 — the
+# genealogy-app shape, `Name • 8 Sources / James Edwin Taylor Sr`,
+# `Birth • 6 Sources / 17 October 1930` — and a landmark-record filing
+# (`maintenance:reflect:…:landmark-record`) turned both men's births into
+# `birth` landmark records: `landmark:entry-35a59936fc440531af66b360`
+# (1930-10-17, basis `anchor`) and `landmark:entry-9c618f4b4d540072b4ec2103`
+# (1929-09-30, basis `anchor`, carrying the raw grains `day: "30"`,
+# `month: "September"`, `year: "1929"`).
+#
+# `birth` has NO identity rung (`questions.yaml`: `birth.identity_kind:` is
+# empty, `birth.collection: singleton`), so every one of those records keyed
+# on the same empty `entry_key` as the owner's own stated 1981-07-11 and
+# folded into ONE entry. Two things followed, and this module is where both
+# of them happened:
+#
+#   1. `landmarks_interaction.merge_landmark_entry`'s `{**prior, **incoming}`
+#      let the later record's raw grains OVERWRITE the owner's, so
+#      `state/landmarks.json` → `/domains/birth[0]` read
+#      `30 September 1929` beside a `date` of `1981-07-11`.
+#   2. `_attach_dates` reconciled all three date claims onto the owner's
+#      entry, so 1929-09-30 and 1930-10-17 became the owner's own
+#      `date_alternates` — and, because `entry_subject_mention` mints
+#      :data:`OWNER_BIRTH_MENTION` for this domain UNCONDITIONALLY, the fold
+#      filed three `self` birth claims and minted the Mirror contradiction
+#      *"Two dates are claimed for your birth — 11 July 1981 and 30
+#      September 1929. Which is right?"*
+#
+# THE RULE. A `birth` landmark record is the owner's own birth. A record that
+# names somebody else, or that is dated a human lifetime away from the birth
+# year the owner STATED, is a relative's birth — it belongs to `family`,
+# which has a `who` rung for exactly this — and it never touches the owner's
+# entry. Refused at FILING so nothing new lands (`timeline.save_landmark`),
+# skipped at DRAW so what already landed heals, which is the same two-seat
+# shape `UNNAMED_ORGANIZATION` and
+# `landmark_recorder.refuse_unnamed_tenures` already have.
+
+#: The one domain whose entry is the OWNER's own, has no subject rung, and
+#: therefore cannot tell two people's births apart by identity.
+OWNER_BIRTH_DOMAIN = "birth"
+
+#: How far a ``birth`` record's year may sit from the year the owner STATED
+#: and still be read as a correction of it rather than a different person's
+#: birth. Fifteen years is under the shortest plausible generation gap and
+#: well over any correction a person makes to their own birthday — the real
+#: records were 52 and 51 years out. A record inside the bound is merged as
+#: it always was; the bound only ever decides whether a record is REFUSED,
+#: never which of two dates wins (that is `chronology.reconcile`'s).
+OWNER_BIRTH_YEAR_TOLERANCE = 15
+
+#: The genealogy-app / vital-record ``Name`` header, whose value is on the
+#: NEXT line: ``Name • 8 Sources\nJames Edwin Taylor Sr``. This is the exact
+#: shape the owner pasted, and a `birth` record carrying it is quoting
+#: somebody's record rather than stating the owner's own birthday.
+BIRTH_NAME_LINE_RE = re.compile(
+    r"(?im)^[ \t]*name\b[^\n]*\n[ \t]*(?P<name>[^\n]{2,120}?)[ \t]*$")
+
+#: Where a `birth` record could be carrying a person. ``label``/``name`` are
+#: `landmarks_interaction.IDENTITY_FIELDS`; ``subject`` is the recorder's own
+#: field; ``who`` is `family`'s identity rung, which a mis-domained record
+#: routinely brings with it.
+BIRTH_SUBJECT_FIELDS = ("label", "name", "subject", "who")
+
+#: Free-text fields a pasted record's prose can ride in on.
+BIRTH_TEXT_FIELDS = ("label", "name", "subject", "who", "what", "note",
+                     "household", "place")
 
 
-def not_a_landmark(domain: object, record: object) -> str | None:
+def _owner_spellings(owner_names: object) -> frozenset[str]:
+    return frozenset(
+        collapsed_text(name).casefold() for name in (owner_names or ())
+        if collapsed_text(name))
+
+
+def _is_owner_spelling(text: object, owner_names: object) -> bool:
+    """Is this text the owner, and only the owner?
+
+    `temporal_timeline.is_owner_reference_only` is the one definition of
+    "this says nothing but *me*" ("I", "myself", "self"); the vault's own
+    owner spellings come from `temporal_publication.owner_identity_inputs`
+    and are compared WHOLE, exactly as `timeline-rules:8` requires.
+    """
+    from temporal_timeline import is_owner_reference_only  # noqa: PLC0415
+
+    body = collapsed_text(text)
+    if not body:
+        return True
+    if is_owner_reference_only(body):
+        return True
+    return body.casefold() in _owner_spellings(owner_names)
+
+
+def third_party_birth_subject(record: object, *, owner_names: object = ()) -> str | None:
+    """The OTHER person a ``birth`` record names, or ``None``.
+
+    Read in two passes, structural both times:
+
+    * the record's own subject fields (:data:`BIRTH_SUBJECT_FIELDS`) — a
+      `birth` entry names nobody by construction, so a name in one of them
+      is a name that does not belong to this domain unless it is the owner's
+      own spelling;
+    * the pasted vital record's ``Name`` header
+      (:data:`BIRTH_NAME_LINE_RE`) in any free-text field, which is how the
+      real records arrived.
+
+    A bare RELATION word ("my grandfather") names a third party without
+    naming a person, so it is reported by :func:`birth_landmark_not_owner`
+    and deliberately NOT returned here: there is no ``who`` to file a
+    `family` entry under, and an unnamed `family` entry is the
+    :data:`UNNAMED_ORGANIZATION` hazard in a second domain.
+    """
+    if not isinstance(record, dict):
+        return None
+    for field in BIRTH_SUBJECT_FIELDS:
+        text = record.get(field)
+        if not isinstance(text, str):
+            continue
+        body = collapsed_text(text)
+        if not body or body.casefold() in landmarks_interaction.PLACEHOLDER_LABELS:
+            continue
+        if body.casefold() == OWNER_BIRTH_DOMAIN:
+            continue
+        if _is_owner_spelling(body, owner_names):
+            continue
+        return body[:120]
+    for field in BIRTH_TEXT_FIELDS:
+        text = record.get(field)
+        if not isinstance(text, str) or "\n" not in text:
+            continue
+        match = BIRTH_NAME_LINE_RE.search(text)
+        if match is None:
+            continue
+        body = collapsed_text(match.group("name"))
+        if body and not _is_owner_spelling(body, owner_names):
+            return body[:120]
+    return None
+
+
+def _names_a_third_party_relation(record: object) -> bool:
+    """Does this ``birth`` record say whose birth it is, and say *not mine*?
+
+    `cross_dating.THIRD_PARTY_RELATION_WORDS` is the ONE vocabulary for
+    "this names somebody other than the owner" and there is no second list
+    here (`axis_membership` partitions the same tuple).
+    """
+    if not isinstance(record, dict):
+        return False
+    import cross_dating  # noqa: PLC0415
+
+    for field in BIRTH_TEXT_FIELDS:
+        text = record.get(field)
+        if isinstance(text, str) and cross_dating.THIRD_PARTY_RELATION_RE.search(text):
+            return True
+    return False
+
+
+def owner_stated_birth(sources: object) -> dict | None:
+    """The owner's own STATED birth claim, read off the filed records.
+
+    The first ``birth`` record in FILING ORDER whose date carries
+    ``basis: "stated"`` — a date the owner typed or said, which is the only
+    kind of birth claim that can speak for whose entry this is. An
+    ``anchor``, ``document`` or ``age`` basis is a date somebody worked out
+    or copied, and the incident is precisely a pair of copied ones.
+
+    ``None`` when no birth has been stated, which is what disarms the year
+    bound: with nothing to be far FROM, only a named subject refuses.
+    """
+    for source in sources or ():
+        if not isinstance(source, dict):
+            continue
+        if collapsed_text(source.get("domain")) != OWNER_BIRTH_DOMAIN:
+            continue
+        record = source.get("record")
+        date = record.get("date") if isinstance(record, dict) else None
+        if isinstance(date, dict) and collapsed_text(date.get("basis")) == "stated":
+            return date
+    return None
+
+
+def birth_landmark_not_owner(record: object, *, owner_birth: object = None,
+                             owner_names: object = ()) -> str | None:
+    """:data:`BIRTH_LANDMARK_NOT_OWNER` when this ``birth`` record is not the
+    owner's, else ``None``.
+
+    Two independent reasons, and either is enough:
+
+    (a) **it names another person.** `birth` names nobody
+        (`landmarks_interaction.identity_rung` → ``None`` for this domain),
+        so a subject field or a pasted ``Name`` header that is not an owner
+        spelling is a person this domain has no slot for
+        (:func:`third_party_birth_subject`); a bare relation word is the
+        same statement without a name
+        (:func:`_names_a_third_party_relation`).
+    (b) **its year is a lifetime from the owner's STATED birth year.**
+        :data:`OWNER_BIRTH_YEAR_TOLERANCE`, and only when a stated birth
+        exists to measure against. This is the half that caught the real
+        records, which carried no name at all by the time they were filed:
+        ``{"date": {"best": "1929-09-30", "basis": "anchor"}, "day": "30",
+        "month": "September", "year": "1929"}`` against a stated 1981.
+
+    The record that SUPPLIED the stated birth is never refused by (b) — it
+    is zero years from itself — so an ordinary correction of the owner's own
+    birthday ("actually I was born on the 12th") is untouched.
+    """
+    if not isinstance(record, dict):
+        return None
+    if record.get("none") is True or record.get("skipped") is True:
+        return None
+    if third_party_birth_subject(record, owner_names=owner_names) \
+            or _names_a_third_party_relation(record):
+        return BIRTH_LANDMARK_NOT_OWNER
+    stated_year = chrono.year_of(owner_birth) if owner_birth else None
+    record_year = chrono.year_of(record.get("date"))
+    if stated_year is not None and record_year is not None \
+            and abs(record_year - stated_year) >= OWNER_BIRTH_YEAR_TOLERANCE:
+        return BIRTH_LANDMARK_NOT_OWNER
+    return None
+
+
+def relative_birth_record(record: object, subject: str) -> dict | None:
+    """The same birth, re-domained to ``family`` under the person it names.
+
+    The ROUTE half of the rule: a grandfather's birth is a real landmark and
+    a real fact about the owner's life — `family` is the domain that holds
+    one, with `who` for the person and the same ``birth`` date semantics —
+    so a refused `birth` record is re-filed there rather than thrown away.
+    Built through `landmarks_interaction.validate_landmark`, so the rungs
+    `family` does not declare drop out instead of riding along (the raw
+    ``day``/``month``/``year`` grains belong to `birth`'s ladder, not this
+    one). ``None`` when nothing survives validation.
+    """
+    who = collapsed_text(subject)
+    if not who:
+        return None
+    rerouted: dict = {"domain": "family", "who": who[:120], "label": who[:120]}
+    date = record.get("date") if isinstance(record, dict) else None
+    if isinstance(date, dict):
+        rerouted["date"] = date
+    relation = record.get("relation") if isinstance(record, dict) else None
+    if isinstance(relation, str) and relation.strip():
+        rerouted["relation"] = relation.strip()
+    return landmarks_interaction.validate_landmark(rerouted)
+
+
+def not_a_landmark(domain: object, record: object, *, owner_birth: object = None,
+                   owner_names: object = ()) -> str | None:
     """Why this filed record must never become a timeline node, or ``None``.
 
     ONE definition, read twice: the recorder refuses to file an
@@ -234,6 +489,14 @@ def not_a_landmark(domain: object, record: object) -> str | None:
     ``residences`` is deliberately outside the unnamed rule: a place stub that
     duplicates a dated stay is an IDENTITY problem (lifehug#365 item 3), and
     attaching it to the stay it repeats is a different fix from refusing it.
+
+    v339 adds the fourth reason, :data:`BIRTH_LANDMARK_NOT_OWNER`, and the
+    two keywords it needs: ``owner_birth`` is the claim
+    :func:`owner_stated_birth` read off this vault's records and
+    ``owner_names`` the spellings `temporal_publication.owner_identity_inputs`
+    hands over. Both default to "unknown", and an unknown owner never refuses
+    a record on the year bound — a caller with no vault context gets exactly
+    the three pre-v339 reasons.
     """
     if not isinstance(record, dict):
         return None
@@ -241,6 +504,9 @@ def not_a_landmark(domain: object, record: object) -> str | None:
         return SKIPPED_ANSWER
     if record.get("none") is True:
         return NONE_TERMINAL
+    if collapsed_text(domain) == OWNER_BIRTH_DOMAIN:
+        return birth_landmark_not_owner(record, owner_birth=owner_birth,
+                                        owner_names=owner_names)
     row = domain_row_or_none(domain)
     if not isinstance(row, dict) or row.get("identity_kind") != "organization":
         return None
@@ -1352,7 +1618,8 @@ def _as_int(value: object) -> int:
 # --------------------------------------------------------------------------
 
 
-def project_landmark_entries(active_index: object, *, sources: object) -> dict:
+def project_landmark_entries(active_index: object, *, sources: object,
+                             owner_names: object = ()) -> dict:
     """Draw ``state/landmarks.json`` from the active claims. PURE.
 
     ``active_index`` is `temporal_store.fold_active_index`'s mapping;
@@ -1385,6 +1652,21 @@ def project_landmark_entries(active_index: object, *, sources: object) -> dict:
     filed, which reproduces the pre-flip file exactly and keeps `residences`
     and `schools` — the sequence domains, whose order is part of the fact —
     walking forward in time as they did before.
+
+    **A ``birth`` record that is not the owner's does not join step 2**
+    (v339, :data:`BIRTH_LANDMARK_NOT_OWNER`). Dropping it HERE, before the
+    group exists, is what makes both halves of the incident heal on the next
+    redraw with no migration: its skeleton never reaches step 3, so the
+    owner's raw ``day``/``month``/``year`` stay his, and its date claim never
+    reaches step 4, so it is not written as one of his ``date_alternates``.
+    The claim itself is still in the substrate and still says what it said —
+    un-drawing a record is not retracting it — which is why the vault-side
+    repair supersedes the claims separately.
+
+    ``owner_names`` is this vault's owner spellings
+    (`temporal_publication.owner_identity_inputs`, supplied by :func:`redraw`);
+    ``()`` is "not told", and the rule then leans on the year bound and
+    `temporal_timeline.is_owner_reference_only` alone.
     """
     active = {
         row.get("claim_id")
@@ -1400,11 +1682,21 @@ def project_landmark_entries(active_index: object, *, sources: object) -> dict:
             by_source.setdefault(source_id, []).append(row)
 
     slots = stay_slots(sources)
+    stated_birth = owner_stated_birth(sources)
     groups: dict[tuple[str, str, int], dict] = {}
     order: list[tuple[str, str, int]] = []
     for source in sources or ():
         claims = by_source.get(source["source_id"]) or []
         if not any(claim.get("claim_type") == "identity" for claim in claims):
+            continue
+        # THE `birth` DOMAIN IS THE OWNER'S OWN BIRTH (v339). A relative's
+        # birth filed here keys on the same empty `entry_key` as the owner's
+        # and would fold into his entry; it is skipped at draw time so a
+        # vault that already holds one heals on its next redraw, exactly as
+        # `not_a_landmark`'s other reasons do.
+        if not_a_landmark(source["domain"], source["record"],
+                          owner_birth=stated_birth,
+                          owner_names=owner_names) == BIRTH_LANDMARK_NOT_OWNER:
             continue
         # THE INTERVAL-AWARE KEY (design §3.2). Two stays at one address share
         # the identity half of the key and differ in the interval half, so
@@ -1671,7 +1963,29 @@ def redraw(vault_root: str | Path) -> dict:
     """
     index = store.rebuild_active_index(vault_root)
     sources = load_landmark_sources(vault_root)
-    return project_landmark_entries(index, sources=sources)
+    return project_landmark_entries(index, sources=sources,
+                                    owner_names=owner_names_for(vault_root))
+
+
+def owner_names_for(vault_root: str | Path) -> tuple[str, ...]:
+    """This vault's owner spellings, or ``()`` — never raises (v339).
+
+    `temporal_publication.owner_identity_inputs` is the ONE definition of who
+    the owner is for a fold of this vault (v328), and the birth rule reads it
+    through the same seat rather than spelling a profile key of its own. A
+    vault with no profile, or a profile that cannot be read, is "not told":
+    the rule then refuses only on the year bound and on the bare owner
+    references `temporal_timeline.is_owner_reference_only` knows, which is the
+    conservative direction — an unknown owner never makes a record MORE
+    suspect.
+    """
+    try:
+        import temporal_publication  # noqa: PLC0415
+
+        _roster, names = temporal_publication.owner_identity_inputs(vault_root)
+        return tuple(names or ())
+    except Exception:  # noqa: BLE001 — an unreadable profile is no profile
+        return ()
 
 
 def flip_if_needed(vault_root: str | Path, landmarks: object, *, now: object = None) -> dict | None:
