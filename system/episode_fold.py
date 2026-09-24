@@ -98,6 +98,54 @@ IDENTITY_NODE_KEYS = (
     "proposed_links",
 )
 
+#: v342 (the 2026-09-24 sweep on the owner's vault). An alias is a REDIRECT,
+#: and until this release the fold published it without following it. The
+#: identity layer binds a TELLING; the fold groups a CLAIM. So a claim of a
+#: whole-message telling — a `landmark_reading` over one conversation, which
+#: holds every fact that message mentions and can therefore never be bound to
+#: one episode — kept grouping under the node id the fold minted for it even
+#: after a bind had aliased that exact id into an episode. The drawing then
+#: held BOTH: the merged node with the date, and the old id with the same
+#: label, no date, and a freshly minted "when did this happen?" card asking the
+#: question the merged node beside it already answers.
+#:
+#: On the owner's vault that is `node:883802c17ba32910522bb663` "Brittney's
+#: birth", placed 17 December 1987 by a resolver reading answered FOR that node
+#: id, unplaced after the sweep while `node:a12d4c388c7a4b27140502a2` carried
+#: the same date and the same two claims — with `node_aliases` already saying
+#: the first IS the second. The alias was right; nothing followed it.
+#:
+#: So the claim follows the node — and it follows it only where the node really
+#: is one fact. An UNDISCRIMINATED id is a bucket: a repeatable kind with no
+#: discriminator mints one id for every one of them, and un-bucketing it is what
+#: a bind is FOR. So a leftover claim whose own date contradicts the merge stays
+#: where it is and the key is not redirected at all — reported contested, absent
+#: from the table — because a redirect to one of the two things an id means is
+#: worse than no redirect. The invariant is then checkable in one line: after a
+#: fold, no key of ``node_aliases`` is the id of a node the drawing publishes.
+AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES = (
+    "a claim follows the node it folds under: when a bind re-keys that node "
+    "every remaining claim of it goes along unless its own date contradicts the "
+    "merge, and a key some claim still holds is not redirected at all — so no "
+    "node is ever drawn at an id node_aliases has already redirected"
+)
+
+#: The relation a person files about an episode their telling is NOT
+#: (§6.1). Named here because :meth:`EpisodeIdentity._refuses` is the second
+#: reader of it and `episode_fold_contract` spells the positive one only.
+NEGATIVE_RELATION = "not_same"
+
+#: Reported, never raised: a key an episode aliased that the fold could not
+#: follow, because the person has said that telling is not that episode. The
+#: row is dropped from `node_aliases` rather than published as a redirect to a
+#: node the drawing still draws.
+DIAGNOSTIC_ALIAS_CONTESTED = "identity_node_alias_contested"
+
+#: Reported, never raised: a key the fold FOLLOWED — one claim's own node id
+#: redirected into an episode by a bind that could not take its telling. Not a
+#: fault; the one line that says the drawing and the alias table agree.
+DIAGNOSTIC_ALIAS_FOLLOWED = "identity_node_alias_followed"
+
 #: §5.4, raised by the LOADER rather than by the fold: an envelope naming a
 #: binding record that is not on disk. `event_identity.load_operation_envelope`
 #: is what raises it; this constant exists so a caller can catch the code
@@ -368,6 +416,17 @@ class EpisodeIdentity:
         self.manifest_view: dict = {"tellings": []}
         self.telling_of: dict = {}
         self._decisions: dict[str, efc.GroupingKey] = {}
+        self._aliases: dict | None = None
+        #: ``{former key: episode node}`` the fold actually FOLLOWED, and the
+        #: ones a `not_same` refused. Both are filled during grouping, which is
+        #: the only pass that knows the key a claim would otherwise publish.
+        self._carried: dict[str, str] = {}
+        self._contested: dict[str, str] = {}
+        #: ``{former key: episode node}`` for a BOUND claim whose own key the
+        #: contract could not see — see :meth:`note_former_key`.
+        self._noted: dict[str, str] = {}
+        #: ``{claim_id: episode node}`` — what :meth:`plan_carries` decided.
+        self._carried_for: dict[str, str] = {}
         self.diagnostics: tuple = ()
         self.entailments: tuple = ()
         self._members_by_episode: dict[str, dict] = {}
@@ -428,13 +487,181 @@ class EpisodeIdentity:
             self.telling_of.get(collapsed_text((claim or {}).get("claim_id")))
         )
 
+    # -- the alias, followed rather than merely published ----------------
+
+    def plan_carries(self, readings: object) -> dict:
+        """Decide, over the WHOLE claim set, which claims follow a re-keyed node.
+
+        :data:`AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES`, as one pure
+        pass. ``readings`` is what only the fold can supply — per claim, the key
+        it would publish under, the episode a bind put it in (``""`` when none),
+        and its own dated bounds as a `chronology.DateRecord`:
+        ``(claim_id, telling_ref, key, episode_node, bounds)``. The answer is
+        ``{claim_id: episode node}`` for the claims that move.
+
+        Three decisions, and each one is a case the owner's vault holds:
+
+        * **The key is followed through chains** — a merge of a merge leaves
+          ``A -> B -> C`` and the claim belongs to ``C`` — with a cycle guard,
+          because a superseding operation can make the table circular.
+        * **A contradicting date is never carried** — v340's own rule, *a merge
+          never moves a dated moment*, through the arithmetic both readers share
+          (`chronology.dates_agree`). Named rather than imported: `compile`
+          never reaches the binder, and a guard test sweeps this file for the
+          word. An UNDISCRIMINATED node
+          id is a bucket rather than a fact: a repeatable kind with no
+          discriminator mints one id for every one of them, so "Started
+          Etherfuse" (May 2022) and "Joined Ridgeline" (2015) share a key. A
+          bind that pulls one of them into an episode is UN-bucketing, and
+          dragging the other one along on the strength of a shared bucket id
+          would move a dated moment 7 years. An undated leftover contradicts
+          nothing and goes.
+        * **A key the drawing still holds is not redirected at all** — it is
+          reported CONTESTED and dropped from :meth:`node_aliases`, because a
+          redirect to one of the two things an id means is worse than none.
+          Same for a `not_same` (§6.1): the person has said that telling is not
+          that episode, and no table carries it in by the back door.
+        """
+        rows = [self._reading(row) for row in (readings or ())]
+        if not self.active:
+            return {}
+        aliases = self._alias_table()
+        keys: dict[str, dict] = {}
+        for claim_id, telling_ref, key, episode_node, bounds in rows:
+            if not key:
+                continue
+            slot = keys.setdefault(key, {"targets": set(), "bound": [], "left": []})
+            if episode_node:
+                slot["targets"].add(episode_node)
+                slot["bound"].append(bounds)
+            else:
+                slot["left"].append((claim_id, telling_ref, bounds))
+        # A key the CONTRACT aliased from a claim's own `event_ref` is a former
+        # key too, even when no row above named it: I0 saw the ref, this pass
+        # sees the mint, and both are keys the drawing must let go of.
+        for key, target in sorted(aliases.items()):
+            keys.setdefault(key, {"targets": {target}, "bound": [], "left": []})
+        for key in sorted(keys):
+            slot = keys[key]
+            target = self._follow(key, aliases)
+            if len(slot["targets"]) == 1 and not target:
+                target = next(iter(slot["targets"]))
+            if not target or target == key:
+                if len(slot["targets"]) > 1:
+                    self._contested[key] = min(slot["targets"])
+                continue
+            if len(slot["targets"]) > 1:
+                self._contested[key] = target
+                continue
+            stayed = False
+            for claim_id, telling_ref, bounds in slot["left"]:
+                agrees = all(chrono.dates_agree(bounds, other) for other in slot["bound"])
+                if agrees and not self._refuses(telling_ref, target):
+                    self._carried_for[claim_id] = target
+                else:
+                    stayed = True
+            if stayed:
+                self._contested[key] = target
+                for claim_id, _, _ in slot["left"]:
+                    self._carried_for.pop(claim_id, None)
+                continue
+            self._carried[key] = target
+            self._noted[key] = target
+            self._aliases = None
+        for key in self._contested:
+            self._noted.pop(key, None)
+            self._carried.pop(key, None)
+        self._aliases = None
+        return dict(self._carried_for)
+
+    def carried_node_for(self, claim: object) -> str:
+        """The episode node this claim follows, or ``""`` — :meth:`plan_carries`'
+        answer, read back per claim. No arithmetic of its own."""
+        return self._carried_for.get(
+            collapsed_text((claim or {}).get("claim_id")), ""
+        ) if self.active else ""
+
+    def _reading(self, row: object) -> tuple:
+        claim_id, telling_ref, key, episode_node, bounds = row
+        return (collapsed_text(claim_id), collapsed_text(telling_ref),
+                collapsed_text(key), collapsed_text(episode_node), bounds)
+
+    def _follow(self, key: str, aliases: dict) -> str:
+        """``node_aliases`` walked to its end, or ``""`` on a cycle."""
+        target, seen = key, {key}
+        while target in aliases:
+            nxt = aliases[target]
+            if nxt in seen:
+                return ""
+            seen.add(nxt)
+            target = nxt
+        return "" if target == key else target
+
+    def _alias_table(self) -> dict:
+        if self._aliases is None:
+            self._aliases = {
+                **self._absorbed_episode_nodes(),
+                **efc.node_aliases(tuple(self._decisions.values())),
+                **self._noted,
+            }
+        return self._aliases
+
+    def _absorbed_episode_nodes(self) -> dict:
+        """``{absorbed episode's node id: surviving episode's node id}`` (v342).
+
+        The third way a node id moves, and the one neither C3 nor the mint can
+        see. An episode's node id is derived FROM its episode id (§3.5), so an
+        episode that grows a member or is absorbed by a merge takes a new
+        episode id and therefore a new node id — while a work item, an open
+        session and a URL still name the old one. `episode_aliases` records the
+        act; this composes it through ``node_of_episode`` so Law 5's promise
+        covers it in the table readers actually follow.
+
+        On the owner's vault this is 68 rows and 61 of the placements a v341
+        apply appeared to lose: "Father started pool company in Yucaipa" moved
+        from `node:401521b0…` to `node:2162c370…`, with the same two claims and
+        the same 1990-06/1991-06, because its episode was re-created with one
+        more member.
+        """
+        table: dict[str, str] = {}
+        for absorbed, surviving in sorted(self.episode_aliases().items()):
+            left = collapsed_text(self.node_of_episode.get(absorbed))
+            right = collapsed_text(self.node_of_episode.get(surviving))
+            if left and right and left != right:
+                table[left] = right
+        return table
+
+    def _refuses(self, telling_ref: object, node_id: str) -> bool:
+        """Has this telling been told it is NOT the episode drawn as ``node_id``?"""
+        episode_id = collapsed_text(self.episode_of_node.get(node_id))
+        if not episode_id:
+            return False
+        for row in self.active.get(collapsed_text(telling_ref)) or ():
+            if collapsed_text(row.get("relation")) != NEGATIVE_RELATION:
+                continue
+            if collapsed_text(row.get("episode_id")) == episode_id:
+                return True
+        return False
+
     # -- the published tables -------------------------------------------
 
     def node_aliases(self) -> dict:
-        """``{former node id: episode node id}`` (§3.5, Law 5)."""
+        """``{former node id: episode node id}`` (§3.5, Law 5).
+
+        Three sources, one table (v342): C3's rows from each bound claim's own
+        ``event_ref``, the key the fold MINTED for a bound telling that had none
+        (:meth:`plan_carries`), and the node id of an episode a merge absorbed
+        (:meth:`_absorbed_episode_nodes`). A CONTESTED key is absent — see
+        :meth:`plan_carries`. After grouping, every remaining key names a node
+        the drawing no longer draws, which is
+        :data:`AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES` as a table.
+        """
         if not self.active:
             return {}
-        return efc.node_aliases(tuple(self._decisions.values()))
+        table = {**self._alias_table(), **self._noted}
+        for key in self._contested:
+            table.pop(key, None)
+        return dict(sorted(table.items()))
 
     def episode_aliases(self) -> dict:
         """``{absorbed episode id: surviving episode id}`` (§3.2, row 8)."""
@@ -448,17 +675,37 @@ class EpisodeIdentity:
         because it must disappear the moment either premise does. Storing the
         closure is how a retracted binding leaves a permanent phantom
         negative behind, so it is a view of this generation and nothing else.
+
+        The two alias rows are appended by GROUPING rather than by the
+        constructor, because the key a claim would otherwise have published is
+        only known where it is minted (v342). A caller that never grouped sees
+        the constructor's findings alone, which is what it is.
         """
+        findings = [dict(row) for row in self.diagnostics]
+        for key, target in sorted(self._carried.items()):
+            findings.append({
+                "code": DIAGNOSTIC_ALIAS_FOLLOWED, "telling_ref": "",
+                "episode_id": collapsed_text(self.episode_of_node.get(target)),
+                "detail": f"{key} -> {target}",
+            })
+        for key, target in sorted(self._contested.items()):
+            findings.append({
+                "code": DIAGNOSTIC_ALIAS_CONTESTED, "telling_ref": "",
+                "episode_id": collapsed_text(self.episode_of_node.get(target)),
+                "detail": f"{key} -> {target}",
+            })
         return {
-            "findings": [dict(row) for row in self.diagnostics],
+            "findings": findings,
             "entailed_not_same": [list(pair) for pair in self.entailments],
             "counts": {
                 "episodes": len(self.episodes),
                 "operations": len(self.operations),
                 "bindings": len(self.bindings),
                 "bound_tellings": len(self.active),
-                "findings": len(self.diagnostics),
+                "findings": len(findings),
                 "entailed_not_same": len(self.entailments),
+                "aliases_followed": len(self._carried),
+                "aliases_contested": len(self._contested),
             },
         }
 

@@ -691,7 +691,7 @@ class FoldTests(FoldTestCase):
         kind of change and needs the same signal — a v334 projection is not
         merely mislabelled, it is missing cards.
         """
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:11")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:12")
 
 
 # ---------------------------------------------------------------------------

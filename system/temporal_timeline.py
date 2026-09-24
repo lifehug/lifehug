@@ -194,7 +194,15 @@ from temporal_claims import (  # noqa: E402
 #: publish ``relationship_unknown``, keep their ``precision_gap`` and re-enter
 #: the unplaced cohort — a different published reason and a different work-item
 #: set for claims nobody edited.
-CALCULATION_RULE_VERSION = "timeline-rules:11"
+#: ``timeline-rules:12`` (v342): AN ALIAS IS FOLLOWED. :11 published a re-keyed
+#: node's redirect and then drew a node at the redirected id anyway — a claim of
+#: a telling no rung could bind kept grouping under it — and a bound telling
+#: whose claims carry no ``event_ref`` left no redirect at all. The same claims
+#: now calculate to a projection where those claims fold into the episode, those
+#: ids are in ``node_aliases`` instead of in ``nodes``, and the date cards minted
+#: against the ghosts are gone: a different node set and a different work-item
+#: set for claims nobody edited, which is what moves this number.
+CALCULATION_RULE_VERSION = "timeline-rules:12"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -1638,6 +1646,18 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
     # Yucaipa, not sure when" must still be a row a person can place.
     if participation is not None:
         groups.update(participation.seed_groups())
+    # v342. A node SEEDED above — an era, or a stay the landmark recorder
+    # minted from its own entry — is never a "former key": the recorder still
+    # holds it, an independent telling may still be filing into it, and a node
+    # emptied by a redirect would be refused as `node_without_inputs`. So the
+    # alias key a claim is noted and carried under is its own event_ref or the
+    # id the fold mints, and never one of these.
+    seeded = set(groups)
+    # Pass one: what each claim's OWN key is, and what the identity layer says
+    # about it. Both halves of v342 need the whole set before any group is made
+    # — a claim's key can only be redirected once the bind that re-keyed it has
+    # been seen, and claim order must not decide which of the two was first.
+    readings: list[tuple] = []
     for claim in claims:
         # A participation entry's `identity` claim is the ONE identity claim
         # that reaches a group: it is the entry's own assertion that this stay
@@ -1650,11 +1670,35 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
         subject = _subject_handle(claim)
         if not subject or (not event_kind and not stay):
             continue
+        own_key = stay or collapsed_text(claim.get("event_ref")) or _mint_node_id(
+            event_kind=event_kind, subject=subject, owner_ref=owner_ref
+        )
+        alias_key = "" if (stay or own_key in seeded) else own_key
         episode_node = identity.episode_node_for(claim) if identity is not None else ""
-        node_id = episode_node or stay or collapsed_text(claim.get("event_ref")) \
-            or _mint_node_id(
-                event_kind=event_kind, subject=subject, owner_ref=owner_ref
-            )
+        readings.append((claim, subject, event_kind, own_key, alias_key, episode_node))
+
+    # v342, `episode_fold.AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES`.
+    # The identity layer binds a TELLING; this loop groups a CLAIM. A claim of a
+    # telling no rung could bind — a whole-message landmark reading holds every
+    # fact one conversation mentions — still belongs to the node it folds under,
+    # and if a bind re-keyed that node this claim goes along. Without it the old
+    # id is drawn a second time, undated, and the work-item seat re-asks the
+    # question the merged node already answers. The DECISION is the identity
+    # layer's, over the whole set at once; what only this loop knows is the key
+    # each claim would otherwise publish under and the bounds it states.
+    if identity is not None:
+        identity.plan_carries(
+            (collapsed_text(claim.get("claim_id")), identity.telling_for(claim),
+             alias_key, episode_node, _record_for_dated_claim(claim))
+            for claim, _, _, _, alias_key, episode_node in readings
+        )
+
+    for claim, subject, event_kind, own_key, alias_key, episode_node in readings:
+        node_id = episode_node or own_key
+        if identity is not None and not episode_node:
+            carried = identity.carried_node_for(claim)
+            if carried:
+                node_id = episode_node = carried
         group = groups.get(node_id)
         if group is None:
             episode_id = (
