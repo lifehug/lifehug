@@ -848,18 +848,37 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
     and reported rather than stolen, which is `roster_relations.alias_decision`'s
     refusal read before the write instead of after it.
 
-    ``{"introduced": [...], "filed": n, "skipped_aliases": [...]}``.
+    v347 also hands the rule what the vault ALREADY records — every `family`
+    landmark entry's ``relation`` and every temporal correction's own words —
+    so an introduction that contradicts one is refused out loud rather than
+    written (`roster_relations.A_RECORDED_RELATION_OUTRANKS_AN_INTRODUCED_ONE`).
+    The refusals come back as ``findings``; nothing about them is written.
+
+    ``{"introduced": [...], "filed": n, "skipped_aliases": [...],
+    "findings": [...]}``.
     """
     import entity_verdict  # noqa: PLC0415
+    import landmark_projection as lp  # noqa: PLC0415
     import temporal_publication as pub  # noqa: PLC0415
     import temporal_store as store  # noqa: PLC0415
     from lifehug_core import REPO_DIR  # noqa: PLC0415
 
     roster, owner_names = pub.owner_identity_inputs(REPO_DIR)
     claims = store.active_claims(store.read_active_index(REPO_DIR))
-    rows = roster_relations.relationship_introductions(
-        claims, roster=roster, owner_names=owner_names
+    try:
+        landmark_entries = lp.load_landmark_sources(REPO_DIR)
+    except Exception:  # noqa: BLE001  — a vault we cannot read records nothing
+        landmark_entries = ()
+    try:
+        correction_texts = [correction.reason for correction
+                            in store.load_temporal_corrections(REPO_DIR)]
+    except Exception:  # noqa: BLE001
+        correction_texts = []
+    batch = roster_relations.relationship_introduction_batch(
+        claims, roster=roster, owner_names=owner_names,
+        landmark_entries=landmark_entries, correction_texts=correction_texts,
     )
+    rows = batch["rows"]
     skipped: list[dict] = []
     filed = 0
     for row in rows:
@@ -884,7 +903,8 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
             name=row["name"],
         )
         filed += 1
-    return {"introduced": list(rows), "filed": filed, "skipped_aliases": skipped}
+    return {"introduced": list(rows), "filed": filed, "skipped_aliases": skipped,
+            "findings": list(batch["findings"])}
 
 
 def _thresholds(entity_type: str, args) -> tuple[float, int]:
@@ -931,6 +951,10 @@ def main() -> int:
                   f"(from “{row['relationship_word']}”{born}); aliases: {aliases}")
             for alias in row.get("contested_aliases") or ():
                 print(f"    ↯ “{alias}” names more than one introduced person — bound to neither")
+        for row in result.get("findings") or ():
+            print(f"    ↯ {row['name']} — introduced as {row['introduced']} "
+                  f"(from “{row['introduced_word']}”), but the vault records "
+                  f"{row['recorded']} ({row['tier']}): {row['reason']}")
         for row in result["skipped_aliases"]:
             print(f"    ↯ “{row['alias']}” already answers to "
                   f"{', '.join(row['taken_by'])} — left alone")

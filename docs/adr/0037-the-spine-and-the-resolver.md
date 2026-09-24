@@ -491,6 +491,108 @@ re-key a node whose subject newly resolves and whose claims carry no
 `node_aliases` covers a BINDER re-key and not an identity one, and closing that
 is the binder's seam rather than the fold's.
 
+## Amendment (v347, 2026-09-24): an introduction names one person in one clause
+
+**What happened.** Item 19 shipped and was run against the owner's vault the
+same day. `entity-roster --ensure-introduced --dry-run` proposed four people,
+and one of them was his paternal GRANDFATHER filed as a second father:
+
+```
+desiree-taylor:         Desiree Taylor — parent (from "mom", born 1955-06-19)
+james-edwin-taylor-sr:  James Edwin Taylor Sr. — parent (from "dad")
+james-taylor:           James Taylor — parent (from "dad")
+katie-taylor:           Katie Taylor — spouse (from "wife", born 1987-05-15)
+```
+
+The resolver had filed one claim whose evidence quote reads *"story: my grandpa
+James Edwin Taylor Sr., my dad's dad, died of a heart attack"*. Item 19's
+appositive shape — `<Name>, <possessive> <word>` — matched the name against the
+"dad" of *my dad's* dad: a relationship word that POSSESSES the next noun,
+read as though it were the name's own relation. The clause says the opposite of
+what was read out of it, twice over: *grandpa* is the word actually in
+apposition with the name, and *dad's* is a possessor.
+
+Then item 19's own shared-alias rule made the damage worse in exactly the way
+it was designed to prevent a different damage. Two people now claimed "dad", so
+dad / my dad / father / my father were dropped from BOTH rows — and the owner's
+real father, James Edwin Taylor, d. 2019, whose own introduction is *"the
+biggest loss of my life so far is my dad, James Edwin Taylor"*, ended up with no
+relationship words at all. Measured on a scratch clone of the owner's vault:
+fourteen nodes whose subject mention is "dad", "Dad", "father" or "Father" went
+on naming nobody, eleven of them drawn as the owner's own life rather than as his
+family's, and *"Dad wins pet snake at fair"* had no birth to measure its age
+from although his father's birthday was in the same vault.
+
+The vault had already said who Sr was, twice, and neither statement was asked.
+The correction `correction:temporal-4eb9abe8c4ca47089ae83a56` says *"these are
+the owner's grandfathers' births, not his: … James Edwin Taylor Sr (born
+1930-10-17) and Darvin Burrows Beauchamp (born 1929-09-30)"*. And the man's own
+name carries the answer in its last token.
+
+**Decision.** Item 19 gains three restrictions and one addition. It is narrowed,
+never widened: every shape it read before it still reads, and the rule now
+refuses three ways of looking like an introduction without being one.
+
+21. **An introduction names one person in one clause**
+    (`roster_relations.AN_INTRODUCTION_NAMES_ONE_PERSON_IN_ONE_CLAUSE`). The
+    relationship phrase and the name it introduces must sit in the SAME clause
+    (`introduction_clauses` — newline, `|`, `;`, `:`, a dash, and a sentence end
+    that is not an abbreviation's full stop, so `Sr.` and `A.J.` are not two
+    clauses). Inside that clause a relationship word carrying a possessive `'s`
+    is a POSSESSOR and not the name's relation, so *"my dad's dad"* introduces
+    nobody as a father; a clause that gives one name two different
+    relationships states neither, and the next clause is read instead; and the
+    in-law reading (`axis_membership.IN_LAW_RE`) is taken over that clause
+    rather than over every text in the source. A name that a pasted vital
+    record merely LISTS — the genealogy-app shape `Name • N Sources` / `Birth •
+    …`, read through `landmark_projection.BIRTH_NAME_LINE_RE`, which is already
+    the one definition of it — is introduced by nothing: a relationship word in
+    the surrounding conversation may not reach into somebody else's document.
+
+22. **A relation the vault records outranks one a phrase would file**
+    (`A_RECORDED_RELATION_OUTRANKS_AN_INTRODUCED_ONE`). Before writing,
+    `recorded_relation` asks `RECORDED_RELATION_TIERS` in order — a temporal
+    correction's own words, a `family` landmark entry's `relation`, a roster
+    row's `relationship` — what the vault already says about that spelling. A
+    recorded relation that AGREES confirms the row; one that CONTRADICTS it
+    refuses the whole row and returns a finding naming both, because a vault
+    that has already placed somebody is not corrected by a sentence that reads
+    them differently. The correction tier counts a text only when it names the
+    person and states EXACTLY ONE relationship, and only when the texts that
+    qualify agree: this reading exists to confirm or refuse an introduction,
+    never to invent one, and the owner's *"1990-03-20 is AJ's birthday, not
+    James's … the owner's brother Anthon James 'AJ' Taylor"* correction is
+    exactly the mixed text it has to decline to read.
+
+23. **A generational suffix is a generation.** When the vault holds both
+    `<Name>` and `<Name> Sr.`/`Senior`/`I`, the suffixed one is one generation
+    UP; `<Name> Jr.`/`Junior` is one generation down
+    (`GENERATIONAL_SUFFIX_STEPS` stepping along `GENERATION_TIERS`, gated on
+    `focus_candidate.FOCUS_RELATIONSHIPS` so a step onto a seat the roster does
+    not have refuses instead of inventing one). A shifted row drops the
+    relationship aliases the old word licensed, since a word of the wrong
+    generation must not bind to the person it was the wrong generation for. The
+    base name is compared WHOLE: "James Taylor" and "James Edwin Taylor" are two
+    spellings this rule deliberately does not join, because four people on the
+    owner's roster bear the token *James*.
+
+24. **A birthday said with the word is said with the name.** `_introduced_birth`
+    reads item 18's `birth_event_subject` first and then v345's
+    `landmark_projection.names_a_birth` against any spelling the introduction
+    itself licensed, inside the one source that introduced the person. The
+    owner typed *"James Taylor my dad was born on June 4th 1954"* and the
+    extractor filed the event as *"Dad's birthdate recorded"*; one clause, one
+    person, and the word is the name.
+
+**Considered and not built.** The father's death is in the vault — *"not Dad
+James Edwin d.2019"* — but under a different spelling and in a different source
+(the family-birthdays roster, which is Katie's introduction, not his). Filing it
+as his `died` would be the cross-source, cross-spelling identity guess this
+amendment exists to refuse, so the row ships without one. And the appositive
+`<possessive> <word>, <Name>` shape — *"my dad, James Edwin Taylor"* — is still
+not read, deliberately: reading it would introduce the owner's father a THIRD
+time, under a third spelling, and hand "dad" back to nobody.
+
 ## Consequences
 
 - The classifier's validator is no longer the place where placement is won or

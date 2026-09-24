@@ -918,9 +918,9 @@ class TheOwnersReviewTests(unittest.TestCase):
         self.assertEqual(frames[0]["best_temporal_value"]["earliest"], BIRTH_DAY)
 
     def test_the_rule_version_moved(self) -> None:
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:15")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:16")
         for node in self.result.nodes:
-            self.assertEqual(node["calculation_rule_version"], "timeline-rules:15")
+            self.assertEqual(node["calculation_rule_version"], "timeline-rules:16")
 
 
 if __name__ == "__main__":

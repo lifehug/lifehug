@@ -244,7 +244,21 @@ from temporal_claims import (  # noqa: E402
 #: (:data:`AN_AGE_IS_MEASURED_FROM_ITS_OWN_SUBJECT`), and a wholly pre-birth node
 #: reads ``pre_birth``: a different node set, a different placement set and a
 #: different work-item set for claims nobody edited.
-CALCULATION_RULE_VERSION = "timeline-rules:15"
+#: ``timeline-rules:16`` (v347): AN INTRODUCTION NAMES ONE PERSON IN ONE CLAUSE.
+#: The arithmetic in this module did not change; the ROSTER it reads did, and
+#: this release is what changes it. :15 read *"my grandpa James Edwin Taylor
+#: Sr., my dad's dad"* as an introduction of a second FATHER, so two people
+#: claimed "dad" and the shared-alias rule bound the word to neither — the
+#: owner's real father resolved from no relationship word at all, and every
+#: claim whose subject mention is "dad", "my dad", "father" or "my father"
+#: stayed unidentified, off the immediate-family tier of
+#: :func:`axis_membership.relationship_tier` and without a birth to measure an
+#: age from. :16 refuses that reading (`roster_relations
+#: .AN_INTRODUCTION_NAMES_ONE_PERSON_IN_ONE_CLAUSE`) and files the grandfather
+#: as a grandparent, so the same claims calculate to a different SUBJECT set, a
+#: different axis membership and a different age-anchor set for claims nobody
+#: edited. The number moves because what a reader is looking at moves with it.
+CALCULATION_RULE_VERSION = "timeline-rules:16"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all

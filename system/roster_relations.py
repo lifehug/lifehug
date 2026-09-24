@@ -545,6 +545,19 @@ def collapsed_text_of(value: object) -> str:
 def relationship_phrase(name: str, texts: object, *, owner_names: object = ()) -> str:
     """The relationship WORD a text introduces ``name`` with, or ``""``.
 
+    :func:`relationship_phrase_match` is the reading; this is its word alone,
+    kept because that is the whole answer for every caller that does not need
+    to know which clause it came out of.
+    """
+    found = relationship_phrase_match(name, texts, owner_names=owner_names)
+    return found["word"] if found is not None else ""
+
+
+def relationship_phrase_match(name: str, texts: object, *,
+                              owner_names: object = ()) -> dict | None:
+    """``{"word", "clause"}`` — the relationship word and the CLAUSE it was read
+    in — or ``None`` (:data:`AN_INTRODUCTION_NAMES_ONE_PERSON_IN_ONE_CLAUSE`).
+
     Three shapes, all anchored on the name itself so a relation word loose
     elsewhere in the sentence never reaches it:
 
@@ -556,41 +569,59 @@ def relationship_phrase(name: str, texts: object, *, owner_names: object = ()) -
       household-roster shape, where the bracket itself is the apposition;
     * ``<possessive> <word> <Name>`` — "my mother Desiree Taylor".
 
+    v347 reads all three inside ONE CLAUSE (:func:`introduction_clauses`) and
+    refuses two ways that a sentence can look like an introduction without
+    being one:
+
+    * a relationship word that POSSESSES the next noun is not the name's own
+      relation (:data:`_NOT_A_POSSESSOR`) — *"my grandpa James Edwin Taylor
+      Sr., my dad's dad"* says dad's DAD, and the clause's one relation for
+      that name is ``grandpa``;
+    * a clause that gives the same name TWO different relationships states
+      neither, and the next clause is read instead. An introduction names one
+      person in one clause with one relation.
+
     An in-law phrase ("my mother-in-law Ruth") returns the WORD it is built out
-    of; :func:`roster_relationship_for` is not what decides that case —
-    :func:`relationship_introduction` is, and it files ``other``.
+    of; :func:`relationship_introduction` is what decides that case, reading
+    `axis_membership.IN_LAW_RE` over the CLAUSE this returns rather than over
+    the whole source.
     """
-    if not name:
-        return ""
-    words = "|".join(
-        re.escape(word) for word in sorted(ir.RELATIONSHIP_MENTION_WORDS, key=len,
-                                           reverse=True)
-    )
+    anchor_name = collapsed_text_of(name)
+    if not anchor_name:
+        return None
+    words = _relation_word_alternation()
     possessives = [re.escape(word) for word in INTRODUCTION_POSSESSIVES]
     for spelling in owner_names or ():
         body = collapsed_text_of(spelling)
         if body:
-            possessives.append(re.escape(body) + r"['’]s")
+            possessives.append(re.escape(body) + r"['\u2019]s")
     possessive = "(?:" + "|".join(possessives) + r")\s+"
-    anchor = re.escape(name)
+    anchor = re.escape(anchor_name)
     # An IN-LAW suffix is allowed to trail the word and is NOT stripped from the
     # reading: "my mother-in-law Ruth" introduces Ruth, and it is
     # :func:`relationship_introduction` — reading `axis_membership.IN_LAW_RE` over
-    # the same text — that decides she is not the owner's mother.
+    # the clause — that decides she is not the owner's mother.
     in_law = r"(?:[-\s]?in[-\s]?laws?)?"
-    patterns = (
-        rf"(?<!\w){anchor}\s*[(,]\s*(?:{possessive})?(?P<word>{words}){in_law}(?!\w)",
-        rf"(?<!\w){possessive}(?P<word>{words}){in_law}\s+{anchor}(?!\w)",
-    )
+    apposition = (rf"(?<!\w){anchor}\s*[(,]\s*(?:{possessive})?"
+                  rf"(?P<word>{words}){in_law}{_NOT_A_POSSESSOR}(?!\w)")
+    predicate = (rf"(?<!\w){possessive}(?P<word>{words}){in_law}"
+                 rf"{_NOT_A_POSSESSOR}\s+{anchor}(?!\w)")
+    patterns = tuple(re.compile(pattern, re.IGNORECASE)
+                     for pattern in (apposition, predicate))
     for text in texts or ():
-        body = collapsed_text_of(text)
-        if not body:
-            continue
-        for pattern in patterns:
-            match = re.search(pattern, body, re.IGNORECASE)
-            if match is not None:
-                return match.group("word").casefold()
-    return ""
+        for clause in introduction_clauses(text):
+            found: list[str] = []
+            for pattern in patterns:
+                for match in pattern.finditer(clause):
+                    word = match.group("word").casefold()
+                    if word not in found:
+                        found.append(word)
+            if not found:
+                continue
+            if len({roster_relationship_for(word) for word in found}) > 1:
+                continue
+            return {"word": found[0], "clause": clause}
+    return None
 
 
 def relationship_introduction(mention: object, texts: object, *,
@@ -606,17 +637,27 @@ def relationship_introduction(mention: object, texts: object, *,
 
     An IN-LAW phrase files ``other``, whatever relation word it is built out of:
     "mother-in-law" contains "mother" and is not the owner's mother
-    (`axis_membership.IN_LAW_RE`, the one definition of that reading).
+    (`axis_membership.IN_LAW_RE`, the one definition of that reading) — read
+    since v347 over the CLAUSE the phrase was found in rather than over every
+    text of the source, because "in-law" somewhere else in a conversation says
+    nothing about this name.
+
+    v347 also refuses a name a pasted vital record merely LISTS
+    (:func:`introduces_only_a_pasted_record`): a relationship word in the
+    surrounding conversation may not reach into somebody else's document.
     """
     import axis_membership as axm  # noqa: PLC0415
 
     name, nicknames = introduced_name(mention)
     if not name or ir.normalized_mention_key(mention) in ir.OWNER_SUBJECT_MENTIONS:
         return None
-    word = relationship_phrase(name, texts, owner_names=owner_names)
-    if not word:
+    if introduces_only_a_pasted_record(name, texts):
         return None
-    in_law = any(axm.IN_LAW_RE.search(collapsed_text_of(text)) for text in texts or ())
+    found = relationship_phrase_match(name, texts, owner_names=owner_names)
+    if found is None:
+        return None
+    word = found["word"]
+    in_law = bool(axm.IN_LAW_RE.search(found["clause"]))
     relationship = FALLBACK_RELATIONSHIP if in_law else roster_relationship_for(word)
     if not relationship:
         return None
@@ -638,8 +679,26 @@ def relationship_introduction(mention: object, texts: object, *,
 
 
 def relationship_introductions(claims: object, *, roster: object = (),
-                               owner_names: object = ()) -> tuple[dict, ...]:
-    """Every person the CLAIM SUBSTRATE introduces and the roster lacks.
+                               owner_names: object = (),
+                               landmark_entries: object = (),
+                               correction_texts: object = ()) -> tuple[dict, ...]:
+    """The rows :func:`relationship_introduction_batch` keeps, and nothing else.
+
+    Kept as the plain reading for every caller that does not need the findings
+    a refusal produces; the batch is the whole rule.
+    """
+    return relationship_introduction_batch(
+        claims, roster=roster, owner_names=owner_names,
+        landmark_entries=landmark_entries,
+        correction_texts=correction_texts)["rows"]
+
+
+def relationship_introduction_batch(claims: object, *, roster: object = (),
+                                    owner_names: object = (),
+                                    landmark_entries: object = (),
+                                    correction_texts: object = ()) -> dict:
+    """Every person the CLAIM SUBSTRATE introduces and the roster lacks, plus
+    every introduction it REFUSED and why: ``{"rows", "findings"}``.
 
     One row per subject mention, in mention-key order so two runs file the same
     rows in the same order. The texts a mention is read against are its OWN
@@ -652,9 +711,18 @@ def relationship_introductions(claims: object, *, roster: object = (),
     already answers to, is skipped: this rule creates the row nobody has
     written, and never re-decides one somebody has. A ``born`` date rides along
     when the introducing source also states that person's BIRTHDAY
-    (`landmark_projection.birth_event_subject`), because it is the same
-    sentence and the roster's ``born`` is the second tier the age arithmetic
-    reads.
+    (`landmark_projection.birth_event_subject`, or — v347 — v345's
+    :func:`landmark_projection.names_a_birth` over a spelling the introduction
+    itself licensed, which is how *"Dad's birthdate recorded"* on a claim whose
+    subject is *"James Taylor (Dad)"* becomes his father's ``born``), because it
+    is the same sentence and the roster's ``born`` is the second tier the age
+    arithmetic reads.
+
+    Then rules 2 and 3 (:func:`introduced_relation_verdict`) ask the vault what
+    it already records for each spelling before anything is written, and only
+    the rows that survive reach the batch-wide shared-alias rule — which is why
+    refusing a grandfather who was read as a father is what GIVES the owner's
+    real father his "dad".
     """
     import chronology as chrono  # noqa: PLC0415
     import landmark_projection as lp  # noqa: PLC0415
@@ -702,11 +770,33 @@ def relationship_introductions(claims: object, *, roster: object = (),
             if row is None:
                 continue
             row = {**row, "source_id": source_id, "mention": mention}
-            born = _introduced_birth(row["name"], group, chrono=chrono, lp=lp)
+            born = _introduced_birth(row["name"], group, chrono=chrono, lp=lp,
+                                     spellings=_licensed_spellings(row))
             if born is not None:
                 row["born"], row["born_basis"] = born
             out[key] = row
-    return _without_contested_aliases(tuple(out[key] for key in sorted(out)))
+
+    placed = dict(roster_recorded_relations(roster))
+    for key in sorted(out):
+        name_key = ir.normalized_mention_key(out[key]["name"])
+        if name_key:
+            placed.setdefault(name_key, out[key]["relationship"])
+    kept: list[dict] = []
+    findings: list[dict] = []
+    for key in sorted(out):
+        verdict = introduced_relation_verdict(
+            out[key],
+            recorded=recorded_relation(out[key]["name"], roster=roster,
+                                       landmark_entries=landmark_entries,
+                                       correction_texts=correction_texts),
+            placed=placed,
+        )
+        if verdict["finding"] is not None:
+            findings.append(verdict["finding"])
+        if verdict["row"] is not None:
+            kept.append(verdict["row"])
+    return {"rows": _without_contested_aliases(tuple(kept)),
+            "findings": tuple(findings)}
 
 
 def _without_contested_aliases(rows: tuple) -> tuple[dict, ...]:
@@ -741,18 +831,52 @@ def _without_contested_aliases(rows: tuple) -> tuple[dict, ...]:
     return tuple(out)
 
 
-def _introduced_birth(name: str, claims: object, *, chrono, lp) -> tuple | None:
+def _licensed_spellings(row: object) -> tuple[str, ...]:
+    """Every spelling the introduction itself licensed for this person.
+
+    The name, the mention as written, and the relationship words the phrase
+    brought with it — so a birthday the owner stated with the WORD rather than
+    with the name ("Dad's birthdate recorded") is still this person's birthday,
+    inside the one source that introduced them. Deterministic order, no second
+    vocabulary: :func:`relationship_aliases` is the one that licenses them.
+    """
+    if not isinstance(row, dict):
+        return ()
+    out: list[str] = []
+    for spelling in (row.get("name"), row.get("mention"),
+                     *(row.get("aliases") or ()),
+                     *relationship_aliases(row.get("relationship_word"))):
+        key = ir.normalized_mention_key(spelling)
+        if key and key not in out:
+            out.append(key)
+    return tuple(out)
+
+
+def _introduced_birth(name: str, claims: object, *, chrono, lp,
+                      spellings: object = ()) -> tuple | None:
     """``(edtf, basis)`` when one of these claims states THIS person's birthday.
 
-    The date claim is read through the same `landmark_projection` reading the
+    The date claim is read through the same `landmark_projection` readings the
     fold uses, so the roster's ``born`` and the timeline's birth node can never
-    come from two different opinions about which sentence is a birthday.
+    come from two different opinions about which sentence is a birthday: v346's
+    :func:`landmark_projection.birth_event_subject` first (``<Name>'s
+    birthday``), then — v347 — v345's :func:`landmark_projection.names_a_birth`,
+    which reads the birth vocabulary as a PHRASE, against any spelling this
+    introduction licensed (``spellings``). The owner typed *"James Taylor my dad
+    was born on June 4th 1954"* and the extractor filed the event as *"Dad's
+    birthdate recorded"*: one clause, one person, and the word is the name.
     """
     wanted = ir.normalized_mention_key(name)
+    licensed = frozenset(spellings or ()) | {wanted}
     for claim in claims or ():
-        subject = lp.birth_event_subject(claim.get("event_mention"))
-        if not subject or ir.normalized_mention_key(subject) != wanted:
-            continue
+        mention = claim.get("event_mention")
+        subject = lp.birth_event_subject(mention)
+        if subject and ir.normalized_mention_key(subject) == wanted:
+            pass
+        else:
+            subject = lp.names_a_birth(mention)
+            if not subject or ir.normalized_mention_key(subject) not in licensed:
+                continue
         record = chrono.from_dict(claim.get("temporal_value"))
         if record is None or record.granularity not in ("day", "month", "year"):
             continue
@@ -785,3 +909,443 @@ def located_in_chain(place_ref: object, snapshot: object, *,
         chain.append(parent)
         current = parent
     return tuple(chain)
+
+
+# --------------------------------------------------------------------------
+# v347 — AN INTRODUCTION NAMES ONE PERSON IN ONE CLAUSE, AND A NAME THE VAULT
+# HAS ALREADY PLACED IN THE FAMILY KEEPS ITS PLACE
+# --------------------------------------------------------------------------
+# WHERE IT WAS SEEN. `entity-roster --ensure-introduced --dry-run` on the
+# owner's vault proposed his paternal GRANDFATHER as a second father. The
+# resolver had filed one claim whose evidence quote reads *"story: my grandpa
+# James Edwin Taylor Sr., my dad's dad, died of a heart attack"*, and v346's
+# appositive shape — `<Name>, <possessive> <word>` — matched the name against
+# the "dad" of *my dad's* dad: a relationship word that POSSESSES the next noun
+# read as if it were the name's own relation. Two people then claimed "dad", so
+# v346's shared-alias rule dropped dad/my dad/father/my father from BOTH rows
+# and the owner's real father — James Edwin Taylor, d. 2019, whose own
+# introduction is *"the biggest loss of my life so far is my dad, James Edwin
+# Taylor"* — ended up with no relationship words at all. The vault had already
+# said who Sr was, twice: the correction
+# `correction:temporal-4eb9abe8c4ca47089ae83a56` ("these are the owner's
+# grandfathers' births … James Edwin Taylor Sr (born 1930-10-17) and Darvin
+# Burrows Beauchamp") and the generational suffix in the man's own name.
+#
+# THE RULES. Rule 1 is a RESTRICTION on v346's reading, not a widening of it:
+# an introduction is read inside ONE clause, the relation word may not be a
+# possessor, and a name a pasted vital record merely lists is introduced by
+# nothing. Rules 2 and 3 ask the vault before writing: a relation it already
+# records for that spelling outranks the one a phrase would file, and a
+# generational suffix is a GENERATION rather than a nickname.
+
+#: The one statement of the rule, quoted by the seats that apply it.
+AN_INTRODUCTION_NAMES_ONE_PERSON_IN_ONE_CLAUSE = (
+    "a relationship phrase introduces a name only when both sit in the same "
+    "clause with the name in apposition or predicate position and the word is "
+    "not possessing something else; a name a pasted record only lists is "
+    "introduced by nothing; and a relation the vault already records for that "
+    "spelling outranks the one a phrase would file"
+)
+
+#: The one statement of the prior-relation rule.
+A_RECORDED_RELATION_OUTRANKS_AN_INTRODUCED_ONE = (
+    "before a phrase may file a relation, the vault is asked what it already "
+    "records for that spelling — a correction, a `family` landmark entry's "
+    "`relation`, a roster row's `relationship` — and an introduction that "
+    "contradicts one is refused out loud, naming both, rather than written"
+)
+
+#: The one landmark domain that declares where a person stands relative to the
+#: owner. `landmark_projection.BIRTH_DATE_SEMANTICS_DOMAINS` names the same
+#: domain as the one whose ladder dates somebody else's birth; this is the same
+#: domain asked the other question — not WHEN, but WHO.
+FAMILY_RELATION_DOMAIN = "family"
+
+#: Where a recorded relation is read from, best first. A CORRECTION is first
+#: because a correction is what a person writes when a filed row is wrong; a
+#: roster row is last because a name the roster already answers to is never an
+#: introduction at all, so in practice this tier only ever confirms.
+RECORDED_RELATION_TIERS = ("correction", "landmark:family", "roster")
+
+#: What ends a clause a relationship phrase may not reach across. A newline
+#: (the line of a pasted record), the ``|`` an evidence quote joins its
+#: fragments with, a semicolon, a colon, a dash and a sentence end. A FULL STOP
+#: is handled separately (:data:`_SENTENCE_END_RE`) because "James Edwin Taylor
+#: Sr." and "A.J." carry their own and a name is not two clauses.
+INTRODUCTION_CLAUSE_SEPARATORS = ("\n", "|", ";", ":", "—", "–", "!", "?")
+
+#: A full stop ends a clause only when a new sentence plainly starts after it:
+#: three word characters in front of the stop (so ``Sr.`` and ``A.J.`` are not
+#: boundaries) and a capitalised word behind it.
+_SENTENCE_END_RE = re.compile(r"(?<=\w\w\w)\.\s+(?=[\"'“(\[]?[A-Z])")
+
+#: A relationship word carrying a POSSESSIVE ``'s`` possesses the noun after
+#: it; it is not the relation of the name in front of it. *"my grandpa James
+#: Edwin Taylor Sr., my dad's dad"* says dad's DAD, and the only relation that
+#: clause gives the name is ``grandpa``. This is the whole defect v347 exists
+#: to close, written as one lookahead so both phrase shapes carry it.
+_NOT_A_POSSESSOR = r"(?!['’]s(?!\w)|s['’](?!\w))"
+
+#: A generational suffix is a GENERATION, not a nickname. ``<Name> Sr.`` is one
+#: generation ABOVE the ``<Name>`` the vault has already placed and ``<Name>
+#: Jr.`` one below, unless a source says otherwise — which
+#: :func:`recorded_relation` is, and it is asked first. Compared on the last
+#: token with its full stop removed, so ``Sr``, ``Sr.`` and ``Senior`` are one
+#: suffix.
+GENERATIONAL_SUFFIX_STEPS = {
+    "sr": 1,
+    "senior": 1,
+    "i": 1,
+    "jr": -1,
+    "junior": -1,
+}
+
+#: The roster seats one generation apart, youngest first. ``sibling`` is the
+#: seat for a person of the owner's OWN generation, because the owner himself
+#: is never an introduced row; ``grandchild`` has no seat in
+#: `focus_candidate.FOCUS_RELATIONSHIPS`, so a step onto it refuses rather than
+#: filing a relationship the roster cannot hold.
+GENERATION_TIERS = ("grandchild", "child", "sibling", "parent", "grandparent")
+
+#: What a row's ``relationship`` was decided by. ``introduced`` is the clause's
+#: own word; ``recorded`` is the vault agreeing with it; ``generational_suffix``
+#: is rule 3 having moved it one generation.
+RELATIONSHIP_BASES = ("introduced", "recorded", "generational_suffix")
+
+
+def introduction_clauses(text: object) -> tuple[str, ...]:
+    """The clauses of one text, each of which is read on its own.
+
+    Rule 1 of :data:`AN_INTRODUCTION_NAMES_ONE_PERSON_IN_ONE_CLAUSE`: a
+    relationship phrase and the name it introduces have to sit in the SAME
+    clause. Split on :data:`INTRODUCTION_CLAUSE_SEPARATORS` and on a sentence
+    end that is not an abbreviation's full stop, then collapsed exactly as
+    every other reader of a mention collapses. Deterministic, order-preserving,
+    de-duplicated.
+
+    This is also what makes the pasted vital record unreadable as an
+    introduction without a second rule: the genealogy-app shape puts the name
+    on its own LINE (``Name • 8 Sources\\nJames Edwin Taylor Sr``), so the name
+    is a clause with no relationship word in it.
+    """
+    body = str(text or "")
+    parts = [body]
+    for separator in INTRODUCTION_CLAUSE_SEPARATORS:
+        parts = [piece for part in parts for piece in part.split(separator)]
+    out: list[str] = []
+    for part in parts:
+        for piece in _SENTENCE_END_RE.split(part):
+            clause = collapsed_text_of(piece)
+            if clause and clause not in out:
+                out.append(clause)
+    return tuple(out)
+
+
+def pasted_record_names(texts: object) -> tuple[str, ...]:
+    """Every name a pasted vital record's ``Name`` header declares.
+
+    The genealogy-app shape the owner drops into a card conversation —
+    ``Name • 8 Sources`` and the man on the next line — read through
+    `landmark_projection.BIRTH_NAME_LINE_RE`, which is already the ONE
+    definition of it (v341 reads the same header off a `birth` landmark
+    record). No second pattern exists here.
+    """
+    import landmark_projection as lp  # noqa: PLC0415
+
+    out: list[str] = []
+    for text in texts or ():
+        for match in lp.BIRTH_NAME_LINE_RE.finditer(str(text or "")):
+            name = collapsed_text_of(match.group("name"))
+            if name and name not in out:
+                out.append(name)
+    return tuple(out)
+
+
+def _names_this_person(text: object, name: str) -> bool:
+    """Whole-token, casefolded: does this text name this person?
+
+    Through `identity_resolution.normalized_mention_key`, which is the one
+    normalisation every mention reader uses, so the comparison is never a raw
+    substring: ``" james taylor "`` inside ``" james taylor dad "`` is the same
+    man, and ``Taylorsville`` is not.
+    """
+    key = ir.normalized_mention_key(name)
+    if not key:
+        return False
+    return f" {key} " in f" {ir.normalized_mention_key(text)} "
+
+
+def introduces_only_a_pasted_record(name: str, texts: object) -> bool:
+    """Is this name ONLY ever a pasted record's header value?
+
+    Rule 1's second half: a name that appears nowhere in a source but inside
+    the vital-record block the owner pasted is never introduced by a
+    relationship word elsewhere in that source. The record is somebody's
+    document, not the owner's sentence about them — which is exactly how the
+    grandfathers' birthdays arrived (v339/v341) and exactly what a relationship
+    word in the surrounding conversation must not reach into.
+    """
+    listed = {ir.normalized_mention_key(value) for value in pasted_record_names(texts)}
+    key = ir.normalized_mention_key(name)
+    if not key or key not in listed:
+        return False
+    for text in texts or ():
+        body = str(text or "")
+        for match in reversed(list(_lp_name_line_spans(body))):
+            body = body[:match[0]] + " " + body[match[1]:]
+        for clause in introduction_clauses(body):
+            if _names_this_person(clause, name):
+                return False
+    return True
+
+
+def _lp_name_line_spans(text: str):
+    """The spans a pasted record's ``Name`` header VALUE occupies."""
+    import landmark_projection as lp  # noqa: PLC0415
+
+    for match in lp.BIRTH_NAME_LINE_RE.finditer(text):
+        yield match.span("name")
+
+
+def _relation_words_in(text: object) -> frozenset[str]:
+    """Every relationship word a free text uses, singular or plural.
+
+    One alternation over `identity_resolution.RELATIONSHIP_MENTION_WORDS` —
+    still the one vocabulary — tolerant of the plural and the possessive a
+    correction writes ("the owner's grandfathers' births"). Whole-token in both
+    directions, so ``grandson`` is not ``son`` and ``childhood`` is not
+    ``child``.
+    """
+    body = collapsed_text_of(text)
+    if not body:
+        return frozenset()
+    return frozenset(
+        match.group("word").casefold()
+        for match in _RELATION_WORD_RE.finditer(body)
+    )
+
+
+def _relation_word_alternation() -> str:
+    return "|".join(
+        re.escape(word)
+        for word in sorted(ir.RELATIONSHIP_MENTION_WORDS, key=len, reverse=True)
+    )
+
+
+_RELATION_WORD_RE = re.compile(
+    rf"(?<!\w)(?P<word>{_relation_word_alternation()})(?:es|s)?"
+    rf"(?:['’]s?)?(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def stated_relation(texts: object, name: str) -> str:
+    """The one roster relationship a set of free texts states for ``name``.
+
+    A text counts only when it NAMES the person and states EXACTLY ONE
+    relationship — a text that says two different relations decides nothing,
+    which is the refusal that keeps the owner's *"1990-03-20 is AJ's birthday,
+    not James's … the owner's brother Anthon James 'AJ' Taylor"* correction from
+    filing a father as a brother. Across the texts that qualify the answer must
+    still be single, or this returns ``""``: this reading exists to CONFIRM or
+    REFUSE an introduction, never to invent one.
+    """
+    found: set[str] = set()
+    for text in texts or ():
+        if not _names_this_person(text, name):
+            continue
+        stated = {
+            relationship for relationship in
+            (roster_relationship_for(word) for word in _relation_words_in(text))
+            if relationship
+        }
+        if len(stated) == 1:
+            found |= stated
+    return next(iter(found)) if len(found) == 1 else ""
+
+
+def roster_recorded_relations(roster: object) -> dict[str, str]:
+    """``{mention key: relationship}`` for every roster row that carries one.
+
+    Keyed by the row's name AND each of its aliases, because a recorded
+    relation belongs to the person and not to one spelling of them.
+    """
+    out: dict[str, str] = {}
+    for entity in roster_entities(roster):
+        relationship = collapsed_text_of(entity.get("relationship"))
+        if not relationship:
+            continue
+        for spelling in (entity.get("name"), *(entity.get("aliases") or ())):
+            key = ir.normalized_mention_key(spelling)
+            if key:
+                out.setdefault(key, relationship)
+    return out
+
+
+def landmark_recorded_relations(landmark_entries: object) -> dict[str, str]:
+    """``{mention key: relation}`` for every `family` landmark entry that
+    declares one.
+
+    The rows are `landmark_projection.load_landmark_sources`' — the filed
+    RECORDS, never `state/landmarks.json`, which is a drawing redrawn from
+    them. ``who``, ``label`` and ``name`` are the entry's own identity fields
+    (`landmark_projection.BIRTH_SUBJECT_FIELDS` names the same set for the
+    `birth` domain) and ``relation`` is the vault's own word for where that
+    person stands.
+    """
+    out: dict[str, str] = {}
+    for row in landmark_entries or ():
+        if not isinstance(row, dict):
+            continue
+        if collapsed_text_of(row.get("domain")) != FAMILY_RELATION_DOMAIN:
+            continue
+        record = row.get("record")
+        if not isinstance(record, dict):
+            continue
+        relation = collapsed_text_of(record.get("relation"))
+        if not relation:
+            continue
+        for spelling in (record.get("who"), record.get("label"), record.get("name")):
+            key = ir.normalized_mention_key(spelling)
+            if key:
+                out.setdefault(key, relation)
+    return out
+
+
+def recorded_relation(name: object, *, roster: object = (),
+                      landmark_entries: object = (),
+                      correction_texts: object = ()) -> dict | None:
+    """What the vault ALREADY says about this spelling, or ``None``
+    (:data:`A_RECORDED_RELATION_OUTRANKS_AN_INTRODUCED_ONE`).
+
+    ``{"relationship", "tier", "stated"}``. :data:`RECORDED_RELATION_TIERS` in
+    order, first answer wins. Pure: the caller reads the corrections, the
+    landmarks and the roster and hands them over, exactly as every other reader
+    in this module takes a snapshot rather than guessing at a vault root.
+    """
+    body = collapsed_text_of(name)
+    if not body:
+        return None
+    key = ir.normalized_mention_key(body)
+    for tier in RECORDED_RELATION_TIERS:
+        if tier == "correction":
+            relationship = stated_relation(correction_texts, body)
+        elif tier == "landmark:family":
+            relationship = landmark_recorded_relations(landmark_entries).get(key, "")
+        else:
+            relationship = roster_recorded_relations(roster).get(key, "")
+        if relationship:
+            return {"relationship": relationship, "tier": tier, "stated": body}
+    return None
+
+
+def generational_suffix(name: object) -> tuple[str, int]:
+    """``(base name, generation step)`` — ``("James Edwin Taylor", 1)`` for
+    ``"James Edwin Taylor Sr."`` — or ``("", 0)``.
+
+    :data:`GENERATIONAL_SUFFIX_STEPS` on the LAST token with its full stop
+    removed. A one-token name has no suffix: ``"Sr"`` alone is not a person.
+    """
+    tokens = collapsed_text_of(name).split()
+    if len(tokens) < 2:
+        return "", 0
+    step = GENERATIONAL_SUFFIX_STEPS.get(tokens[-1].rstrip(".").casefold(), 0)
+    if not step:
+        return "", 0
+    return " ".join(tokens[:-1]), step
+
+
+def generation_shifted(relationship: object, step: int) -> str:
+    """The roster seat ``step`` generations from ``relationship``, or ``""``.
+
+    :data:`GENERATION_TIERS` is the ladder and
+    `focus_candidate.FOCUS_RELATIONSHIPS` is the gate, so a step off either end
+    — a great-grandparent, a grandchild — refuses rather than filing a
+    relationship the roster has no seat for.
+    """
+    from focus_candidate import FOCUS_RELATIONSHIPS  # noqa: PLC0415
+
+    body = collapsed_text_of(relationship)
+    if body not in GENERATION_TIERS or not step:
+        return ""
+    index = GENERATION_TIERS.index(body) + int(step)
+    if not 0 <= index < len(GENERATION_TIERS):
+        return ""
+    shifted = GENERATION_TIERS[index]
+    return shifted if shifted in FOCUS_RELATIONSHIPS else ""
+
+
+def suffixed_generation(name: object, *, placed: object = None) -> str:
+    """The relation ``<Name> Sr.`` takes when the vault has placed ``<Name>``.
+
+    Rule 3. The base name is compared WHOLE — "James Taylor" and "James Edwin
+    Taylor" are two spellings this rule deliberately does not join, because
+    four people on the owner's roster bear the token *James* and collapsing a
+    middle name would put his father, his brother and his son in one bucket.
+    """
+    base, step = generational_suffix(name)
+    if not base:
+        return ""
+    held = collapsed_text_of((placed or {}).get(ir.normalized_mention_key(base)))
+    if not held:
+        return ""
+    return generation_shifted(held, step)
+
+
+def introduced_relation_verdict(row: object, *, recorded: object = None,
+                                placed: object = None) -> dict:
+    """Rules 2 and 3 over one introduced row: ``{"row", "finding"}``.
+
+    ``row`` is what rule 1 read. A recorded relation that AGREES confirms it
+    (``relationship_basis: "recorded"``); one that CONTRADICTS it refuses the
+    whole row and returns a finding naming both, because a vault that has
+    already placed somebody is not corrected by a sentence that reads them
+    differently. With nothing recorded, a generational suffix may move the
+    relation one generation — and the relationship ALIASES the old word
+    licensed are dropped with it, since a word of the wrong generation must not
+    bind to the person it was the wrong generation for.
+    """
+    if not isinstance(row, dict):
+        return {"row": None, "finding": None}
+    introduced = collapsed_text_of(row.get("relationship"))
+    stated = (recorded or {}) if isinstance(recorded, dict) else {}
+    recorded_relationship = collapsed_text_of(stated.get("relationship"))
+    if recorded_relationship:
+        if recorded_relationship == introduced:
+            return {"row": {**row, "relationship_basis": "recorded"}, "finding": None}
+        return {
+            "row": None,
+            "finding": {
+                "slug": row.get("slug"),
+                "name": row.get("name"),
+                "introduced": introduced,
+                "introduced_word": row.get("relationship_word"),
+                "recorded": recorded_relationship,
+                "tier": stated.get("tier"),
+                "reason": "an introduced relation may not contradict a recorded one",
+            },
+        }
+    shifted = suffixed_generation(row.get("name"), placed=placed)
+    if not shifted or shifted == introduced:
+        return {"row": {**row, "relationship_basis": "introduced"}, "finding": None}
+    licensed = {
+        ir.normalized_mention_key(alias)
+        for alias in relationship_aliases(row.get("relationship_word"))
+    }
+    kept = tuple(
+        alias for alias in row.get("aliases") or ()
+        if ir.normalized_mention_key(alias) not in licensed
+    )
+    return {
+        "row": {**row, "relationship": shifted, "aliases": kept,
+                "relationship_basis": "generational_suffix"},
+        "finding": {
+            "slug": row.get("slug"),
+            "name": row.get("name"),
+            "introduced": introduced,
+            "introduced_word": row.get("relationship_word"),
+            "recorded": shifted,
+            "tier": "generational_suffix",
+            "reason": "a generational suffix is one generation from the name it suffixes",
+        },
+    }
