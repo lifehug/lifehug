@@ -64,9 +64,11 @@ import temporal_projection as tp  # noqa: E402
 import temporal_store as store  # noqa: E402
 import temporal_timeline as tt  # noqa: E402
 from identity_resolution import (  # noqa: E402
+    ONCE_PER_COUPLE_EVENT_KINDS,
     ONCE_PER_SUBJECT_EVENT_KINDS,
     OWNER_SUBJECT_MENTIONS,
     REPEATABLE_EVENT_KINDS,
+    couple_key,
     is_unresolved_ref,
 )
 from temporal_claims import (  # noqa: E402
@@ -352,6 +354,47 @@ MILESTONE_OF_EVENT_KIND = {
 #: is the `moment` wildcard, so "Dottie's birth" carries no `birth` kind at all
 #: and the verb is the only place the milestone is written down.
 MILESTONE_OF_VERB_STEM = {"born": "birth", "die": "death", "marry": "married"}
+
+#: v345. *"A telling of a landmark folds onto the landmark, and a landmark is
+#: drawn as what it is."* (Owner review of staging, 2026-09-24.)
+#:
+#: Three tellings of the owner's parents' wedding sat as three nodes. "Parents'
+#: wedding date" carried the day, 1976-06-25; "Mom married dad at 21" carried
+#: the age and no date at all, with its own *"when did this happen?"* card; and
+#: the `family` landmark entry — a couple's wedding filed under a domain that
+#: declares `date_semantics: birth` — was drawn a THIRD time as "Parents's
+#: birth". Beside them, "Harvey arriving" stayed undated with its own card while
+#: its evidence read *"Birth of Harvey during the Etherfuse chapter"* and the
+#: vault had held Harvey's birthday, 2021-10-11, for weeks.
+#:
+#: The milestone rung could see none of it. Its key is (milestone, one person),
+#: and the milestone is read from the `event_kind` or the label's own verb — so
+#: "arriving" is not a birth, "wedding" is not a marriage, and a wedding's two
+#: people are two keys rather than one couple.
+A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT = (
+    "R2b reads the milestone the EVIDENCE names, not only the one the kind or "
+    "the label's verb does, and keys a marriage on the COUPLE rather than on "
+    "one of the two people — so a telling of an event the vault already holds "
+    "as a dated landmark folds onto the landmark instead of asking when it "
+    "happened"
+)
+
+#: The milestone read out of a NOUN the label carries. `wedding` alone, and the
+#: omissions are the rule: `marriage` is a STATE a life spends years inside —
+#: the owner's vault holds "Marriage became hard", "Early marriage arguments and
+#: silence", "Went bankrupt early in marriage" and six more — and `anniversary`
+#: recurs. A wedding is the day. Read through
+#: :data:`MILESTONE_NOUN_IS_AN_ADJUNCT_AFTER` so a noun that says WHEN rather
+#: than WHAT ("Father fell ill after wedding") is not the telling's own event.
+MILESTONE_OF_EVENT_NOUN = {"wedding": "married"}
+
+#: A preposition immediately before a milestone noun makes it an ADJUNCT: the
+#: telling happened near that event and is not that event. "Father fell ill
+#: after wedding" is an illness; "Parents' wedding date" is a wedding.
+MILESTONE_NOUN_IS_AN_ADJUNCT_AFTER = frozenset({
+    "after", "before", "during", "since", "until", "till", "post", "pre",
+    "in", "into", "at", "on", "from", "by", "near", "around", "about",
+})
 
 #: A roster entity ref's person prefix (`episode_containers` mints
 #: `<roster type>/<key>`), so a rung can ask "which PEOPLE does this telling
@@ -744,6 +787,14 @@ class TellingView:
     #: participant set where it does not. The owner is dropped for the reason
     #: :data:`INDEPENDENT_SIGNALS` drops him: he is on every telling.
     people: frozenset = frozenset()
+    #: v345. This telling's OWN sentences — its event mentions, its subject
+    #: mentions and its evidence quotes (:func:`_claim_texts`, the same reader
+    #: the containment rung uses). Read by :func:`milestone_of` and by nothing
+    #: else: an evidence quote is prose the model transcribed, so it may name
+    #: the KIND of a fact the classifier typed as the wildcard and it may never
+    #: contribute a retrieval signal (:data:`ONE_FACT_ONE_SIGNAL_TEXT`'s own
+    #: reason, and `_mention_texts`').
+    phrases: frozenset = frozenset()
 
     def as_dict(self) -> dict:
         return {
@@ -767,6 +818,7 @@ class TellingView:
             "node_refs": sorted(self.node_refs),
             "reads_node": self.reads_node,
             "people": sorted(self.people),
+            "phrases": sorted(self.phrases),
             "eligible": self.eligible,
             "ineligible_reason": self.ineligible_reason,
         }
@@ -1251,17 +1303,65 @@ def milestone_of(view: "TellingView") -> str:
     The `event_kind` when it names one; otherwise the LABEL's own verb, because
     the classifier's kind for "a thing that happened" is the `moment` wildcard
     and "Dottie's birth" carries no `birth` kind anywhere.
+
+    **v345** adds the two readings a label's verb cannot give
+    (:data:`A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT`), in order of how much they
+    claim:
+
+    * the label's own NOUN (:data:`MILESTONE_OF_EVENT_NOUN`) — "Parents'
+      wedding date" is a wedding and no verb in it says so — refused when the
+      noun is an adjunct (:data:`MILESTONE_NOUN_IS_AN_ADJUNCT_AFTER`);
+    * the EVIDENCE, through `landmark_projection.names_a_birth` — "Harvey
+      arriving" is Harvey's birth because the quote behind it says *"Birth of
+      Harvey"*. The name the quote gives must be somebody the telling is ALREADY
+      about (:meth:`TellingView.people`), so "the birth of the company" and a
+      quote that mentions a third party's birth in passing say nothing. This
+      reads the sentence; it never rewrites the receipt.
     """
     kind = collapsed_text(view.event_kind)
     if kind in MILESTONE_OF_EVENT_KIND:
         return MILESTONE_OF_EVENT_KIND[kind]
     if is_repeatable(kind):
         return ""
-    for token in label_tokens(view.label):
+    tokens = label_tokens(view.label)
+    for token in tokens:
         milestone = MILESTONE_OF_VERB_STEM.get(EVENT_VERB_STEMS.get(token, ""))
         if milestone:
             return milestone
+    for index, token in enumerate(tokens):
+        milestone = MILESTONE_OF_EVENT_NOUN.get(token)
+        if not milestone:
+            continue
+        if index and tokens[index - 1] in MILESTONE_NOUN_IS_AN_ADJUNCT_AFTER:
+            continue
+        return milestone
+    if _evidence_names_this_telling_a_birth(view):
+        return "birth"
     return ""
+
+
+def _evidence_names_this_telling_a_birth(view: TellingView) -> bool:
+    """Does one of this telling's own sentences say it is a birth, and whose?
+
+    `landmark_projection.names_a_birth` reads the sentence; this decides whether
+    the name it read is THIS telling's subject, which is the half no word list
+    can do. Both sides are compared as tokens, nested exactly as
+    :func:`_same_people` nests them, so "Harvey" satisfies a telling about
+    "Harvey Rex Taylor" and "Etherfuse" satisfies nothing.
+    """
+    if not view.people:
+        return False
+    for phrase in sorted(view.phrases):
+        named = lp.names_a_birth(phrase)
+        if not named:
+            continue
+        tokens = frozenset(
+            token for token in label_tokens(named)
+            if token and token not in OWNER_SUBJECT_MENTIONS
+        )
+        if tokens and (tokens <= view.people or view.people <= tokens):
+            return True
+    return False
 
 
 def _bounds_of(claims: Sequence[object]) -> tuple[object, bool]:
@@ -1287,7 +1387,8 @@ def _bounds_of(claims: Sequence[object]) -> tuple[object, bool]:
 def telling_views(claims: object, *, manifest: object = None,
                   era_memberships: object = None, entity_index: object = None,
                   participation_kinds: object = None,
-                  placed_windows: object = None) -> dict:
+                  placed_windows: object = None,
+                  landmark_entries: object = ()) -> dict:
     """``{telling_ref: TellingView}`` — pure, over the claims and nothing else.
 
     The claim→telling map is `episode_fold.claim_telling_index`, which is C1's
@@ -1320,8 +1421,17 @@ def telling_views(claims: object, *, manifest: object = None,
     a roster is a vault read and this function is pure. With none supplied the
     entity signal simply never fires and every pair scores one signal fewer,
     which can only ever retrieve LESS, never bind wrongly.
+
+    ``landmark_entries`` (v345) is `landmark_projection.load_landmark_sources`'
+    list, and it is an argument for the fourth time for the same reason. It is
+    read for ONE thing — `landmark_projection.read_landmark_dates`, so a
+    landmark date claim reaches the milestone rung as the event its ENTRY dates
+    (:data:`A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT`) — and the fold applies the
+    identical read, so the binder and the drawing can never disagree about what
+    a `family` entry's date is. A vault that hands over none is read exactly as
+    it was before.
     """
-    rows = [row for row in (claims or ()) if isinstance(row, dict)]
+    rows = lp.read_landmark_dates(claims, landmark_entries)
     index = ef.claim_telling_index(rows, manifest)
     by_telling: dict[str, list] = {}
     for claim in rows:
@@ -1377,6 +1487,7 @@ def telling_views(claims: object, *, manifest: object = None,
             reads_node=reads_node(telling_ref, rows_here),
             people=person_tokens(tuple(mentions) + tuple(subject_mentions),
                                  participants, entity_index),
+            phrases=frozenset(_claim_texts(rows_here)),
             label=label,
             stem=label_stem(label, participants, event_kind=event_kind),
             tokens=proper_noun_tokens(label),
@@ -2575,8 +2686,22 @@ def derived_reading_links(views: Mapping[str, TellingView]) -> list:
 
 
 def milestone_links(views: Mapping[str, TellingView]) -> list:
-    """:data:`RULE_ID_MILESTONE` — one subject, one milestone, one episode."""
+    """:data:`RULE_ID_MILESTONE` — one subject, one milestone, one episode.
+
+    **v345** sweeps a second set of buckets beside the per-person ones
+    (:data:`A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT`). A marriage is
+    once per COUPLE (`identity_resolution.ONCE_PER_COUPLE_EVENT_KINDS`), so a
+    telling whose people ARE one couple (`identity_resolution.couple_key`) is
+    bucketed under that couple as well as under each of its words — which is how
+    *"Mom married dad at 21"* (people ``{mother}``) reaches *"Parents' wedding
+    date"* (people ``{parents}``) at all. Inside a couple bucket
+    :func:`_same_people` is not asked, because the bucket key has already
+    asserted the stronger thing: the two tellings name the same two people, in
+    two vocabularies for them. Every other guard is the per-person rung's own —
+    compatible kinds, and dates that do not contradict.
+    """
     buckets: dict[tuple, list] = {}
+    couples: dict[tuple, list] = {}
     for telling_ref in sorted(views):
         view = views[telling_ref]
         if not view.eligible:
@@ -2586,28 +2711,40 @@ def milestone_links(views: Mapping[str, TellingView]) -> list:
             continue
         for token in sorted(view.people):
             buckets.setdefault((milestone, token), []).append(telling_ref)
+        if milestone in ONCE_PER_COUPLE_EVENT_KINDS:
+            key = couple_key(view.people)
+            if key:
+                couples.setdefault((milestone, key), []).append(telling_ref)
     rows: list = []
     seen: set[tuple] = set()
-    for (milestone, token), refs in sorted(buckets.items()):
-        for index, left in enumerate(refs):
-            for right in refs[index + 1:]:
-                pair = (left, right)
-                if pair in seen:
-                    continue
-                a, b = views[left], views[right]
-                if not _same_people(a.people, b.people):
-                    continue
-                if not kinds_compatible(a.event_kind, b.event_kind):
-                    continue
-                if not _dates_agree(a.bounds, b.bounds):
-                    continue
-                seen.add(pair)
-                rows.append(ExactLink(
-                    rule_id=RULE_ID_MILESTONE, left=left, right=right,
-                    key=f"{milestone}:{token}",
-                    reason=(f"a {milestone} happens once to one person, and both "
-                            f"tellings are {token}'s"),
-                ))
+
+    def _sweep(source: dict, *, by_couple: bool) -> None:
+        for (milestone, token), refs in sorted(source.items()):
+            for index, left in enumerate(refs):
+                for right in refs[index + 1:]:
+                    pair = (left, right)
+                    if pair in seen:
+                        continue
+                    a, b = views[left], views[right]
+                    if not by_couple and not _same_people(a.people, b.people):
+                        continue
+                    if not kinds_compatible(a.event_kind, b.event_kind):
+                        continue
+                    if not _dates_agree(a.bounds, b.bounds):
+                        continue
+                    seen.add(pair)
+                    rows.append(ExactLink(
+                        rule_id=RULE_ID_MILESTONE, left=left, right=right,
+                        key=f"{milestone}:{token}",
+                        reason=((f"a {milestone} happens once to one couple, and "
+                                 f"both tellings are {token.split(':')[-1]}'")
+                                if by_couple else
+                                (f"a {milestone} happens once to one person, and "
+                                 f"both tellings are {token}'s")),
+                    ))
+
+    _sweep(buckets, by_couple=False)
+    _sweep(couples, by_couple=True)
     return rows
 
 
@@ -3100,6 +3237,7 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
         entity_index=entity_index,
         participation_kinds=lp.participation_kinds_by_telling(landmark_entries),
         placed_windows=placed_windows,
+        landmark_entries=landmark_entries,
     )
     units = candidates(views, episode_records=episode_records)
     records = ef.normalize_episode_records(episode_records)
@@ -3943,6 +4081,7 @@ __all__ = [
     "MAINTENANCE_STEP_IS_A_DRY_RUN",
     "MATURE_EPISODE_MEMBERS",
     "A_MERGE_NEVER_MOVES_A_DATED_MOMENT",
+    "A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT",
     "NON_TRANSITIVE_RULE_TEXT",
     "OVERMERGE_DISJOINT_REASON",
     "PLAUSIBILITY_FLOOR",
@@ -3965,7 +4104,9 @@ __all__ = [
     "DERIVED_READING_SOURCE_KIND",
     "EXACT_IDENTITY_RULE_IDS",
     "EXACT_IDENTITY_RULE_TEXT",
+    "MILESTONE_NOUN_IS_AN_ADJUNCT_AFTER",
     "MILESTONE_OF_EVENT_KIND",
+    "MILESTONE_OF_EVENT_NOUN",
     "MILESTONE_OF_VERB_STEM",
     "PERSON_ENTITY_PREFIX",
     "RESTATEMENT_BUCKET_CAP",

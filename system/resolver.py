@@ -1275,7 +1275,10 @@ def file_same_as(root: Path, *, now: str) -> dict:
     claims = [row for row in (index.get("claims") or ()) if isinstance(row, dict)]
     by_claim = ef.claim_telling_index(claims, ei.read_telling_manifest(root))
     nodes = {node["node_id"]: node for node in projection.get("nodes") or ()}
-    views = eb.telling_views(claims, entity_index=eb.ec.load_entity_index(root))
+    views = eb.telling_views(
+        claims, entity_index=eb.ec.load_entity_index(root),
+        landmark_entries=eb.lp.load_landmark_sources(root),
+    )
     records = ef.load_episode_records(root)
     normalized = ef.normalize_episode_records(records)
     active = eb.efc.active_binding_index(normalized["bindings"])

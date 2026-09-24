@@ -269,6 +269,15 @@ REPEATABLE_EVENT_KINDS = (
 #: and never meet. `graduation` is deliberately ABSENT for the mirror-image
 #: reason — high school and college are two graduations of one subject and
 #: nothing in the label distinguishes their subjects.
+#:
+#: **v345 amendment: a marriage is once per COUPLE.** `married` is in this list
+#: on a subject rung, and a subject rung cannot see that *"Mom married dad at
+#: 21"* (subject `mother`) and *"Parents' wedding date"* (subject `parents`) are
+#: one wedding — the owner's own vault held them as two nodes, one of them
+#: undated with its own *"when?"* card, beside a third drawn from the `family`
+#: landmark. So the milestone rung reads a COUPLE key beside the subject key
+#: (:data:`ONCE_PER_COUPLE_EVENT_KINDS`, :func:`couple_key`) and a marriage of
+#: one resolved couple is one fact.
 ONCE_PER_SUBJECT_EVENT_KINDS = (
     "birth",
     "child_born",
@@ -276,6 +285,79 @@ ONCE_PER_SUBJECT_EVENT_KINDS = (
     "loss",
     "married",
 )
+
+#: v345. The event kinds a COUPLE holds at most once — the other half of
+#: :data:`ONCE_PER_SUBJECT_EVENT_KINDS`, and the one the owner's parents' wedding
+#: needs. A marriage is the only kind here, and deliberately: a birth and a
+#: death happen to one person, so the subject rung already has them; a wedding
+#: happens to two, and neither of the two is the fact's discriminator on their
+#: own.
+ONCE_PER_COUPLE_EVENT_KINDS = ("married",)
+
+#: The relation words that name a COUPLE, mapped to the couple they name.
+#:
+#: SHORT on purpose, and the omissions are the design. A person has one set of
+#: parents and therefore one parents' wedding, so ``mom``/``dad``/``parents``
+#: all name the same couple and a telling about any of them is a telling about
+#: it. ``grandparents`` is ABSENT for the reason `graduation` is absent from
+#: :data:`ONCE_PER_SUBJECT_EVENT_KINDS`: a person has up to four grandparents
+#: and two of their weddings, and the bare word discriminates neither — the
+#: owner's vault holds "Naming of maternal grandparents" and "Naming of
+#: paternal grandparents" side by side. ``wife``/``husband``/``spouse`` ARE here
+#: because a wedding told as *"when I got married"* names the owner's own
+#: couple and nothing else; a life that holds a SECOND marriage told only by
+#: relation and never by name folds onto the first and surfaces a contradiction
+#: card naming both dates, which is `episode_binder`'s v340 ruling working
+#: rather than failing — two tellings of "my wedding" at two dates is an
+#: ambiguity only the person can settle.
+COUPLE_OF_RELATION_WORD = {
+    "mom": "parents",
+    "mommy": "parents",
+    "mother": "parents",
+    "mum": "parents",
+    "mama": "parents",
+    "momma": "parents",
+    "dad": "parents",
+    "daddy": "parents",
+    "father": "parents",
+    "papa": "parents",
+    "poppa": "parents",
+    "parent": "parents",
+    "parents": "parents",
+    "wife": "spouse",
+    "husband": "spouse",
+    "spouse": "spouse",
+}
+
+#: How a couple key is spelled, so no caller composes one by hand.
+COUPLE_KEY_PREFIX = "couple"
+
+
+def couple_key(people: object) -> str:
+    """``"couple:parents"`` for the people who ARE one couple, else ``""``.
+
+    The people are a telling's non-owner person TOKENS
+    (`episode_binder.TellingView.people`). Every one of them must map to the
+    SAME couple through :data:`COUPLE_OF_RELATION_WORD`, so ``{mother}``,
+    ``{parents}`` and ``{mom, dad}`` are one key and ``{mother, katie}`` is no
+    key at all — a telling that names a couple AND somebody outside it is not a
+    telling about the couple alone.
+
+    A name resolves nothing here: ``{katie}`` has no couple key, and *"Married
+    Katie"* meets *"Getting married to Katie"* through the ordinary subject rung
+    on the name, which is the discriminator a vault that holds two marriages
+    actually has.
+    """
+    keys = {
+        COUPLE_OF_RELATION_WORD.get(normalized_mention_key(token))
+        for token in (people or ())
+        if collapsed_text(token)
+    }
+    if len(keys) != 1:
+        return ""
+    only = keys.pop()
+    return f"{COUPLE_KEY_PREFIX}:{only}" if only else ""
+
 
 #: Mentions that name the OWNER rather than anybody else. The owner is on every
 #: telling, so agreeing about him is not evidence about which event a telling is
@@ -1566,7 +1648,11 @@ __all__ = [
     "relationship_qualified_candidates",
     "shared_name_token_refs",
     "RELATIONSHIP_EVENT_KINDS",
+    "ONCE_PER_COUPLE_EVENT_KINDS",
     "ONCE_PER_SUBJECT_EVENT_KINDS",
+    "COUPLE_OF_RELATION_WORD",
+    "COUPLE_KEY_PREFIX",
+    "couple_key",
     "OWNER_SUBJECT_MENTIONS",
     "REPEATABLE_EVENT_KINDS",
     "RESOLUTIONS",
