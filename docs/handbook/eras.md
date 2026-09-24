@@ -345,8 +345,24 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:15 -->
-`timeline-rules:15` (v346), which made a dated BIRTHDAY a BIRTH and every age
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:16 -->
+`timeline-rules:16` (v347), which made an introduction name one person in one
+clause. The arithmetic did not change; the roster it reads did. `:15` read the
+evidence quote *"my grandpa James Edwin Taylor Sr., my dad's dad, died of a
+heart attack"* as introducing a second FATHER, because the appositive shape
+matched the name against the "dad" of *my dad's* dad — so two people claimed
+"dad" and the shared-alias rule bound the word to neither, leaving the owner's
+real father with no relationship word at all. A relationship phrase now
+introduces a name only inside ONE clause, and only when the word is not
+possessing something else; a name a pasted vital record merely lists is
+introduced by nothing; a relation the vault already records for that spelling —
+a correction, a `family` landmark entry's `relation`, a roster row's
+`relationship` — outranks the one a phrase would file, and a contradiction is
+refused out loud rather than written; and a generational suffix (`Sr.`, `Jr.`)
+is a GENERATION rather than a nickname. The same claims therefore calculate to a
+different subject set, a different axis membership and a different age-anchor
+set once the roster this release writes is in place.
+`timeline-rules:15` (v346) made a dated BIRTHDAY a BIRTH and every age
 band measure from its own subject's birth: `<Name>'s birthday` at day, month or
 year grain is read as that person's `birth` at fold time, a merged birth group
 naming one child is labelled and anchored for the child rather than for the
