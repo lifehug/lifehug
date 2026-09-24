@@ -395,6 +395,102 @@ is the wrong direction: a standing claim is retracted by a correction, not by a
 reader. An affected vault therefore needs `temporal_store.supersede_claims`
 beside the redraw, which is what the owner's vault got.
 
+## Amendment (v344, 2026-09-24): a birthday is a birth, and an age is measured from its own subject's birth
+
+**What happened.** The two amendments above are both about which birth is the
+OWNER'S. The owner's review of staging on 2026-09-24 was about the other
+direction: whose birth a birth is when it is not his, and what a vault owes a
+person whose birthday it has been told.
+
+He had filed his mother's birthday as a manual source on 2026-09-14 —
+*"Desiree Taylor (Dave's mom, also called Desi) — birthday June 19, 1955."* —
+and the classifier read it exactly right (`claim:da4f59afb2d774e0b9ebef87`, a
+`date` claim, 1955-06-19 certain/stated, `event_mention: "Desiree Taylor's
+birthday"`). Three things went wrong on the node it drew. Its `event_kind` was
+`moment`, because a claim extractor can say WHEN and cannot say what KIND of
+event a birthday is, so `temporal_timeline`'s births — read off birth-kinded
+nodes — never saw it. Its subject resolved to nobody, because the person roster
+held a collective `parents` row and no mother. And it published
+`axis_membership: owner / lived`, twenty-six years before his own birth, because
+`_owner_relevance`'s zero-candidate fallback reads a name the roster cannot
+place as the ordinary shape of the owner's own life.
+
+The cards were the consequence: *"When did Mom married dad at 21 happen?"*
+stayed `age_without_birth_anchor` with her birthday in the same vault, and
+*"Two dates are claimed for your birth — 11 October 2021 and 2020"* was asked
+about his SON's birthday, because the eleven tellings of Harvey's birth that the
+binder's `R2b` folded into one node resolved to the owner: two of them carry
+`subject_mention: "self"` because he is the subject of the TURNING POINT and the
+birth is only what turned it.
+
+**Decision.** Items 16 and 17 gain three siblings, each one definition.
+
+18. **A dated birthday of a named person is that person's birth.** A `date`
+    claim whose event mention is `<Name>'s birthday|birth date|birth|born`, at
+    day, month or year grain, with a named non-owner subject, IS that person's
+    `birth`. `landmark_projection.BIRTH_EVENT_NOUNS` and `birth_event_subject`
+    are the one definition — a SUBSET of item 16's `BIRTH_DOMAIN_WORDS`, asked
+    forwards ("whose birth does this name?") where item 16 asks it backwards
+    ("does this name nobody?"), compared whole and never as a substring, so
+    v341's *"Mary Born"* and *"Bornstein"* still name people and not events. It
+    is applied as a READING at FOLD time (`temporal_timeline
+    .A_DATED_BIRTHDAY_IS_A_BIRTH`, `reads_as_a_birth`/`_read_event_kind`), never
+    written back onto the receipt, so a vault that already holds the claim heals
+    on its next redraw and the extractor's own words are untouched — the same
+    posture item 16's draw seat already takes. The owner's own birth is excluded
+    by construction: an owner `subject_ref`, an owner-only mention and a bare
+    birth domain word all refuse, so items 16 and 17 keep governing it alone.
+
+19. **A person a source introduces EXISTS.** A named subject the roster has
+    never heard of, introduced in its own source by a relationship phrase the
+    owner used — *"Dave's mom"*, *"my mother"*, *"(wife)"*, *"(brother)"* — gets
+    a roster row carrying that `relationship`
+    (`roster_relations.A_RELATIONSHIP_PHRASE_INTRODUCES_A_PERSON`). The
+    possessive must be the OWNER's, because *"Katie's mom"* is not his mother;
+    the relationship is derived from `identity_resolution
+    .RELATIONSHIP_MENTION_WORDS` crossed with `focus_candidate
+    .FOCUS_RELATIONSHIPS`, so mother and father land in the `parent` tier of
+    `axis_membership`'s immediate-family set and an in-law lands in `other`; and
+    an alias more than one introduced person claims is dropped from every row
+    before anything is written, which is the shared-alias rule stated over the
+    whole batch rather than decided by file order. The write is
+    `entity_roster.ensure_introduced_relatives` through
+    `entity_verdict.apply_verdict(..., ensure=True)` — the `source:
+    "landmark:family"` door — reached by `entity-roster --ensure-introduced`:
+    deterministic, additive, idempotent, no AI, and never a hand-edit.
+
+20. **Anyone's age is measured from their own birth.** `_births_by_subject`
+    reads `BIRTH_ANCHOR_TIERS` in order — a birth-kinded node whose resolved
+    subject is that person, else the roster row's `born`, else a
+    `family`/`children` landmark entry's own date, those two being the domains
+    whose ladder declares `date_semantics: ["birth"]` — and the first tier that
+    answers for a person answers for every key that person goes by, so a lower
+    tier can add a birth nobody has drawn and can never contradict one already
+    on the page. A key several roster people bear is never one of those keys.
+    `_record_for_age_claim` and `chronology.from_age_band` stay
+    subject-agnostic; the only thing that changed is which birth a group is
+    handed, so `age_without_birth_anchor` now means what it says.
+
+    Two corollaries. A birth group naming exactly one non-owner person is that
+    person's birth whatever else it mentions
+    (`A_BIRTH_BELONGS_TO_THE_PERSON_BORN`, which is item 16's rule read
+    forwards): the owner's `self` mentions on such a group are the turning point
+    he lived, and two named people on one birth group decide nothing and are
+    left to v340's `owner_birth_anchor_ambiguous`. And a node wholly before the
+    owner's birth is `pre_birth` whoever it turns out to be about — rule 4 of
+    the axis ruling moved above the evidence relations — with v334's exception
+    kept exactly: an occurrence whose subject IS the owner stays `owner`/`lived`
+    before his birth, because that is a contradiction Mirror owns and hiding it
+    off the axis would delete the question.
+
+**Considered and not built.** Rewriting the classifier to emit `event_kind:
+"birth"` for a birthday would fix new vaults and heal none, which is why this is
+a reading and not an extractor change. And a roster row created by item 19 can
+re-key a node whose subject newly resolves and whose claims carry no
+`event_ref`, because a node id is derived from its subject; v342's
+`node_aliases` covers a BINDER re-key and not an identity one, and closing that
+is the binder's seam rather than the fold's.
+
 ## Consequences
 
 - The classifier's validator is no longer the place where placement is won or

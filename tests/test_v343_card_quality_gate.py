@@ -51,6 +51,8 @@ The rule, built in the smallest right places, ONE definition each:
    releases move on from)
    — the same claims now calculate to a different node set and a different
    work-item set for claims nobody edited, exactly what moves that number.
+   v345 took ``:14`` and v346 ``:15`` on the same day; the number is a
+   monotonic marker that the rules moved, never a name for one release.
 
 Every negative below was run against a build with its guard removed and SEEN
 failing first. Synthetic data only; NEVER references ~/Workspace/dave.
@@ -483,8 +485,8 @@ class EndToEndIdentityCardsTests(unittest.TestCase):
 
 
 class CalculationRuleVersionTests(unittest.TestCase):
-    def test_the_rule_version_is_v343s(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:14")
+    def test_the_rule_version_is_the_one_in_force(self):
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:15")
 
 
 if __name__ == "__main__":

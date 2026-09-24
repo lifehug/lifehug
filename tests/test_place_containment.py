@@ -177,7 +177,7 @@ class TheRuleIsWrittenDown(unittest.TestCase):
     """The rule text lives as a constant, and the retirement says so too."""
 
     def test_the_rule_version_tracks_the_current_rules(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:14")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:15")
         self.assertEqual(tt.CALCULATION_RULE_VERSION,
                          CERT_10["calculation_rule_version"])
 

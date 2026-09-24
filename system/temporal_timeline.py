@@ -231,8 +231,20 @@ from temporal_claims import (  # noqa: E402
 #: fold onto it; and an age claim that agrees with the date a node is placed at
 #: is recorded as agreeing evidence instead of as a rival reading. The same
 #: claims calculate to a different node set, a different alternates set and a
+
+
+#: ``timeline-rules:15`` (v346): A BIRTHDAY IS A BIRTH, AND AN AGE IS MEASURED
+#: FROM ITS OWN SUBJECT'S BIRTH. :14 read a dated ``<Name>'s birthday`` as an
+#: undifferentiated ``moment``, so nothing about that person's age could anchor
+#: on it; read a merged birth group carrying one child's ref and two ``self``
+#: turning-point tellings as the OWNER's birth; and let an evidence relation put
+#: a moment from before the owner was born on his own axis. The same claims now
+#: calculate to a projection where those nodes are ``birth``-kinded and labelled
+#: for the person born, every age band anchors on its own subject's birth
+#: (:data:`AN_AGE_IS_MEASURED_FROM_ITS_OWN_SUBJECT`), and a wholly pre-birth node
+#: reads ``pre_birth``: a different node set, a different placement set and a
 #: different work-item set for claims nobody edited.
-CALCULATION_RULE_VERSION = "timeline-rules:14"
+CALCULATION_RULE_VERSION = "timeline-rules:15"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -736,6 +748,86 @@ def _claim_is_empty(claim: dict) -> bool:
     return empty_label and claim.get("confidence") == 0.0
 
 
+#: v344. WHERE IT WAS SEEN: the owner filed his mother's birthday as a manual
+#: source on 2026-09-14 — *"Desiree Taylor (Dave's mom, also called Desi) —
+#: birthday June 19, 1955."* — and the classifier read it perfectly:
+#: `claim:da4f59afb2d774e0b9ebef87`, `claim_type: "date"`, 1955-06-19
+#: certain/stated, `event_mention: "Desiree Taylor's birthday"`. What a claim
+#: extractor cannot say is what KIND of event a birthday is, so it came out
+#: `event_kind: "moment"`, and every reader of births in this module reads
+#: birth-KINDED groups. His mother's birthday was in the vault and invisible to
+#: the one calculation that needed it.
+#:
+#: THE RULE: a dated birthday of a named person IS that person's birth. It is a
+#: READING over the substrate, applied where the fold decides what a group is —
+#: so a vault that already holds the claim heals on its next redraw — and never
+#: a rewrite of the receipt, which still says exactly what the extractor said.
+#: The vocabulary is `landmark_projection.BIRTH_EVENT_NOUNS`, a subset of the
+#: ONE birth vocabulary v341 established, compared whole and never as a
+#: substring. The OWNER's own birth is excluded by construction: an owner
+#: `subject_ref`, an owner-only mention and a bare birth domain word are all
+#: refused here, so v339/v340 keep governing it alone.
+A_DATED_BIRTHDAY_IS_A_BIRTH = (
+    "a date claim whose event mention names a person's birthday, at day, month "
+    "or year grain, is that person's BIRTH — read at fold time, never written "
+    "back onto the receipt, and never the owner's own"
+)
+
+#: The kinds a birthday reading may OVERWRITE: none at all, or the extractor's
+#: undifferentiated ``moment``. A claim that already states what it is — a
+#: ``death``, a ``married``, a ``birth`` — is left exactly as it is; this rule
+#: fills a gap, it does not re-decide a kind somebody recorded.
+BIRTHDAY_READABLE_EVENT_KINDS = ("", "moment")
+
+#: The date grains a birthday may be read at. A ``range`` is not a birthday: a
+#: person born "sometime in the seventies" has a window, and reading that as a
+#: birth would hand the age arithmetic an anchor nobody stated.
+BIRTHDAY_DATE_GRANULARITIES = ("day", "month", "year")
+
+
+def reads_as_a_birth(claim: object, *, owner_ref: object) -> bool:
+    """Is this claim a named person's BIRTHDAY
+    (:data:`A_DATED_BIRTHDAY_IS_A_BIRTH`)?
+
+    Five conditions, every one of them deterministic: the claim is a DATED claim
+    (`temporal_claims.DATED_CLAIM_TYPES`); its kind is one this rule may fill
+    (:data:`BIRTHDAY_READABLE_EVENT_KINDS`); its date is day-, month- or
+    year-grained; its event mention names somebody's birth
+    (`landmark_projection.birth_event_subject`); and its subject is a NAMED
+    person who is not the owner.
+    """
+    if not isinstance(claim, dict):
+        return False
+    if collapsed_text(claim.get("claim_type")) not in tc.DATED_CLAIM_TYPES:
+        return False
+    if collapsed_text(claim.get("event_kind")) not in BIRTHDAY_READABLE_EVENT_KINDS:
+        return False
+    record = chrono.from_dict(claim.get("temporal_value"))
+    if record is None or record.granularity not in BIRTHDAY_DATE_GRANULARITIES:
+        return False
+    if not lp.birth_event_subject(claim.get("event_mention")):
+        return False
+    ref = collapsed_text(claim.get("subject_ref"))
+    if ref and normalized_mention_key(ref) == normalized_mention_key(owner_ref):
+        return False
+    mention = claim.get("subject_mention")
+    if is_owner_reference_only(mention) or lp.is_birth_domain_word(mention):
+        return False
+    return bool(ref or collapsed_text(mention))
+
+
+def _read_event_kind(claim: dict, *, owner_ref: object) -> str:
+    """What this claim's event IS, as the fold reads it.
+
+    The stored kind, except where :func:`reads_as_a_birth` fills an unkinded
+    birthday. ONE seat, read by :func:`_group_claims` before the node id is
+    minted, so a vault drawn for the first time and a vault re-drawn agree about
+    both the kind and the key.
+    """
+    stored = collapsed_text(claim.get("event_kind"))
+    return "birth" if reads_as_a_birth(claim, owner_ref=owner_ref) else stored
+
+
 def _node_kind_for(event_kind: object) -> str:
     """``period`` for a stretch of life, ``episode`` for a repeat, else ``event``.
 
@@ -980,6 +1072,232 @@ def _birth_names_only_the_owner(group: dict, owner: str) -> bool:
     return True
 
 
+#: v344, and it is v339's rule read FORWARDS. `OWNER_BIRTH_IS_ABOUT_NOBODY_ELSE`
+#: says which birth group is NOT the owner's; this says whose it is instead.
+#:
+#: WHERE IT WAS SEEN: `node:f617262f723b943266375d93` on the owner's own vault —
+#: eleven tellings of his son HARVEY's birth, folded into one node by the
+#: binder's `R2b`, drawn as *"your birth"* with `occurrence_subject_scope:
+#: "owner"`, and carrying the contradiction card *"Two dates are claimed for
+#: your birth — 11 October 2021 and 2020"*. Two of those tellings carry
+#: `subject_mention: "self"` because the owner is the subject of the TURNING
+#: POINT and the birth is only what turned it; one carries `subject_ref:
+#: "person/harvey"`, which is the only claim in the group that says whose birth
+#: this is. v340 already refused to make it his age ANCHOR. What it did not do
+#: is give the node the right subject, so `births_by_subject` never found
+#: Harvey's birth and *"Harvey explains rule about cussing"* — age 4, subject
+#: `person/harvey` — could not be placed although the date was on the node next
+#: to it.
+#:
+#: THE RULE: a birth is the birth OF somebody, and when exactly one PERSON is
+#: named on a birth group — one non-owner `subject_ref`, identity landed — that
+#: person is its subject, whatever else the group mentions. The owner's own
+#: `self` mentions on such a group are the turning point, never the birth: his
+#: own birth is governed by v339/v340 and cannot be a group that also names
+#: somebody else. Two named people on one birth group name nothing: that is a
+#: standoff, and it is left to v340's `owner_birth_anchor_ambiguous` rather than
+#: decided here.
+A_BIRTH_BELONGS_TO_THE_PERSON_BORN = (
+    "a birth group naming exactly one non-owner person is that person's birth — "
+    "labelled for them, anchoring their ages, and never the owner's own"
+)
+
+
+def _birth_group_person(group: dict, owner: object) -> str:
+    """The ref of the ONE non-owner person a ``birth`` group names, or ``""``
+    (:data:`A_BIRTH_BELONGS_TO_THE_PERSON_BORN`)."""
+    if collapsed_text(group.get("event_kind")) != "birth":
+        return ""
+    owner_key = normalized_mention_key(owner)
+    refs: list[str] = []
+    for claim in group.get("claims") or ():
+        if not isinstance(claim, dict):
+            continue
+        ref = collapsed_text(claim.get("subject_ref"))
+        if not ref or normalized_mention_key(ref) == owner_key:
+            continue
+        if ref not in refs:
+            refs.append(ref)
+    return refs[0] if len(refs) == 1 else ""
+
+
+#: The three places a person's birth can be written down, most authoritative
+#: first. Named so the diagnostics, the tests and a host can talk about which
+#: one answered without re-deriving the order.
+BIRTH_ANCHOR_TIERS = ("birth_node", "roster_born", "landmark_birth")
+
+
+def _person_key_index(roster_snapshot: object) -> tuple[dict, frozenset]:
+    """``(key -> frozenset(keys), ambiguous keys)`` — who each roster key names.
+
+    One entry per key, mapping to the WHOLE key set of the row that owns it, so
+    a subject that resolved to ``person/harvey`` and a landmark entry that says
+    ``who: "Harvey"`` reach the same person. Keys are the entity ref (both as
+    written and normalised) plus the normalised name, slug and every alias —
+    exactly the set `axis_membership.family_tier_index` keys its tiers by, and a
+    key two rows disagree about is DROPPED rather than decided by file order,
+    which is the roster's own shared-alias rule (`roster_relations
+    .alias_decision`).
+
+    The second return is those dropped keys, and it is load-bearing: the owner's
+    roster holds four people whose names bear the token *James*, so a birth filed
+    under the bare word "James" would hand an unresolved mention the BROTHER's
+    birthday and date somebody else's story with it. That is the v335 shared-name
+    ambiguity, and a birth index is not the place to re-introduce it.
+    """
+    owners: dict[str, int] = {}
+    sets: dict[int, set[str]] = {}
+    for position, row in enumerate(axm.roster_person_rows(roster_snapshot)):
+        slug = (normalized_mention_key(row.get("slug"))
+                or normalized_mention_key(row.get("name"))).replace(" ", "-")
+        keys = set()
+        if slug:
+            ref = ident.entity_ref("person", slug)
+            keys.update({collapsed_text(ref), normalized_mention_key(ref)})
+        for field in ("name", "slug"):
+            keys.add(normalized_mention_key(row.get(field)))
+        for alias in row.get("aliases") or ():
+            keys.add(normalized_mention_key(alias))
+        keys.discard("")
+        sets[position] = keys
+        for key in keys:
+            standing = owners.get(key)
+            if standing is None:
+                owners[key] = position
+            elif standing != position:
+                owners[key] = -1
+    index: dict[str, frozenset] = {}
+    ambiguous = frozenset(key for key, position in owners.items() if position < 0)
+    for key, position in owners.items():
+        if position >= 0:
+            index[key] = frozenset(sets[position]) - ambiguous
+    return index, ambiguous
+
+
+def _subject_birth_keys(subject: object, key_index: dict,
+                        ambiguous: frozenset = frozenset()) -> tuple[str, ...]:
+    """Every key the birth of ``subject`` should be filed under, or found by.
+
+    The subject's own two spellings, plus — when one of them answers to a roster
+    person — that whole person's key set, which is what lets a birth NODE filed
+    under ``person/harvey`` block a weaker ``born`` on the ``harvey`` row from
+    ever being read. A key more than one roster person answers to is never one of
+    them: "James" names four people on the owner's roster and must go on naming
+    none of them.
+    """
+    keys: list[str] = []
+    for candidate in (collapsed_text(subject), normalized_mention_key(subject)):
+        if candidate and candidate not in ambiguous and candidate not in keys:
+            keys.append(candidate)
+    for candidate in tuple(keys):
+        for key in sorted(key_index.get(candidate, ())):
+            if key not in ambiguous and key not in keys:
+                keys.append(key)
+    return tuple(keys)
+
+
+def _births_by_subject(groups: dict, *, roster_snapshot: object,
+                       landmark_entries: object, owner: object) -> dict:
+    """``{key: birth record}`` — whose birth this vault knows, and from where
+    (:data:`AN_AGE_IS_MEASURED_FROM_ITS_OWN_SUBJECT`).
+
+    :data:`BIRTH_ANCHOR_TIERS` in order, and the first tier that answers for a
+    person answers for EVERY key that person goes by — so a tier below can add a
+    birth for somebody nobody has drawn yet and can never contradict one that is
+    already on the page:
+
+    1. a ``birth``-kinded node whose resolved subject is that person, when there
+       is exactly one of them, read at its BEST-SUPPORTED value — which is
+       exactly how the owner's own anchor is read (`_owner_birth`'s seeding
+       block), and v344 is where the two stopped disagreeing. :12 refused a
+       contested birth here and fell through, which on the owner's own vault
+       meant Harvey's birth node — 2021-10-11 stated twice against a single
+       "2020", a live ``contradiction`` card — handed the age arithmetic the
+       LOSING reading off his roster row, silently, while the card that would
+       settle it stayed open. A contradiction is answered by answering it, never
+       by quietly preferring one side of it in a lower tier;
+    2. the roster row's ``born`` — the settled identity fact
+       `entity_verdict --born` files and `entity_roster._SETTLED_IDENTITY_FIELDS`
+       keeps across every refresh;
+    3. a ``family`` or ``children`` landmark entry's own date, when that entry's
+       date really is a birth — the ladder's declaration
+       (`landmark_projection.BIRTH_DATE_SEMANTICS_DOMAINS`) refined by v345's
+       `landmark_projection.entry_date_event_kind`, so a couple's wedding filed
+       under `family` anchors nobody's age.
+
+    The owner's own anchor is not read here: it is `_owner_birth_readings`', and
+    `birth_for_group` asks that question first.
+    """
+    key_index, ambiguous = _person_key_index(roster_snapshot)
+    index: dict[str, object] = {}
+
+    def file(subject: object, record: object) -> None:
+        if record is None:
+            return
+        for key in _subject_birth_keys(subject, key_index, ambiguous):
+            index.setdefault(key, record)
+
+    owner_text = collapsed_text(owner)
+    candidates: dict[str, list[tuple[str, object]]] = {}
+    for group in groups.values():
+        if collapsed_text(group.get("event_kind")) != "birth":
+            continue
+        # The OWNER's own birth is `_owner_birth_readings`' question, and
+        # `birth_for_group` asks it first. Keeping his keys out of this index
+        # altogether is what makes "the owner's birth is never a generic
+        # fallback" structural rather than a matter of lookup order.
+        if collapsed_text(group.get("subject")) == owner_text \
+                or _is_owner_subject(group, owner):
+            continue
+        seeded = _reconcile_group(group, birth=None, diagnostics=[])
+        if seeded["best"] is None:
+            continue
+        subject = collapsed_text(group["subject"])
+        keys = _subject_birth_keys(subject, key_index, ambiguous)
+        if not keys:
+            continue
+        candidates.setdefault(keys[-1], []).append((subject, seeded["best"]))
+    for rows in candidates.values():
+        if len(rows) == 1:
+            file(rows[0][0], rows[0][1])
+
+    owner_key = normalized_mention_key(owner)
+    for row in axm.roster_person_rows(roster_snapshot):
+        slug = (normalized_mention_key(row.get("slug"))
+                or normalized_mention_key(row.get("name"))).replace(" ", "-")
+        if not slug:
+            continue
+        ref = ident.entity_ref("person", slug)
+        if normalized_mention_key(ref) == owner_key:
+            continue
+        file(ref, chrono.from_dict(row.get("born")))
+
+    for entry in landmark_entries or ():
+        if not isinstance(entry, dict):
+            continue
+        domain = collapsed_text(entry.get("domain"))
+        if domain not in lp.BIRTH_DATE_SEMANTICS_DOMAINS:
+            continue
+        record = entry.get("record")
+        if not isinstance(record, dict):
+            continue
+        # v345's one definition of what an ENTRY's date dates, not the domain's
+        # declaration alone (`landmark_projection.A_LANDMARK_IS_DRAWN_AS_WHAT_IT_IS`).
+        # The owner's single `family` entry is his PARENTS at 1976-06-25 — their
+        # wedding — and a couple is never born, so reading the domain's declared
+        # `birth` here would hand every age about his mother an anchor seventeen
+        # years too late. The drawing already refuses to call that node a birth;
+        # this is the same refusal in the age index.
+        if lp.entry_date_event_kind(domain, record) != lp.BIRTH_DATE_SEMANTICS:
+            continue
+        who = collapsed_text(record.get("who")) or collapsed_text(record.get("subject"))
+        if not who or normalized_mention_key(who) == owner_key:
+            continue
+        file(who, chrono.from_dict(record.get("date")))
+
+    return index
+
+
 def _owner_birth_readings(groups: dict, owner: str, *, reads_as_owner) -> list:
     """``[(node_id, group)]`` — every birth group that reads as the owner's own.
 
@@ -1063,6 +1381,22 @@ def _record_for_dated_claim(claim: dict) -> chrono.DateRecord | None:
     if entry and entry not in [dict(p) for p in record.provenance]:
         record = replace(record, provenance=record.provenance + (entry,))
     return record
+
+
+#: v344. The other half of the same release, and the half the owner asked for in
+#: his own words: *"anyone's age is measured from their own birth"*.
+#: :func:`_record_for_age_claim` and `chronology.from_age_band` stay
+#: subject-agnostic — they take a birth and a band and do arithmetic — and the
+#: only thing that changed is WHICH birth a group is handed
+#: (:func:`_births_by_subject`). ``age_without_birth_anchor`` is therefore
+#: reported exactly when no birth for that subject exists anywhere in the vault,
+#: which is what makes it an answerable card instead of a shrug.
+AN_AGE_IS_MEASURED_FROM_ITS_OWN_SUBJECT = (
+    "an age band is measured from the birth of the person it is about: a birth "
+    "node of theirs, else their roster `born`, else their birth in a family or "
+    "children landmark entry — and only with none of the three is the anchor "
+    "honestly missing"
+)
 
 
 def _record_for_age_claim(claim: dict, birth: object) -> tuple[chrono.DateRecord | None, str]:
@@ -1790,7 +2124,7 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
         # undated stay.
         if not stay and _claim_is_empty(claim):
             continue
-        event_kind = collapsed_text(claim.get("event_kind"))
+        event_kind = _read_event_kind(claim, owner_ref=owner_ref)
         subject = _subject_handle(claim)
         if not subject or (not event_kind and not stay):
             continue
@@ -1860,6 +2194,16 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
     for group in groups.values():
         group["claims"].sort(key=lambda row: collapsed_text(row.get("claim_id")))
         group["subjects"].sort()
+        # v344, `A_BIRTH_BELONGS_TO_THE_PERSON_BORN`. AFTER the claims are in
+        # and after every node id has been minted — the id is derived from the
+        # subject the claims arrived with, so re-reading the subject here can
+        # never move a node the vault already points at.
+        born = _birth_group_person(group, owner_ref)
+        if born and collapsed_text(group.get("subject")) != born:
+            group["subject"] = born
+            if born not in group["subjects"]:
+                group["subjects"].append(born)
+                group["subjects"].sort()
     return groups
 
 
@@ -3629,7 +3973,16 @@ def _owner_relevance(group: dict, *, best: object, entry_index: dict, owner: str
         # any candidate is usually the ordinary shape of the owner's own life
         # ("the reunion", "the wedding") — but not when the words themselves
         # name somebody else. `timeline-rules:9`:
-        if _mention_names_another_person(group) is None:
+        if _mention_names_another_person(group) is None \
+                and not _before_birth(best, birth):
+            # v344: and never for a moment WHOLLY BEFORE HIS BIRTH. "The
+            # ordinary shape of the owner's own life" is what this fallback
+            # reads a nameless mention as, and 1955 is not a shape his life has
+            # — his mother's birthday reached it as an unknown name, came out
+            # `owner`/`participated`, and was drawn on his axis as something he
+            # lived twenty-six years before he was born. A pre-birth scene with
+            # no candidate and no entry is somebody else's, which rules 3 and 4
+            # below already say correctly.
             return owner_row
         death = _is_a_death(group)
         if (event_kind == "moment" or death) and not _before_birth(best, birth) \
@@ -4758,32 +5111,25 @@ def derive_calculated_timeline(
                 "node_ids": [node_id for node_id, _ in births],
             })
 
-    birth_candidates_by_subject: dict[str, list[object]] = {}
-    for group in groups.values():
-        if group["event_kind"] != "birth":
-            continue
-        seeded = _reconcile_group(group, birth=None, diagnostics=[])
-        if seeded["best"] is None or seeded["conflict"] >= MATERIAL_CONFLICT:
-            continue
-        birth_candidates_by_subject.setdefault(
-            normalized_mention_key(group["subject"]), []
-        ).append(seeded["best"])
-    births_by_subject = {
-        subject: candidates[0]
-        for subject, candidates in birth_candidates_by_subject.items()
-        if subject and len(candidates) == 1
-    }
+    births_by_subject = _births_by_subject(
+        groups, roster_snapshot=roster_snapshot,
+        landmark_entries=landmark_entries, owner=owner,
+    )
 
     def birth_for_group(group: dict) -> object:
-        subject_key = normalized_mention_key(group["subject"])
+        subject = collapsed_text(group["subject"])
+        subject_key = normalized_mention_key(subject)
         owner_key = normalized_mention_key(owner)
         if subject_key == owner_key or _is_owner_subject(group, owner):
             return owner_birth
-        if subject_key in births_by_subject:
-            return births_by_subject[subject_key]
+        for key in (subject, subject_key):
+            if key in births_by_subject:
+                return births_by_subject[key]
         # The owner's birth is never a generic fallback. An owner-age claim
         # must carry explicit owner identity through subject_ref or an exact
-        # owner-only mention; a named or unbound subject stays unplaced.
+        # owner-only mention; a named or unbound subject with no birth of their
+        # own anywhere in the vault stays unplaced and says so
+        # (``age_without_birth_anchor``).
         return None
 
     def birth_for_claim(group: dict) -> object:
@@ -5433,9 +5779,19 @@ def _node_what(group: dict, display: str) -> str:
 
 
 def _is_owner_subject(group: dict, owner: object) -> bool:
-    """Is this node about the vault's owner — the person reading the question?"""
+    """Is this node about the vault's owner — the person reading the question?
+
+    v344: a BIRTH group that names one other person is that person's birth
+    (:data:`A_BIRTH_BELONGS_TO_THE_PERSON_BORN`), so an owner-only mention on it
+    is the turning point the owner lived and not the subject of the birth. Read
+    through the same one definition the group builder reads, so the title, the
+    contradiction card, the age anchor and the origin floor cannot answer the
+    question four ways.
+    """
     if collapsed_text(group.get("subject")) == collapsed_text(owner):
         return True
+    if _birth_group_person(group, owner):
+        return False
     return any(
         is_owner_reference_only(claim.get("subject_mention"))
         for claim in group.get("claims", ())

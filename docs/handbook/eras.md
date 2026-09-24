@@ -345,8 +345,15 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:14 -->
-`timeline-rules:14` (v345), which made a landmark be drawn as what it IS and a
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:15 -->
+`timeline-rules:15` (v346), which made a dated BIRTHDAY a BIRTH and every age
+band measure from its own subject's birth: `<Name>'s birthday` at day, month or
+year grain is read as that person's `birth` at fold time, a merged birth group
+naming one child is labelled and anchored for the child rather than for the
+owner, `births_by_subject` reads a birth node, then the roster's `born`, then a
+`family`/`children` landmark entry, and a node wholly before the owner's birth
+is `pre_birth` whether or not anybody has said who it is about.
+`timeline-rules:14` (v345) made a landmark be drawn as what it IS and a
 telling of one fold onto it: a `family` entry's date is read as the event the
 ENTRY dates rather than the one the domain declares — so a couple's wedding stops
 being drawn a second time as `<who>'s birth`, and the id it used to be drawn at is
@@ -365,7 +372,7 @@ set is filtered before it is offered, dropping roster alias rows
 owner's own roster row when the mention is the owner's own given name; and a
 bare gerund/participle `{what}` ("Harvey arriving") reads "When was {what}?"
 rather than the ungrammatical "When did {what} happen?".
-`timeline-rules:12` (v342), which made the fold FOLLOW a re-key rather than only
+`timeline-rules:12` (v342) made the fold FOLLOW a re-key rather than only
 publish it: a claim still grouping under an id a bind had aliased away now folds
 into the episode, a bound telling's minted id is published as an alias too, and
 no node is drawn at an id `node_aliases` redirects — so a merged node keeps its

@@ -856,8 +856,11 @@ class TheRulesAreNamedTests(unittest.TestCase):
 
     def test_the_rule_version_moved(self):
         """The same claims calculate to a different node set, a different
-        alternates set and a different work-item set."""
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:14")
+        alternates set and a different work-item set. v345 took
+        ``timeline-rules:14``; the assertion pins whatever the LIVE value is,
+        because the number is a monotonic marker that the rules moved and later
+        releases move it again — v346 took ``:15`` the same day."""
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:15")
 
     def test_the_binder_exports_its_new_tables(self):
         for name in ("A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT",

@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -403,6 +404,360 @@ def located_in(child_ref: object, parent_ref: object, snapshot: object) -> dict:
         raise RosterRelationError(f"unknown place: {child!r}")
     snap = snapshot if isinstance(snapshot, dict) else {"entities": []}
     return {**snap, "entities": updated}
+
+
+# --------------------------------------------------------------------------
+# v344 — the person a relationship phrase INTRODUCES
+# --------------------------------------------------------------------------
+#
+# WHERE IT WAS SEEN. The owner filed "Desiree Taylor (Dave's mom, also called
+# Desi) — birthday June 19, 1955." on 2026-09-14. The classifier read the date
+# perfectly and the roster never heard of her: its thirteen person rows held a
+# COLLECTIVE `parents` ("Mom and Dad (parents)") and no mother. So "Desiree
+# Taylor", "Desi", "Mom" and "mother" answered to nobody, his mother's birthday
+# anchored nothing, and "Mom married dad at 21" stayed unplaced with her
+# birthday sitting in the same vault.
+#
+# THE RULE. A source that introduces a named person with a RELATIONSHIP PHRASE
+# — "Dave's mom", "my mother", "(wife)", "(brother)" — has said who that person
+# is, and a person the vault has been told about EXISTS. The phrase is the
+# owner's own words, so the relationship it states is filed as a roster
+# relationship through the one writer that already creates rows this way
+# (`entity_verdict.apply_verdict(..., ensure=True)`, `source: "landmark:family"`
+# — the door `james` and `anthon-james-taylor` came through), never by editing
+# the file. Everything here is PURE: claims and a roster snapshot in, rows out;
+# the caller decides whether to file them.
+
+#: The one statement of the rule, quoted by the seats that apply it.
+A_RELATIONSHIP_PHRASE_INTRODUCES_A_PERSON = (
+    "a named subject the roster has never heard of, introduced in its own "
+    "source by a relationship phrase the owner used, is a person with that "
+    "relationship — one roster row, through the roster's own writer"
+)
+
+#: Determiners a relationship phrase may be possessed by, besides an owner
+#: spelling. "my mom" and "our mother" are the owner speaking.
+INTRODUCTION_POSSESSIVES = ("my", "our")
+
+#: An in-law is never the relation its phrase is built out of, so the row it
+#: makes carries ``other`` — `axis_membership.DISTANT_RELATIONSHIPS`' own
+#: bucket for exactly this case. Read from that module so there is one
+#: definition of "this phrase says in-law".
+FALLBACK_RELATIONSHIP = "other"
+
+
+def roster_relationship_for(word: object) -> str:
+    """The roster ``relationship`` a mention's relationship WORD states.
+
+    Derived, never re-typed: `identity_resolution.RELATIONSHIP_MENTION_WORDS`
+    already maps each word to the roster values that satisfy it, and
+    `focus_candidate.FOCUS_RELATIONSHIPS` is the roster's own closed
+    vocabulary. The answer is the first member of that vocabulary the word's set
+    contains — so ``mother`` -> ``parent``, ``wife`` -> ``spouse`` (``spouse``
+    precedes ``partner`` in the vocabulary), ``brother`` -> ``sibling`` — and
+    :data:`FALLBACK_RELATIONSHIP` for a word the vocabulary has no seat for
+    (``uncle``, ``aunt``, ``cousin``), which is where the owner's ruling puts
+    them anyway.
+    """
+    from focus_candidate import FOCUS_RELATIONSHIPS  # noqa: PLC0415
+
+    wanted = ir.RELATIONSHIP_MENTION_WORDS.get(
+        ir.normalized_mention_key(word), frozenset()
+    )
+    if not wanted:
+        return ""
+    return next((value for value in FOCUS_RELATIONSHIPS if value in wanted),
+                FALLBACK_RELATIONSHIP)
+
+
+def relationship_aliases(word: object) -> tuple[str, ...]:
+    """The mention spellings a person introduced by ``word`` also answers to.
+
+    Every word in `identity_resolution.RELATIONSHIP_MENTION_WORDS` that
+    satisfies EXACTLY the same roster values as ``word``, plus its ``my …``
+    form — so "mom" brings "mother" (both satisfy ``{parent, mother}``) and
+    never "dad" (``{parent, father}``), which is the whole reason the test is
+    set EQUALITY and not "maps to the same relationship". "wife" brings only
+    itself, because "husband" and "spouse" satisfy different sets. No second
+    list of synonyms exists anywhere. Deterministic order.
+
+    These are CANDIDATE aliases. :func:`alias_decision` is what decides whether
+    each one may actually bind, and its shared-alias refusal is what keeps this
+    from re-introducing the v335 ambiguity: a word two people already answer to
+    binds to neither.
+    """
+    key = ir.normalized_mention_key(word)
+    wanted = ir.RELATIONSHIP_MENTION_WORDS.get(key)
+    if wanted is None:
+        base = [key] if key else []
+    else:
+        base = sorted(
+            other for other, values in ir.RELATIONSHIP_MENTION_WORDS.items()
+            if values == wanted
+        )
+    out: list[str] = []
+    for spelling in base:
+        for form in (spelling, f"my {spelling}"):
+            if form not in out:
+                out.append(form)
+    return tuple(out)
+
+
+_NICKNAME_RE = re.compile(r"^[A-Z][\w'’.-]*(?:\s+[A-Z][\w'’.-]*)?$")
+
+
+def _parentheticals(text: str) -> list[str]:
+    return [body.strip() for body in re.findall(r"\(([^)]*)\)", text)]
+
+
+def introduced_name(mention: object) -> tuple[str, tuple[str, ...]]:
+    """``(name, nicknames)`` for a subject mention, or ``("", ())``.
+
+    ``"Desiree Taylor (Desi)"`` -> ``("Desiree Taylor", ("Desi",))``. The name
+    is the mention with its parentheticals removed; a parenthetical that reads
+    as a short name of its own — one or two capitalised words, and not a
+    relationship phrase — is a nickname. A mention with no NAME TOKEN at all
+    ("mother", "my mom") names nobody this rule can file, which is exactly
+    right: it is the thing the introduction is supposed to give a name to.
+    """
+    body = collapsed_text_of(mention)
+    if not body:
+        return "", ()
+    nicknames: list[str] = []
+    for inner in _parentheticals(body):
+        names, relations = ir.mention_tokens(inner)
+        if names and not relations and _NICKNAME_RE.match(inner):
+            nicknames.append(inner)
+    name = collapsed_text_of(re.sub(r"\([^)]*\)", " ", body))
+    names, _ = ir.mention_tokens(name)
+    if not names:
+        return "", ()
+    return name, tuple(nicknames)
+
+
+def collapsed_text_of(value: object) -> str:
+    """One space between words, nothing at the ends. The same normalisation
+    every other reader of a mention uses, spelled through
+    `identity_resolution` so this module keeps no second copy."""
+    return " ".join(str(value or "").split())
+
+
+def relationship_phrase(name: str, texts: object, *, owner_names: object = ()) -> str:
+    """The relationship WORD a text introduces ``name`` with, or ``""``.
+
+    Three shapes, all anchored on the name itself so a relation word loose
+    elsewhere in the sentence never reaches it:
+
+    * ``<Name> (…<possessive> <word>…`` / ``<Name>, <possessive> <word>`` —
+      "Desiree Taylor (Dave's mom, also called Desi)", "Desiree Taylor, my
+      mother". The possessive is ``my``/``our`` or an OWNER spelling's
+      possessive, because "Katie's mom" is not the owner's mother;
+    * ``<Name> (<word>)`` — "Katie Taylor (wife)", "A.J. (brother)", the
+      household-roster shape, where the bracket itself is the apposition;
+    * ``<possessive> <word> <Name>`` — "my mother Desiree Taylor".
+
+    An in-law phrase ("my mother-in-law Ruth") returns the WORD it is built out
+    of; :func:`roster_relationship_for` is not what decides that case —
+    :func:`relationship_introduction` is, and it files ``other``.
+    """
+    if not name:
+        return ""
+    words = "|".join(
+        re.escape(word) for word in sorted(ir.RELATIONSHIP_MENTION_WORDS, key=len,
+                                           reverse=True)
+    )
+    possessives = [re.escape(word) for word in INTRODUCTION_POSSESSIVES]
+    for spelling in owner_names or ():
+        body = collapsed_text_of(spelling)
+        if body:
+            possessives.append(re.escape(body) + r"['’]s")
+    possessive = "(?:" + "|".join(possessives) + r")\s+"
+    anchor = re.escape(name)
+    # An IN-LAW suffix is allowed to trail the word and is NOT stripped from the
+    # reading: "my mother-in-law Ruth" introduces Ruth, and it is
+    # :func:`relationship_introduction` — reading `axis_membership.IN_LAW_RE` over
+    # the same text — that decides she is not the owner's mother.
+    in_law = r"(?:[-\s]?in[-\s]?laws?)?"
+    patterns = (
+        rf"(?<!\w){anchor}\s*[(,]\s*(?:{possessive})?(?P<word>{words}){in_law}(?!\w)",
+        rf"(?<!\w){possessive}(?P<word>{words}){in_law}\s+{anchor}(?!\w)",
+    )
+    for text in texts or ():
+        body = collapsed_text_of(text)
+        if not body:
+            continue
+        for pattern in patterns:
+            match = re.search(pattern, body, re.IGNORECASE)
+            if match is not None:
+                return match.group("word").casefold()
+    return ""
+
+
+def relationship_introduction(mention: object, texts: object, *,
+                              owner_names: object = ()) -> dict | None:
+    """One introduced person, or ``None``
+    (:data:`A_RELATIONSHIP_PHRASE_INTRODUCES_A_PERSON`).
+
+    ``{"name", "slug", "relationship", "relationship_word", "aliases"}``. The
+    aliases are the mention as written, any nickname it carries and the
+    relationship spellings the phrase licenses — the exact set that has to bind
+    for "Desi", "Mom" and "mother" to reach her — and each of them still goes
+    through :func:`alias_decision`'s collision refusal at filing.
+
+    An IN-LAW phrase files ``other``, whatever relation word it is built out of:
+    "mother-in-law" contains "mother" and is not the owner's mother
+    (`axis_membership.IN_LAW_RE`, the one definition of that reading).
+    """
+    import axis_membership as axm  # noqa: PLC0415
+
+    name, nicknames = introduced_name(mention)
+    if not name or ir.normalized_mention_key(mention) in ir.OWNER_SUBJECT_MENTIONS:
+        return None
+    word = relationship_phrase(name, texts, owner_names=owner_names)
+    if not word:
+        return None
+    in_law = any(axm.IN_LAW_RE.search(collapsed_text_of(text)) for text in texts or ())
+    relationship = FALLBACK_RELATIONSHIP if in_law else roster_relationship_for(word)
+    if not relationship:
+        return None
+    slug = ir.normalized_mention_key(name).replace(" ", "-")
+    if not slug:
+        return None
+    aliases: list[str] = []
+    for alias in (collapsed_text_of(mention), *nicknames,
+                  *(() if in_law else relationship_aliases(word))):
+        if alias and alias != name and alias not in aliases:
+            aliases.append(alias)
+    return {
+        "name": name,
+        "slug": slug,
+        "relationship": relationship,
+        "relationship_word": word,
+        "aliases": tuple(aliases),
+    }
+
+
+def relationship_introductions(claims: object, *, roster: object = (),
+                               owner_names: object = ()) -> tuple[dict, ...]:
+    """Every person the CLAIM SUBSTRATE introduces and the roster lacks.
+
+    One row per subject mention, in mention-key order so two runs file the same
+    rows in the same order. The texts a mention is read against are its OWN
+    source's — every ``event_mention``, evidence quote and subject mention of
+    the claims citing that ``source_id`` — which is what "introduced with a
+    relationship phrase IN THE SAME SOURCE" means, and why a relation word in
+    an unrelated answer cannot name somebody.
+
+    A mention that already carries a ``subject_ref``, or that any roster row
+    already answers to, is skipped: this rule creates the row nobody has
+    written, and never re-decides one somebody has. A ``born`` date rides along
+    when the introducing source also states that person's BIRTHDAY
+    (`landmark_projection.birth_event_subject`), because it is the same
+    sentence and the roster's ``born`` is the second tier the age arithmetic
+    reads.
+    """
+    import chronology as chrono  # noqa: PLC0415
+    import landmark_projection as lp  # noqa: PLC0415
+
+    rows = [claim for claim in claims or () if isinstance(claim, dict)]
+    by_source: dict[str, list[dict]] = {}
+    for claim in rows:
+        ref = claim.get("source_ref")
+        source_id = collapsed_text_of(ref.get("source_id")) if isinstance(ref, dict) else ""
+        by_source.setdefault(source_id, []).append(claim)
+
+    index = None
+    try:
+        index = ir.roster_index(roster, entity_type="person")
+    except Exception:  # noqa: BLE001  — a roster we cannot read knows nobody
+        index = None
+
+    def known(mention: str) -> bool:
+        if index is None:
+            return False
+        key = ir.normalized_mention_key(mention)
+        return bool(index.by_name_key.get(key) or index.by_alias_key.get(key)
+                    or index.has_ref(collapsed_text_of(mention)))
+
+    out: dict[str, dict] = {}
+    for source_id, group in sorted(by_source.items()):
+        texts: list[str] = []
+        for claim in group:
+            for value in (claim.get("event_mention"), claim.get("subject_mention")):
+                body = collapsed_text_of(value)
+                if body and body not in texts:
+                    texts.append(body)
+            for item in claim.get("evidence") or ():
+                body = collapsed_text_of(item.get("quote")) if isinstance(item, dict) else ""
+                if body and body not in texts:
+                    texts.append(body)
+        for claim in group:
+            if collapsed_text_of(claim.get("subject_ref")):
+                continue
+            mention = collapsed_text_of(claim.get("subject_mention"))
+            key = ir.normalized_mention_key(mention)
+            if not key or key in out or known(mention):
+                continue
+            row = relationship_introduction(mention, texts, owner_names=owner_names)
+            if row is None:
+                continue
+            row = {**row, "source_id": source_id, "mention": mention}
+            born = _introduced_birth(row["name"], group, chrono=chrono, lp=lp)
+            if born is not None:
+                row["born"], row["born_basis"] = born
+            out[key] = row
+    return _without_contested_aliases(tuple(out[key] for key in sorted(out)))
+
+
+def _without_contested_aliases(rows: tuple) -> tuple[dict, ...]:
+    """The v335 rule applied to the BATCH, before anything is written.
+
+    Two people introduced by the same relationship word — the owner's vault
+    names his father twice, as "James Taylor (Dad)" and as "James Edwin Taylor
+    Sr." — both claim "dad". Filing them one at a time would give the alias to
+    whichever row went first, which is an identity decided by file order; and
+    :func:`alias_decision` refusing the second would leave the first holding it
+    alone, which is the same defect wearing a refusal. So an alias more than one
+    row claims is dropped from EVERY row: two people answering to one word bind
+    to neither, which is the roster's own shared-alias rule stated over the whole
+    set at once. Each row keeps its own name and nicknames, which nobody
+    contests.
+    """
+    census: dict[str, int] = {}
+    for row in rows:
+        for alias in row.get("aliases") or ():
+            key = ir.normalized_mention_key(alias)
+            census[key] = census.get(key, 0) + 1
+    out = []
+    for row in rows:
+        kept = tuple(alias for alias in row.get("aliases") or ()
+                     if census.get(ir.normalized_mention_key(alias), 0) == 1)
+        contested = tuple(alias for alias in row.get("aliases") or ()
+                          if alias not in kept)
+        row = {**row, "aliases": kept}
+        if contested:
+            row["contested_aliases"] = contested
+        out.append(row)
+    return tuple(out)
+
+
+def _introduced_birth(name: str, claims: object, *, chrono, lp) -> tuple | None:
+    """``(edtf, basis)`` when one of these claims states THIS person's birthday.
+
+    The date claim is read through the same `landmark_projection` reading the
+    fold uses, so the roster's ``born`` and the timeline's birth node can never
+    come from two different opinions about which sentence is a birthday.
+    """
+    wanted = ir.normalized_mention_key(name)
+    for claim in claims or ():
+        subject = lp.birth_event_subject(claim.get("event_mention"))
+        if not subject or ir.normalized_mention_key(subject) != wanted:
+            continue
+        record = chrono.from_dict(claim.get("temporal_value"))
+        if record is None or record.granularity not in ("day", "month", "year"):
+            continue
+        return record.best, (record.basis or "stated")
+    return None
 
 
 def located_in_chain(place_ref: object, snapshot: object, *,

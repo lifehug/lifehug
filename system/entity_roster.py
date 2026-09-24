@@ -824,6 +824,69 @@ def load_roster(entity_type: str = "person", *, vault_root: object = None) -> di
     return {"version": 1, "type": entity_type, "entities": []}
 
 
+# --------------------------------------------------------------------------
+# v344 — the person a relationship phrase introduced gets a row
+# --------------------------------------------------------------------------
+
+
+def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
+    """File a roster row for every person the claim substrate INTRODUCES.
+
+    `roster_relations.relationship_introductions` is the whole rule
+    (:data:`roster_relations.A_RELATIONSHIP_PHRASE_INTRODUCES_A_PERSON`) and
+    this is the one seat that writes it — through
+    `entity_verdict.apply_verdict(..., ensure=True)`, the door the `james` and
+    `anthon-james-taylor` rows already came through (`source:
+    "landmark:family"`), one atomic per-row roster write each and never a
+    rewrite of the file. Verdict ``clear``, because this asserts an IDENTITY and
+    not a page verdict — exactly `general_listener.person_invocations`' reading
+    of the same seam.
+
+    Idempotent twice over: a name already on the roster is never an
+    introduction at all, and a second run of the same batch finds the row and
+    unions nothing new. An alias an EXISTING row already answers to is dropped
+    and reported rather than stolen, which is `roster_relations.alias_decision`'s
+    refusal read before the write instead of after it.
+
+    ``{"introduced": [...], "filed": n, "skipped_aliases": [...]}``.
+    """
+    import entity_verdict  # noqa: PLC0415
+    import temporal_publication as pub  # noqa: PLC0415
+    import temporal_store as store  # noqa: PLC0415
+    from lifehug_core import REPO_DIR  # noqa: PLC0415
+
+    roster, owner_names = pub.owner_identity_inputs(REPO_DIR)
+    claims = store.active_claims(store.read_active_index(REPO_DIR))
+    rows = roster_relations.relationship_introductions(
+        claims, roster=roster, owner_names=owner_names
+    )
+    skipped: list[dict] = []
+    filed = 0
+    for row in rows:
+        aliases = []
+        for alias in row.get("aliases") or ():
+            taken = [entity for entity in roster_relations.find_by_alias(roster, alias)
+                     if entity.get("slug") != row["slug"]]
+            if taken:
+                skipped.append({"slug": row["slug"], "alias": alias,
+                                "taken_by": [e.get("slug") for e in taken]})
+                continue
+            aliases.append(alias)
+        if dry_run:
+            continue
+        entity_verdict.apply_verdict(
+            "person", row["slug"], "clear",
+            aliases=aliases,
+            relationship=row["relationship"],
+            born=row.get("born"),
+            born_basis=row.get("born_basis"),
+            ensure=True,
+            name=row["name"],
+        )
+        filed += 1
+    return {"introduced": list(rows), "filed": filed, "skipped_aliases": skipped}
+
+
 def _thresholds(entity_type: str, args) -> tuple[float, int]:
     cfg = load_config()
     dscore, dans = THRESHOLDS.get(entity_type, (8.0, 2))
@@ -846,8 +909,32 @@ def main() -> int:
     parser.add_argument("--model", default=None)
     parser.add_argument("--force-empty", action="store_true",
                         help="Allow an empty object roster to overwrite an existing one.")
+    parser.add_argument("--ensure-introduced", action="store_true",
+                        help="File a person row for everybody the claim substrate "
+                             "introduces with a relationship phrase (v344). "
+                             "Deterministic, additive, idempotent — no AI.")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="With --ensure-introduced: report the rows, write nothing.")
     args = parser.parse_args()
     t = args.type
+
+    if args.ensure_introduced:
+        result = ensure_introduced_relatives(dry_run=args.dry_run)
+        verb = "would file" if args.dry_run else "filed"
+        print(f"✓ relationship introductions: {verb} "
+              f"{len(result['introduced']) if args.dry_run else result['filed']} "
+              f"person row(s)")
+        for row in result["introduced"]:
+            aliases = ", ".join(row.get("aliases") or ()) or "—"
+            born = f", born {row['born']}" if row.get("born") else ""
+            print(f"  {row['slug']}: {row['name']} — {row['relationship']} "
+                  f"(from “{row['relationship_word']}”{born}); aliases: {aliases}")
+            for alias in row.get("contested_aliases") or ():
+                print(f"    ↯ “{alias}” names more than one introduced person — bound to neither")
+        for row in result["skipped_aliases"]:
+            print(f"    ↯ “{row['alias']}” already answers to "
+                  f"{', '.join(row['taken_by'])} — left alone")
+        return 0
 
     if args.show:
         print(json.dumps(load_roster(t), indent=2, ensure_ascii=False))
