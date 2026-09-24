@@ -345,7 +345,12 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:11 -->
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:12 -->
+`timeline-rules:12` (v342), which made the fold FOLLOW a re-key rather than only
+publish it: a claim still grouping under an id a bind had aliased away now folds
+into the episode, a bound telling's minted id is published as an alias too, and
+no node is drawn at an id `node_aliases` redirects — so a merged node keeps its
+date instead of leaving an undated twin behind with the card re-minted.
 `timeline-rules:11` (v338). `timeline-rules:10` (v334, the owner ruling of
 2026-09-23) made every node publish `axis_membership`/`axis_membership_reason`
 and gated the frame memberships on that field: an immediate family member's own

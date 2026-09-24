@@ -111,6 +111,26 @@ telling (Law 5) and `episode_aliases()` derives the absorbed-id table from the
 operations' own `aliases_created`, so the table cannot drift from the act that
 created it.
 
+**Amendment (v342): the alias is FOLLOWED, and a minted key is a former key
+too.** C3 derives its rows from each claim's own `event_ref`, which is the only
+former id a pure decision over claims can see, and I0 noted that a telling with
+no key of its own "contributes no row, and that absence is not a gap". That is
+true of a vault drawn once and false of one drawn twice: the fold MINTED an id
+for such a telling, published it, and the vault's work items, sessions and URLs
+point at it. And an alias was published without ever being followed — the
+identity layer binds a TELLING, `temporal_timeline` groups a CLAIM, and a claim
+of a whole-message telling no rung can bind kept grouping under an id an
+episode had already aliased away. So `episode_fold.EpisodeIdentity.plan_carries`
+decides both over the whole claim set at once
+(`AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES`): a bound claim's minted
+key is published as an alias, a leftover claim under a re-keyed id follows it,
+and a leftover whose own date CONTRADICTS the merge does not — an
+undiscriminated id is a bucket, not a fact, and un-bucketing it is what a bind
+is for. A key some claim still holds is reported `identity_node_alias_contested`
+and dropped from the table, because a redirect to one of the two things an id
+means is worse than no redirect. The invariant, checkable in one line: no key of
+`node_aliases` is the id of a node the drawing publishes.
+
 ### Entailment (§2.2)
 
 `entailed_not_same()` computes `same(A,E) ∧ not_same(B,E) ⇒ not_same(A,B)` and

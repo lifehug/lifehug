@@ -2508,15 +2508,12 @@ class ExactLink:
 def _dates_agree(left: object, right: object) -> bool:
     """Do two tellings' bounds leave any date they could BOTH be?
 
-    An undated side agrees with everything — it is the whole reason these
-    rungs exist, since the unplaced retelling is the one asking for a date.
-    Two dated sides must intersect: `chronology.intersect` returns ``None``
-    for disjoint inputs, and disjoint bounds are a contradiction no
-    deterministic rung may bind through.
+    `chronology.dates_agree` is the one definition (v342), read here under the
+    rungs' own name because every rung below asks the question in these words.
+    An undated side agrees with everything — it is the whole reason these rungs
+    exist, since the unplaced retelling is the one asking for a date.
     """
-    if left is None or right is None:
-        return True
-    return chrono.intersect(left, right) is not None
+    return chrono.dates_agree(left, right)
 
 
 def _placements_agree(left: "TellingView", right: "TellingView") -> bool:

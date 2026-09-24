@@ -1277,6 +1277,24 @@ def intersect(*records: object) -> DateRecord | None:
                       confidence=confidence, basis=basis, anchors=anchors, provenance=provenance)
 
 
+def dates_agree(left: object, right: object) -> bool:
+    """Do two readings leave any date they could BOTH be?
+
+    An ABSENT side agrees with everything — an undated telling is the one asking
+    for a date, and caution is not a contradiction. Two dated sides must
+    intersect: :func:`intersect` returns ``None`` for disjoint inputs, and
+    disjoint bounds are a contradiction no deterministic rung, and no re-key,
+    may pass through (`episode_binder.A_MERGE_NEVER_MOVES_A_DATED_MOMENT`).
+
+    One definition, three readers (v342): the binder's rungs, the binder's
+    placed-window half, and the fold's own carry. The first two used to hold a
+    private copy of this arithmetic and the third would have been the fourth.
+    """
+    if left is None or right is None:
+        return True
+    return intersect(left, right) is not None
+
+
 #: What an ABSENT bound means to the interval arithmetic below. An interval
 #: with no ``earliest`` reaches back forever; one with no ``latest`` runs past
 #: today ("May 2022 – present"). Spelled as ordinals rather than as ``None``
