@@ -2547,6 +2547,11 @@ def cmd_focus_merge(args: argparse.Namespace) -> int:
 
 def cmd_entity_roster(args: argparse.Namespace) -> int:
     flags = ["--type", args.type]
+    if getattr(args, "ensure_introduced", False):
+        flags.append("--ensure-introduced")
+        if getattr(args, "dry_run", False):
+            flags.append("--dry-run")
+        return run_python("entity_roster.py", flags)
     if args.emit_task:
         flags.extend(["--emit-task", args.emit_task])
     elif args.from_response:
@@ -3346,6 +3351,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", help="Override AI model")
     p.add_argument("--force-empty", action="store_true",
                    help="Allow an empty object roster to overwrite an existing one")
+    p.add_argument("--ensure-introduced", action="store_true",
+                   help="File a person row for everybody a source introduces with a "
+                        "relationship phrase — \"Dave's mom\", \"(wife)\" (v344). "
+                        "Deterministic and additive; no AI, no roster rewrite")
+    p.add_argument("--dry-run", action="store_true",
+                   help="With --ensure-introduced: report the rows, write nothing")
     p.set_defaults(func=cmd_entity_roster)
 
     p = sub.add_parser("entity-verdict",

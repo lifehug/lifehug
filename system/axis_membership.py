@@ -328,19 +328,29 @@ def axis_membership(*, occurrence_subject_scope: object,
 
     Pure, total, and ordered exactly as the owner stated it:
 
-    * his own occurrence, or a relation the evidence rules already put on the
-      axis (`temporal_projection.AXIS_RELATIONS`) — ``owner`` / ``lived``.
-      Rule 1, unchanged. An OWNER-subject occurrence before his own birth stays
-      ``owner``: that is a contradiction Mirror owns (``life_view:
-      contradictory``), not family history, and rule 4 is about other people's
-      events;
+    * his OWN occurrence — ``occurrence_subject_scope: "owner"``, identity
+      landed on him — ``owner`` / ``lived``. Rule 1, and it outranks everything
+      including rule 4: an owner-subject occurrence before his own birth stays
+      ``owner``, because that is a contradiction Mirror owns (``life_view:
+      contradictory``) and rule 4 is about other people's events;
+    * wholly before his birth — ``none`` / ``pre_birth``. Rule 4, which is
+      v324's own pre-birth rule under a name. **v344 moved it above the two
+      clauses below**, so it now outranks an evidence RELATION and an
+      unidentified subject alike: the owner's mother's birthday, 1955-06-19,
+      reached `axis_membership` with ``owner_timeline_relation:
+      "participated"`` — the zero-candidate fallback's reading of a name the
+      roster had never heard of — and was drawn on his axis as something he
+      lived, twenty-six years before he was born. Nothing about a subject
+      nobody has identified can make 1955 part of his life, which is why this
+      clause does not wait for identity to land;
     * identity has not landed — ``none`` / ``subject_unresolved``. The fifth
       reason, and the honest one: no tier can be read for a subject nobody has
       identified, and §2.6 is explicit that an unresolved subject is never
       ``self`` by default. It is not rule 3: nothing has been decided against
       this node, and the identity question stays open;
-    * wholly before his birth — ``none`` / ``pre_birth``. Rule 4, which is
-      v324's own pre-birth rule under a name;
+    * a relation the evidence rules already put on the axis
+      (`temporal_projection.AXIS_RELATIONS`) — ``owner`` / ``lived``. Rule 1's
+      other half: what he lived is his, whoever else it is about;
     * immediate family — ``family`` / ``immediate_family_in_lifetime``. Rule 2.
       ``family`` means DRAWN ON HIS AXIS, as a moment about them;
     * affirmatively somebody ELSE — a relationship that is KNOWN and outside
@@ -360,12 +370,14 @@ def axis_membership(*, occurrence_subject_scope: object,
     """
     scope = collapsed_text(occurrence_subject_scope)
     relation = collapsed_text(owner_timeline_relation)
-    if scope == "owner" or relation in tp.AXIS_RELATIONS:
+    if scope == "owner":
         return _row(tp.AXIS_MEMBERSHIP_OWNER, tp.AXIS_REASON_LIVED)
-    if scope == "unresolved" or relation == "unresolved":
-        return _row(tp.AXIS_MEMBERSHIP_NONE, tp.AXIS_REASON_SUBJECT_UNRESOLVED)
     if before_owner_birth:
         return _row(tp.AXIS_MEMBERSHIP_NONE, tp.AXIS_REASON_PRE_BIRTH)
+    if scope == "unresolved" or relation == "unresolved":
+        return _row(tp.AXIS_MEMBERSHIP_NONE, tp.AXIS_REASON_SUBJECT_UNRESOLVED)
+    if relation in tp.AXIS_RELATIONS:
+        return _row(tp.AXIS_MEMBERSHIP_OWNER, tp.AXIS_REASON_LIVED)
     tier = collapsed_text(family_tier)
     if tier == IMMEDIATE_FAMILY_TIER:
         return _row(tp.AXIS_MEMBERSHIP_FAMILY, tp.AXIS_REASON_IMMEDIATE_FAMILY)

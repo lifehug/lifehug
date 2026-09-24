@@ -494,6 +494,104 @@ def names_a_birth(text: object) -> str:
     return ""
 
 
+# v344 — a dated birthday of a named person IS that person's birth
+# --------------------------------------------------------------------------
+#
+# The owner filed his mother's birthday as a manual source on 2026-09-14 and
+# the classifier read it exactly right: a `date` claim, 1955-06-19,
+# certain/stated, `event_mention: "Desiree Taylor's birthday"`. What it could
+# not say is WHAT KIND of event a birthday is, so the claim came out
+# `event_kind: "moment"` — and `temporal_timeline`'s births are read off
+# birth-KINDED nodes, so the one fact that anchors every age his mother is ever
+# given was invisible to the arithmetic that needed it.
+#
+# THE RULE, and it belongs beside :data:`BIRTH_DOMAIN_WORDS` because it is the
+# same vocabulary asked a different question. `is_birth_domain_word` asks *does
+# this text name the domain instead of a person?*; :func:`birth_event_subject`
+# asks *does this text name a PERSON'S birth?* — the possessive shape the
+# domain words take when a name is in front of them. One set of nouns, two
+# predicates, no third list.
+
+#: The birth domain's own nouns, in the shape an event mention trails them in:
+#: ``Desiree Taylor's birthday``, ``Harvey's birth date``, ``Katie was born``.
+#: A SUBSET of :data:`BIRTH_DOMAIN_WORDS` — every member is one of those words
+#: — and a test pins the containment, so this can never drift into a second
+#: vocabulary. ``my birthday`` and the other owner-possessive spellings are
+#: deliberately absent: they name the owner, whose birth v339/v340 govern.
+BIRTH_EVENT_NOUNS = frozenset({
+    "birth",
+    "birthday",
+    "birthdate",
+    "birth date",
+    "birth day",
+    "date of birth",
+    "born",
+})
+
+#: ``<Name>'s <noun>`` and ``<Name> was born`` / ``<Name> born``. The name is
+#: whatever precedes the possessive, matched lazily so the LAST possessive wins
+#: ("my brother James's birthday" names "my brother James"), and the noun is
+#: compared whole against :data:`BIRTH_EVENT_NOUNS` rather than spelled into
+#: the pattern, so the set stays the one definition.
+_BIRTH_EVENT_RE = re.compile(
+    r"^(?P<name>.*\S)(?:['’]s|s['’])\s+(?P<noun>[A-Za-z][A-Za-z ]*)$"
+)
+#: The verbal shape, and it REQUIRES the verb: ``Katie was born`` names Katie's
+#: birth, while ``Mary Born`` is a person called Mary Born and names no event at
+#: all — which is v341's own ruling about that exact string, kept.
+_BIRTH_BORN_RE = re.compile(
+    r"^(?P<name>.*?\S)\s+(?:was|is|were)\s+born$", re.IGNORECASE
+)
+
+
+def birth_event_subject(text: object) -> str:
+    """The NAME whose birth ``text`` is, or ``""`` — whole-token, deterministic.
+
+    ``"Desiree Taylor's birthday"`` -> ``"Desiree Taylor"``.
+    ``"Harvey's birth date"`` -> ``"Harvey"``. ``"Katie was born"`` ->
+    ``"Katie"``. ``"birthday"``, ``"my birthday"``, ``"Bornstein"`` and
+    ``"Mary Born"`` -> ``""`` — the first two name the domain
+    (:func:`is_birth_domain_word`), and the last two are names that merely
+    contain one of its words, which is v341's ruling kept intact.
+
+    Never a substring search. The noun must be the WHOLE tail of the mention
+    after the possessive, so ``"Desiree's birthday cake"`` names no birth; the
+    bare verbal form needs its verb, so ``"Mary Born"`` names none either; and
+    the name must not itself be one of the domain's own words, so
+    ``"the birth's date"`` names nobody.
+    """
+    body = collapsed_text(text).translate(_BIRTH_WORD_APOSTROPHES)
+    if not body or is_birth_domain_word(body):
+        return ""
+    match = _BIRTH_EVENT_RE.match(body)
+    if match is not None:
+        noun = " ".join(match.group("noun").casefold().split())
+        if noun not in BIRTH_EVENT_NOUNS:
+            return ""
+        name = collapsed_text(match.group("name"))
+        return "" if is_birth_domain_word(name) else name
+    match = _BIRTH_BORN_RE.match(body)
+    if match is None:
+        return ""
+    name = collapsed_text(match.group("name"))
+    return "" if not name or is_birth_domain_word(name) else name
+
+
+#: The landmark domains whose ladder declares ``date_semantics: ["birth"]`` for
+#: somebody OTHER than the owner — `family` (a sibling's or parent's birth year)
+#: and `children` (a child's). Named here because the fold is a pure function of
+#: its arguments and cannot read `interactions/landmarks/questions.yaml`; a
+#: parity test derives the same pair from that file, so a ladder that changes
+#: its semantics fails the build instead of silently teaching the age
+#: arithmetic to read a wedding as a birthday. `birth` itself is absent: that
+#: domain is the OWNER's own birthday (v339).
+BIRTH_DATE_SEMANTICS_DOMAINS = ("children", "family")
+
+#: What a ladder row's ``date_semantics`` says when its date is a birth. The
+#: parity test reads this key rather than re-typing the word.
+BIRTH_DATE_SEMANTICS = "birth"
+
+
 #: How far a ``birth`` record's year may sit from the year the owner STATED
 #: and still be read as a correction of it rather than a different person's
 #: birth. Fifteen years is under the shortest plausible generation gap and

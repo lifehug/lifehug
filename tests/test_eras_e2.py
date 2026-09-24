@@ -699,12 +699,32 @@ class OwnerRelevanceTests(VaultTestCase):
     def test_negative_under_the_old_default_mom_was_the_owner(self) -> None:
         """Seen failing first: strip the words out of the mention and the same
         claim is the owner's own marriage — the relation word is the whole
-        difference, not the absence of a candidate."""
-        self.file_claims([owner_birth(), dated("Rosalind", "1979-06-01", event_kind="married")])
+        difference, not the absence of a candidate.
+
+        AMENDED v344: the date moved from 1979-06-01 to 1985-06-01. The original
+        sat two years BEFORE the owner's own 1981-07-11 birthday, and v344 ruled
+        that the zero-candidate fallback never reads a wholly pre-birth moment as
+        the owner's own life — 1955 is not a shape his life has, and neither is
+        1979. The pre-birth half is asserted on its own in
+        `tests/test_v344_a_birthday_is_a_birth.py`; what THIS test is about is
+        the relation word, so it uses a date inside his life.
+        """
+        self.file_claims([owner_birth(), dated("Rosalind", "1985-06-01", event_kind="married")])
         result = self.fold()
         node = self.node(result, event_kind="married")
         self.assertEqual(node["occurrence_subject_scope"], "owner")
         self.assertEqual(node["owner_timeline_relation"], "participated")
+
+    def test_a_nameless_mention_before_his_birth_is_not_his_life(self) -> None:
+        """v344's own half of the clause above, kept beside it: the SAME claim at
+        a pre-birth date is not the owner's, however little the roster knows
+        about who it is about."""
+        self.file_claims([owner_birth(), dated("Rosalind", "1979-06-01", event_kind="married")])
+        result = self.fold()
+        node = self.node(result, event_kind="married")
+        self.assertEqual(node["occurrence_subject_scope"], "other_person")
+        self.assertEqual(node["axis_membership"], "none")
+        self.assertEqual(node["axis_membership_reason"], "pre_birth")
 
     def test_a_scene_he_told_about_a_relative_stays_on_his_axis(self) -> None:
         """Owner decision 2026-09-21: "Grandpa died when I was in 9th grade" is
@@ -983,7 +1003,7 @@ class OwnerRelevanceTests(VaultTestCase):
                     tt._mention_names_another_person({"subject": mention, "claims": []}))  # noqa: SLF001
 
     def test_the_rule_version_is_nine(self) -> None:
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:14")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:15")
 
     def test_the_owners_own_life_domains_never_reach_the_subject_question(self) -> None:
         """residences/schools/work/military/birth are the owner's own life —
