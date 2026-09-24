@@ -64,6 +64,17 @@ page's §4 derives), and — only when the owner has spoken — `owner_verdict`.
 by ADR 0013): there is no parallel ledger anywhere for entity identity or
 graduation decisions.
 
+**The roster feeds Timeline's identity resolution too** (v343,
+`timeline-rules:13`), and two of its own fields now gate that reading rather
+than only this page's own eligibility formula. `identity_resolution.roster_index`
+drops a `maps_to_focus`-mapped row entirely — it is a duplicate of the row it
+points at, never a second candidate for an ambiguous mention — and excludes a
+collective/role row (name or slug in `entity_roster.ROLE_WORDS`: "Kids",
+"Parents", …) from the given-name census that decides whether a bare name is
+ambiguous, though its own exact spelling still resolves a mention that uses
+it. Neither exclusion touches `page_eligible` or `qualifies`; both are read
+fresh, from the roster snapshot, at fold time.
+
 **Candidate research** is a separate immutable source about one still-pending
 roster entry (ADR 0020), never a roster verdict. Exact raw user-turn spans must
 cover the entity usefulness rubric and include concrete material; the author

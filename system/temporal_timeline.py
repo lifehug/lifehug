@@ -114,6 +114,7 @@ import event_binding as eb
 import identity_resolution as ident  # noqa: E402
 import landmark_opportunities as lo  # noqa: E402
 import landmark_projection as lp  # noqa: E402
+import landmarks_interaction as li  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import timeline_evidence  # noqa: E402
 import temporal_projection as tp  # noqa: E402
@@ -202,7 +203,26 @@ from temporal_claims import (  # noqa: E402
 #: ids are in ``node_aliases`` instead of in ``nodes``, and the date cards minted
 #: against the ghosts are gone: a different node set and a different work-item
 #: set for claims nobody edited, which is what moves this number.
-CALCULATION_RULE_VERSION = "timeline-rules:12"
+#: ``timeline-rules:13`` (v343, owner staging review 2026-09-24): A CARD IS
+#: ASKED ONLY WHEN A PERSON COULD ANSWER IT. Three defects, one number, because
+#: all three change which nodes exist or which work items mint for an unmoved
+#: head: a claim whose only label is a pronoun/placeholder AND whose
+#: ``confidence`` is ``0.0`` no longer mints or joins a node at all
+#: (:func:`_claim_is_empty`, read from ``_group_claims`` — the claim itself
+#: stays in the substrate, unminted); an ``identity_uncertain`` candidate set is
+#: filtered to drop roster alias rows (``maps_to_focus`` set) and collective/role
+#: rows before it is offered, and the owner's own roster row is dropped from a
+#: candidate set built for the owner's own given name
+#: (``identity_resolution.roster_index``, ``identity_resolution.identity_work_item``
+#: — see their docstrings); and a bare gerund/participle ``{what}``
+#: (:func:`_is_gerund_phrase`) reads as "When was {what}?" rather than the
+#: ungrammatical "When did {what} happen?". The same claims now calculate to a
+#: projection with fewer nodes (an empty claim mints none), a smaller
+#: ``identity_uncertain`` set (fewer or no candidates offered), and different
+#: prompt text for an unmoved gerund-phrase node — a different node set and a
+#: different work-item set for claims nobody edited, which is what moves this
+#: number.
+CALCULATION_RULE_VERSION = "timeline-rules:13"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -671,6 +691,39 @@ def _subject_handle(claim: dict) -> str:
     return collapsed_text(claim.get("subject_ref")) or collapsed_text(
         claim.get("subject_mention")
     )
+
+
+def _claim_is_empty(claim: dict) -> bool:
+    """No node or work item may mint from this claim (v343, ``timeline-rules:13``).
+
+    Its only label is a pronoun or a placeholder — no ``event_mention`` at
+    all, or an ``event_mention``/``subject_mention`` that is nothing but one
+    of `landmarks_interaction.EMPTY_SUBJECT_LABELS`, compared whole-body and
+    casefolded so "they built the shed" is untouched and bare "they" is not
+    — AND, on top of that, its ``confidence`` is exactly ``0.0``.
+
+    Both, never either alone. ``confidence: 0.0`` is not a signal reserved for
+    "found nothing worth trusting" — it is ``temporal_claims.unit_score``'s
+    OWN DEFAULT for a claim whose caller never stated one at all (``None`` in,
+    ``0.0`` out), and this repo's own claims routinely omit it: an era
+    membership claim built with ``subject_mention: "me"`` and a real
+    ``temporal_value`` carries no ``confidence`` key either and is exactly as
+    real a claim as one with a 0.9. Gating on ``confidence == 0.0`` alone
+    would have refused it a node — checked against the whole suite (v343's own
+    guard removed and SEEN failing this way first). What confidence-zero DOES
+    add, reliably, is confirmation on a claim that ALSO carries no real label:
+    that combination is what the owner's own incident was —
+    ``subject_mention: "they"``, no ``event_mention``, ``confidence: 0.0`` —
+    minted ``node:63099d24ba8c9fe2e6dd800a`` and the card *"When was they?"*.
+    The claim itself is never dropped from the substrate here — only refused a
+    node, exactly as an ``identity`` claim with no ``stay`` already is two
+    lines above this function's one caller.
+    """
+    label = collapsed_text(claim.get("event_mention")) or collapsed_text(
+        claim.get("subject_mention")
+    )
+    empty_label = not label or label.casefold() in li.EMPTY_SUBJECT_LABELS
+    return empty_label and claim.get("confidence") == 0.0
 
 
 def _node_kind_for(event_kind: object) -> str:
@@ -1168,6 +1221,48 @@ def _is_bare_kind_word(text: object) -> bool:
     } | {"named era", "age frame"}
 
 
+#: Event nouns ending in "-ing" that name a THING a person calls it by, not a
+#: doing — "the wedding", "a meeting" read fine as ``{what}`` in "When did
+#: {what} happen?". Excluded from :func:`_is_gerund_phrase` so a real event
+#: noun is never misread as a SUBJECT + PARTICIPLE clause.
+_ING_EVENT_NOUNS = frozenset({
+    "wedding", "meeting", "morning", "evening", "opening", "closing",
+    "beginning", "ending", "gathering", "offering", "homecoming",
+    "housewarming", "christening", "training", "outing", "showing",
+    "screening", "hearing", "reading", "landing", "crossing",
+})
+
+#: A bare determiner in front of an "-ing" word keeps it a NOUN phrase — "the
+#: wedding" — never a clause.
+_BARE_DETERMINERS = frozenset({"the", "a", "an", "this", "that", "these", "those"})
+
+#: SUBJECT + PRESENT PARTICIPLE — "Harvey arriving" — read as a clause, not a
+#: name a person would call an event by (D5, owner staging review
+#: 2026-09-24: *"When did Harvey arriving happen?"*, the gerund phrase the
+#: extractor wrote for Harvey's own arrival, dropped verbatim into the
+#: fallback template). Two or more words, the last a bare "-ing" word.
+_GERUND_PHRASE_RE = re.compile(r"^(?P<subject>.+?)\s+(?P<participle>\w+ing)$")
+
+
+def _is_gerund_phrase(text: object) -> bool:
+    """Does ``text`` read as SUBJECT + PRESENT PARTICIPLE rather than a name?
+
+    Detected, never guessed: the last word is a bare "-ing" word that is not
+    one of :data:`_ING_EVENT_NOUNS`, and the word(s) before it are not JUST a
+    bare determiner. "Harvey arriving" is one; "the wedding" and "the
+    meeting" — nouns, not clauses — are not, by :data:`_ING_EVENT_NOUNS`
+    alone; "The arriving" is not either, having no real subject in front of
+    the participle.
+    """
+    match = _GERUND_PHRASE_RE.match(collapsed_text(text))
+    if not match:
+        return False
+    if match.group("participle").casefold() in _ING_EVENT_NOUNS:
+        return False
+    subject = match.group("subject").strip().casefold()
+    return bool(subject) and subject not in _BARE_DETERMINERS
+
+
 #: One row per event kind: the node's TITLE and the sentence each work-item
 #: kind asks. ``None`` is the default row. Slots:
 #:
@@ -1380,6 +1475,18 @@ def compose_question(
         return None
     if _is_bare_kind_word(what_text) and "{what}" in template:
         return None
+
+    # v343 (`timeline-rules:13`). The fallback row's two "happen?" slots read
+    # as "When did Harvey arriving happen?" when `{what}` is a bare gerund
+    # phrase. Only the fallback row's wording is ever wrong this way — every
+    # other row's "happen?"-free templates already read naturally.
+    if (
+        row is KIND_SENTENCES[None]
+        and slot in ("missing_anchor", "precision_undated")
+        and "{what}" in template
+        and _is_gerund_phrase(what_text)
+    ):
+        template = "When was {what}?"
 
     place = _MOVE_LEAD_RE.sub("", what_text).strip() or what_text
     if "{place}" in template and (
@@ -1665,6 +1772,13 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
         # all. Every other identity claim still asserts *who*, not *when*.
         stay = participation.node_for(claim) if participation is not None else ""
         if claim.get("claim_type") == "identity" and not stay:
+            continue
+        # v343 (`timeline-rules:13`). A participation entry's own identity
+        # claim is exempt: it asserts the stay happened, not what to call it,
+        # and a low/zero confidence there is by design (see its own docstring
+        # two functions up) — filtering it would un-seed a landmark's own
+        # undated stay.
+        if not stay and _claim_is_empty(claim):
             continue
         event_kind = collapsed_text(claim.get("event_kind"))
         subject = _subject_handle(claim)
@@ -4830,6 +4944,7 @@ def derive_calculated_timeline(
         containment_conflicts=containment_conflicts,
         axis_rows=relevance,
         owner=owner,
+        owner_names=owner_names,
         now=now,
     )
     timings["work_items"] = clock() - mark
@@ -5283,7 +5398,7 @@ def _derive_work_items(
     *, groups, calculated, placed, possibilities, edges, diagnostics, records, by_mention, displays,
     whats=None, owner_flags=None, place_flags=None, roster_snapshot=(),
     ambiguity=None, residence_overlaps=None, containment_conflicts=None,
-    axis_rows=None, owner, now
+    axis_rows=None, owner, owner_names=(), now
 ):
     """Everything the substrate currently implies a question about (§5.4, D2).
 
@@ -5388,10 +5503,18 @@ def _derive_work_items(
                 handle_claims.setdefault(key, set()).add(row["claim_id"])
 
     # -- identity ---------------------------------------------------------
+    # v343 (`timeline-rules:13`). The refs that answer to the OWNER's own
+    # name (`timeline-rules:8`'s own census, re-read here) are never offered
+    # as one of several candidates for the owner's own given name — see
+    # `identity_resolution.identity_work_item`'s docstring for why this is
+    # NOT `timeline-rules:9`.
+    owner_refs = ident.owner_name_refs(roster_snapshot, owner_names)
     for key in sorted(records):
         record = records[key]
         refs = sorted(set(by_mention.get(key, ())))
-        row = ident.identity_work_item(record, claim_refs=refs, now=now)
+        row = ident.identity_work_item(
+            record, claim_refs=refs, now=now, owner_refs=owner_refs
+        )
         if row is None:
             continue
         raw = len(refs)

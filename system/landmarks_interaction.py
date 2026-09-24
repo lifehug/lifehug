@@ -557,6 +557,44 @@ _PLACEHOLDER_LABELS = frozenset({"that one", "unknown", "unnamed", "n/a",
 #: same object.
 PLACEHOLDER_LABELS = _PLACEHOLDER_LABELS
 
+#: A pronoun standing in for a subject without naming one. "They" answered a
+#: mission card and the general listener minted a claim with `subject_mention:
+#: "they"` and no `event_mention` at all — the claim was honest (a pronoun IS
+#: what was said) and the node it went on to mint, "When was they?", was not
+#: (v343, `timeline-rules:13`). THIRD-PERSON AND INDEFINITE ONLY.
+#: Deliberately absent, on two different grounds:
+#:
+#: * "you" is the CORRECT rendering of an owner reference once composed
+#:   (`temporal_timeline.compose_question`'s `is_owner` branch), never a
+#:   leak — a bare "you" is refused by `temporal_timeline.OWNER_BARE_REFERENCES`
+#:   instead.
+#: * "i" / "me" / "self" (`identity_resolution.OWNER_SUBJECT_MENTIONS`) are
+#:   the ORDINARY, CORRECT way a raw claim's ``subject_mention`` names the
+#:   OWNER — "I went bankrupt at 26" is `subject_mention: "self"`, no
+#:   `event_mention`, and a real claim. These name somebody; only a pronoun
+#:   that names NOBODY belongs here. A composed SENTENCE where one of these
+#:   three survives unrewritten is still a real defect, and
+#:   `conversation_lints._QUESTION_BARE_PRONOUN_RE` keeps catching it —
+#:   that check runs on already-rewritten text, an entirely different
+#:   reading, so its own narrower set is kept separately rather than widened
+#:   with this one.
+PRONOUN_LABELS = frozenset({
+    "he", "him", "she", "her", "it", "we", "us", "they", "them",
+    "this", "that", "these", "those", "someone", "somebody", "anybody",
+    "anyone", "everybody", "everyone", "nobody", "no one",
+})
+
+#: `PLACEHOLDER_LABELS` plus `PRONOUN_LABELS` — the ONE closed vocabulary for
+#: "this text names nothing a person could answer about", reused everywhere
+#: that question is asked: minting a node from a claim
+#: (`temporal_timeline._claim_is_empty`) and linting a composed question's
+#: subject (`conversation_lints._QUESTION_BARE_PRONOUN_RE`, unioned there
+#: with that check's own narrower "i"/"me"/"self"/"the subject" spellings —
+#: see `PRONOUN_LABELS`'s own docstring for why those stay separate). Whole-body
+#: casefold comparison only, in both readers — "they built the shed" still
+#: names a real subject; only a BARE pronoun/placeholder label is refused.
+EMPTY_SUBJECT_LABELS = PLACEHOLDER_LABELS | PRONOUN_LABELS
+
 
 def identity_rung(row: object) -> str | None:
     """The rung whose answer IS what the entry is called, or None.

@@ -142,6 +142,21 @@ Four rules travel with the composer and none of them is a preference:
   system itself. `UNASKABLE_EVENT_KINDS` blocks the composer and
   `timeline.unknowns` skips any legacy period slug `legacy_period_ref`
   recognises as a frame.
+- **A card is asked only when a person could answer it** (v343,
+  `timeline-rules:13`). A claim whose only label is a pronoun/placeholder
+  (`landmarks_interaction.EMPTY_SUBJECT_LABELS`) AND whose `confidence` is
+  exactly `0.0` mints no node at all (`temporal_timeline._claim_is_empty`,
+  read from `_group_claims`) — the owner's *"When was they?"* card came from a
+  `confidence: 0.0` claim with no `event_mention` and a bare pronoun
+  `subject_mention`. A bare gerund/participle `{what}` ("Harvey arriving")
+  reads `"When was {what}?"` (`temporal_timeline._is_gerund_phrase`) rather
+  than the ungrammatical `"When did {what} happen?"`. And an
+  `identity_uncertain` candidate set is filtered — roster rows with
+  `maps_to_focus` set and collective/role rows (`entity_roster.ROLE_WORDS`)
+  are excluded by `identity_resolution.roster_index` before a mention is even
+  resolved, and the OWNER's own roster row is dropped from the running by
+  `identity_resolution.identity_work_item`'s `owner_refs` — so a card mints
+  only when at least two DISTINCT people remain to ask about.
 
 ## 3. The playbook, the anchors, and the stage
 
