@@ -254,6 +254,91 @@ NOT_A_LANDMARK_REASONS = (NONE_TERMINAL, SKIPPED_ANSWER, UNNAMED_ORGANIZATION,
 #: therefore cannot tell two people's births apart by identity.
 OWNER_BIRTH_DOMAIN = "birth"
 
+# --------------------------------------------------------------------------
+# v341: a birth record's OWN domain words name nobody
+# --------------------------------------------------------------------------
+#
+# THE SECOND INCIDENT (2026-09-23, the hosted platform's CI against the pinned
+# v339/v340 package). v339 read every subject field of a `birth` record and
+# treated any body that was not a placeholder, not the literal domain word
+# `"birth"`, and not an owner spelling as the name of a THIRD PARTY. But the
+# platform — and every older package seat — files the owner's own birth with
+# the domain's natural DISPLAY LABEL: `{"domain": "birth", "label": "Born",
+# "date": {"best": "1979"}}`. "Born" is not a person. v339 read it as one, so
+# `birth_landmark_not_owner` refused the owner's own birthday and
+# `timeline.py`'s draw seat dropped an unnamed self-birth from the drawing
+# without a word. Four platform tests said so on the pin
+# (`test_landmark_record.py::test_a_birth_date_files_as_an_edtf_date_and_the_
+# timeline_reads_it_back`, two in `test_landmark_flip_invisibility.py`, and
+# `test_landmark_flip_containment.py::test_a_parked_entry_keeps_its_exact_
+# value_in_the_drawing`, which asserts the literal `['Born']` survives).
+#
+# THE RULE. A `birth` record whose subject-field text is the birth domain's OWN
+# vocabulary names NOBODY — it says which domain this is, not whose birth it
+# is — so it can never be a third party. :data:`BIRTH_DOMAIN_WORDS` is the ONE
+# definition, read by BOTH seats that ask the question: this module's
+# :func:`third_party_birth_subject` (the landmark) and
+# `temporal_timeline._birth_names_only_the_owner` (the projection's age
+# anchor), which spoke of "the legacy birth domain word" with a list of its own
+# until this release. Compared WHOLE and casefolded after ``collapsed_text``,
+# never as a substring, so a real name that merely CONTAINS one of these words
+# — "Bornstein", "Mary Born" — is still a name and still refuses.
+
+#: Every way a `birth` record names its own domain instead of a person. The
+#: display label (``Born``), the rung's own words (``birthday``, ``date of
+#: birth``), the owner-possessive spellings the hosts write (``my birth``,
+#: ``your birth``, ``owner's birth``) and the sentence fragment a harvester
+#: leaves behind (``I was born``). ``birth`` itself — the legacy mention
+#: `identity_resolution.LEGACY_OWNER_BIRTH_MENTION`, which
+#: :func:`entry_subject_mention` minted before design §3.1 — is a member, so
+#: this set SUPERSEDES the bare domain-word comparison v339 shipped rather
+#: than sitting beside it.
+BIRTH_DOMAIN_WORDS = frozenset({
+    OWNER_BIRTH_DOMAIN,
+    "born",
+    "birthday",
+    "birthdate",
+    "birth date",
+    "birth day",
+    "date of birth",
+    "my birth",
+    "my birthday",
+    "my birthdate",
+    "my birth date",
+    "my date of birth",
+    "my own birth",
+    "your birth",
+    "your birthday",
+    "your birthdate",
+    "your birth date",
+    "your date of birth",
+    "owner's birth",
+    "owner's birthday",
+    "own birth",
+    "the birth",
+    "was born",
+    "i was born",
+    "when i was born",
+    "date of my birth",
+})
+
+#: The typographic apostrophes a paste carries, folded to the plain one before
+#: the WHOLE-text comparison — ``owner’s birth`` is ``owner's birth``, and a
+#: curly quote is not a different word.
+_BIRTH_WORD_APOSTROPHES = str.maketrans({"’": "'", "ʼ": "'", "`": "'"})
+
+
+def is_birth_domain_word(text: object) -> bool:
+    """Is this text the `birth` domain's own vocabulary
+    (:data:`BIRTH_DOMAIN_WORDS`), naming nobody?
+
+    WHOLE-text, casefolded, whitespace-collapsed. Never a substring test: the
+    whole reason this is a set membership rather than a regex is that "Born"
+    names nobody while "Mary Born" and "Bornstein" name somebody.
+    """
+    body = collapsed_text(text).casefold().translate(_BIRTH_WORD_APOSTROPHES)
+    return bool(body) and body in BIRTH_DOMAIN_WORDS
+
 #: How far a ``birth`` record's year may sit from the year the owner STATED
 #: and still be read as a correction of it rather than a different person's
 #: birth. Fifteen years is under the shortest plausible generation gap and
@@ -313,10 +398,13 @@ def third_party_birth_subject(record: object, *, owner_names: object = ()) -> st
     * the record's own subject fields (:data:`BIRTH_SUBJECT_FIELDS`) — a
       `birth` entry names nobody by construction, so a name in one of them
       is a name that does not belong to this domain unless it is the owner's
-      own spelling;
+      own spelling, or (v341) the domain's OWN vocabulary
+      (:func:`is_birth_domain_word`), which is the display label the hosts
+      file the owner's own birthday under and names nobody at all;
     * the pasted vital record's ``Name`` header
       (:data:`BIRTH_NAME_LINE_RE`) in any free-text field, which is how the
-      real records arrived.
+      real records arrived. It requires a NEWLINE — the header is on one line
+      and the man on the next — so a one-word ``label`` can never reach it.
 
     A bare RELATION word ("my grandfather") names a third party without
     naming a person, so it is reported by :func:`birth_landmark_not_owner`
@@ -333,7 +421,7 @@ def third_party_birth_subject(record: object, *, owner_names: object = ()) -> st
         body = collapsed_text(text)
         if not body or body.casefold() in landmarks_interaction.PLACEHOLDER_LABELS:
             continue
-        if body.casefold() == OWNER_BIRTH_DOMAIN:
+        if is_birth_domain_word(body):
             continue
         if _is_owner_spelling(body, owner_names):
             continue

@@ -877,7 +877,19 @@ OWNER_BIRTH_IS_ABOUT_NOBODY_ELSE = (
 
 def _birth_names_only_the_owner(group: dict, owner: str) -> bool:
     """Is every subject this birth group names the OWNER
-    (:data:`OWNER_BIRTH_IS_ABOUT_NOBODY_ELSE`)?"""
+    (:data:`OWNER_BIRTH_IS_ABOUT_NOBODY_ELSE`)?
+
+    v341: the birth domain's own vocabulary is read from the ONE definition,
+    `landmark_projection.BIRTH_DOMAIN_WORDS`, which the landmark seat
+    (`landmark_projection.third_party_birth_subject`) reads too. v340 asked
+    `identity_resolution.is_owner_birth_domain_word` here, which knows the
+    single legacy spelling ``"birth"`` and nothing else — so a group whose
+    mention was the domain's DISPLAY label (``"Born"``) read as somebody else's
+    birth and lost the owner his age anchor, the projection-side twin of the
+    landmark defect v341 fixes. The legacy word is a member of the set, so this
+    is a widening and never a narrowing; the event-kind half that rule requires
+    is already answered by the group, whose `event_kind` is ``birth``.
+    """
     owner_key = normalized_mention_key(owner)
     for claim in group.get("claims") or ():
         row = claim if isinstance(claim, dict) else {}
@@ -891,7 +903,7 @@ def _birth_names_only_the_owner(group: dict, owner: str) -> bool:
             continue
         if is_owner_reference_only(mention):
             continue
-        if ident.is_owner_birth_domain_word(mention, row.get("event_kind")):
+        if lp.is_birth_domain_word(mention):
             continue
         return False
     return True

@@ -359,6 +359,20 @@ a domain rather than about a record's completeness:
     correction, which is the only thing that can make a standing claim stop
     standing.
 
+    **Amended v341.** "Names somebody who is not the owner" excludes the
+    domain's OWN vocabulary. A `birth` record whose subject field holds `Born`,
+    `birthday`, `date of birth`, `my birth` or `I was born` names NOBODY — it
+    says which domain this is, not whose birth it is — and the hosts file the
+    owner's own birthday under exactly that display label, so v339 refused the
+    owner's own birth landmark and the draw seat dropped it without a word.
+    `landmark_projection.BIRTH_DOMAIN_WORDS` (with `is_birth_domain_word`) is
+    the one definition, compared WHOLE and casefolded rather than as a
+    substring so a real name containing one of the words still refuses, and it
+    is read by both seats that ask the question — this item's
+    `third_party_birth_subject` and the projection's own age-anchor test,
+    `temporal_timeline._birth_names_only_the_owner`, which held a second
+    single-word list until v341.
+
     The year bound needs a stated birth to measure against
     (`owner_stated_birth` — the first `basis: "stated"` birth claim in filing
     order), so a vault whose owner has not said when he was born still records
