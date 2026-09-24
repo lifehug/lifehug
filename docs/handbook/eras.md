@@ -345,7 +345,17 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:12 -->
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:13 -->
+`timeline-rules:13` (v343, owner staging review 2026-09-24), which made a card
+askable only when a person could answer it. Three defects, one number: a claim
+whose only label is a pronoun/placeholder (`landmarks_interaction.EMPTY_SUBJECT_LABELS`)
+AND whose `confidence` is exactly `0.0` mints no node and no work item at all —
+the claim stays in the substrate, unminted; an `identity_uncertain` candidate
+set is filtered before it is offered, dropping roster alias rows
+(`maps_to_focus` set), collective/role rows ("Kids", "Parents", ...), and the
+owner's own roster row when the mention is the owner's own given name; and a
+bare gerund/participle `{what}` ("Harvey arriving") reads "When was {what}?"
+rather than the ungrammatical "When did {what} happen?".
 `timeline-rules:12` (v342), which made the fold FOLLOW a re-key rather than only
 publish it: a claim still grouping under an id a bind had aliased away now folds
 into the episode, a bound telling's minted id is published as an alias too, and

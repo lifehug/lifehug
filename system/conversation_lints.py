@@ -79,6 +79,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+import landmarks_interaction as li
 from lifehug_core import INTERACTIONS_DIR, _parse_simple_yaml
 
 DEFAULT_CAP_TURN_CHARS = 1200
@@ -364,9 +365,26 @@ _QUESTION_OWNER_TOKEN_RE = re.compile(
     ) + r")(?:['\u2019]s)?(?!\w)",
     re.IGNORECASE,
 )
+#: v343 (`timeline-rules:13`). "When was they?" is the same defect as "When
+#: did I happen?" — a subject string, not a person — and used to slip through
+#: because this alternation only ever named the four spellings a rewrite bug
+#: could leave behind (kept here, unchanged: this check runs on an
+#: already-rewritten SENTENCE, where a surviving "i"/"me"/"self"/"the
+#: subject" is still exactly that same rewrite-failed defect). Widened with
+#: `landmarks_interaction.PRONOUN_LABELS` — third-person/indefinite only, so
+#: a pronoun added there is caught here too — rather than with the raw-claim
+#: label vocabulary `EMPTY_SUBJECT_LABELS` itself: "self" names the owner at
+#: the CLAIM level (`temporal_timeline._claim_is_empty` must never refuse
+#: it) but is still a leak if it survives all the way into rendered text,
+#: which is why the two checks read two different sets. "you" is in neither:
+#: it is the correct, composed subject of every owner-directed question this
+#: fold writes.
+_QUESTION_BARE_PRONOUN_WORDS = frozenset({"i", "me", "the subject", "self"}) | li.PRONOUN_LABELS
 _QUESTION_BARE_PRONOUN_RE = re.compile(
     r"^\s*(?:when|where|what|who|how)\s+(?:did|was|were|does|is|are)\s+"
-    r"(?:i|me|the subject|self)(?!\w)",
+    r"(?:" + "|".join(
+        re.escape(word) for word in sorted(_QUESTION_BARE_PRONOUN_WORDS, key=len, reverse=True)
+    ) + r")(?!\w)",
     re.IGNORECASE,
 )
 _QUESTION_EMPTY_SUBJECT_RE = re.compile(

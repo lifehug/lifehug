@@ -317,6 +317,19 @@ ROSTER_ALIAS_KEY = "aliases"
 #: corroborate a relationship word the mention itself supplied.
 ROSTER_RELATIONSHIP_KEY = "relationship"
 
+#: The roster field that says a row is a DUPLICATE of another row — curation
+#: found this spelling already answers to an existing Focus and pointed it
+#: there rather than minting a second page for it (`entity_roster.py`'s own
+#: convention; `entity_candidate.py`, `entity_verdict.py`, `wiki_compile.py`
+#: and every other reader already treat a non-null value here as "this row is
+#: not its own identity"). `roster_index` is the one place that convention
+#: reaches identity resolution (v343, `timeline-rules:13`): a row with this
+#: field set contributes NO ref, NO key and NO census token — every spelling
+#: it carries is expected to already be curated onto the row it maps to, so a
+#: bare "James" no longer runs against both the alias row AND its target as
+#: if they were two different people.
+ROSTER_MAPS_TO_FOCUS_KEY = "maps_to_focus"
+
 #: Determiners and possessives a mention may wrap a name in. They carry no
 #: identity, so they are dropped before a mention's tokens are counted —
 #: "my son James" and "our son James" are the same three-token question.
@@ -481,6 +494,25 @@ class RosterIndex:
         return collapsed_text(ref) in self.refs
 
 
+#: A DELIBERATE DUPLICATE of `entity_roster.ROLE_WORDS`, never an import of
+#: it. This module's own purity contract (`test_identity_resolution
+#: .RosterReadTests.test_the_module_never_imports_the_roster_module_or_any_io`
+#: — "safe to vendor into the worker and the sandboxed prompt seam") forbids
+#: importing `entity_roster` at all, lazily or otherwise, the same way
+#: :func:`_entity_slug`'s own docstring already re-derives a slug rather than
+#: importing `lifehug_core.slugify`. `tests/test_v343_card_quality_gate.py`
+#: asserts this set stays a subset of the live `entity_roster.ROLE_WORDS` so
+#: the two cannot silently drift.
+_COLLECTIVE_ROLE_WORDS = frozenset({
+    "mom", "dad", "mother", "father", "brother", "sister", "friend", "mentor",
+    "boss", "wife", "husband", "partner", "son", "daughter", "grandma", "grandpa",
+    "grandfather", "grandmother", "uncle", "aunt", "cousin", "teacher", "coach",
+    "pastor", "priest", "therapist", "neighbor", "colleague", "roommate",
+    "boyfriend", "girlfriend", "fiance", "stepmother", "stepfather", "kids",
+    "child", "children", "parent", "parents", "family", "spouse",
+})
+
+
 def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex:
     """Build the read model from an ``entity_roster`` snapshot.
 
@@ -493,6 +525,22 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
     suppresses a wiki *page*; ``entity_roster`` says so in its own comment
     ("suppression is about pages, not alias folding"), and an unresolvable
     mention is a worse outcome than a resolved mention with no page.
+
+    Two v343 (`timeline-rules:13`) exclusions, both narrow and both read off
+    an existing roster convention rather than a new one:
+
+    * A row with :data:`ROSTER_MAPS_TO_FOCUS_KEY` set is dropped ENTIRELY —
+      no ref, no exact key, no census token. It is curation's own statement
+      that this spelling is not a second identity (see the field's
+      docstring), so a "James" alias row naming the same person as
+      "Anthon James Taylor" never again runs as its own candidate.
+    * A person row whose name or slug is a bare collective/role word
+      (`entity_roster.ROLE_WORDS` — "Kids", "Parents", ...) keeps its exact
+      keys (a mention that says "the kids" still means them) but never
+      enters the CENSUS (:attr:`RosterIndex.by_name_token` /
+      :attr:`RosterIndex.by_given_name`): a collective's own alias ("Dave's
+      kids") starting with the owner's first name must not make that name
+      "ambiguous" against a group nobody meant.
     """
     if isinstance(snapshot, RosterIndex):
         return snapshot
@@ -503,6 +551,7 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
         entities = list(snapshot or ())
         kind = collapsed_text(entity_type) or "person"
 
+    role_words = _COLLECTIVE_ROLE_WORDS
     refs: dict = {}
     by_name_key: dict = {}
     by_alias_key: dict = {}
@@ -511,6 +560,8 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
     relationship_of: dict = {}
     for entity in entities:
         if not isinstance(entity, dict):
+            continue
+        if collapsed_text(entity.get(ROSTER_MAPS_TO_FOCUS_KEY)):
             continue
         name = collapsed_text(entity.get("name"))
         slug = _entity_slug(entity)
@@ -522,6 +573,11 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
         relationship = normalized_mention_key(entity.get(ROSTER_RELATIONSHIP_KEY))
         if relationship:
             relationship_of.setdefault(ref, relationship)
+
+        is_collective = kind == "person" and (
+            normalized_mention_key(name) in role_words
+            or normalized_mention_key(slug) in role_words
+        )
 
         keys: list[str] = []
         for key_field in ROSTER_NAME_KEYS:
@@ -537,6 +593,9 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
             if key:
                 keys.append(key)
                 by_alias_key.setdefault(key, []).append(ref)
+
+        if is_collective:
+            continue
 
         # The token census. Every word of every spelling this person answers to,
         # counted per REF, so one person spelled five ways is still one person.
@@ -1293,6 +1352,7 @@ def identity_work_item(
     *,
     claim_refs: object = (),
     now: object = None,
+    owner_refs: object = (),
 ) -> dict | None:
     """Mint the ``identity_uncertain`` work item an ambiguous mention deserves.
 
@@ -1301,7 +1361,7 @@ def identity_work_item(
     handle, so every claim that ever said "AJ" ambiguously points at one row
     — answer once, update everywhere (§5.4).
 
-    Returns ``None`` for anything that is not genuine ambiguity, and the two
+    Returns ``None`` for anything that is not genuine ambiguity, and the
     exclusions are deliberate rather than incidental:
 
     * A **resolved** record has nothing to ask.
@@ -1311,17 +1371,34 @@ def identity_work_item(
       noise and bury the real contradictions §2.5 exists to surface. Nothing is
       lost by the omission: the claim is retained with its ``uncertain``
       record, and the mention resolves the moment the roster learns the name.
-
-    Surfacing, scoring and queue admission are Wave D/E; this wires the shape.
+    * v343 (`timeline-rules:13`). ``owner_refs`` — the roster refs that answer
+      to the OWNER's own name (`identity_resolution.owner_name_refs`,
+      `temporal_publication.owner_identity_inputs`) — are never offered as a
+      candidate here: the owner does not need to be told which "Dave" he is.
+      This is deliberately NOT `timeline-rules:9` ("an unknown name is not
+      the owner"): that rule is about a mention nobody in the roster
+      resembles defaulting to the owner; this is the opposite direction — a
+      mention that DOES resolve to the owner's own roster row, among others,
+      dropping that one true candidate from the running. Fewer than two
+      candidates left after the drop is not ambiguity either, so it mints
+      nothing (§6.3's "did not justify dropping the claim" still holds — the
+      claim keeps its ``uncertain`` record; only the CARD is withheld).
     """
     current = record if isinstance(record, ResolutionRecord) else record_from_dict(record)
     if current is None or current.resolution != "uncertain" or not current.candidates:
         return None
 
+    owners = {collapsed_text(ref) for ref in (owner_refs or ()) if collapsed_text(ref)}
+    candidates = tuple(
+        c for c in current.candidates if collapsed_text(c.get("ref")) not in owners
+    ) if owners else current.candidates
+    if len(candidates) < 2:
+        return None
+
     refs = claim_refs
     if isinstance(refs, (str, bytes)):
         refs = [refs]
-    names = [c["name"] or c["ref"] for c in current.candidates]
+    names = [c["name"] or c["ref"] for c in candidates]
 
     return validate_temporal_work_item(
         {
