@@ -849,6 +849,75 @@ def _is_owner_birth_group(group: dict, owner: str) -> bool:
     )
 
 
+#: v340. *"A binder apply never loses a placement."* The owner's age anchor is
+#: read off the ONE group that is his own birth, and both readers of it —
+#: :func:`_owner_birth` for the frames and the seeding block in
+#: :func:`derive_calculated_timeline` for the ages — used to refuse outright
+#: when two groups answered to the owner. That refusal is what cost the
+#: owner's vault 36 placements on 2026-09-23: the binder's `R2b` folded the
+#: eleven tellings of his son HARVEY's birth into one node, two of them
+#: ("Harvey's birth as turning point") carry `subject_mention: "self"` because
+#: the owner is the subject of the turning point, so the folded group's
+#: resolved subject came out `self` and its kind came out `birth` — a SECOND
+#: owner birth, at 2021-10-11. `owner_birth` fell to `None` and every
+#: `basis: "age"` derivation silently produced nothing.
+#:
+#: The rule that settles it is the one v339 wrote for the landmark: a birth is
+#: the owner's OWN only when it is about nobody else. A group carrying a
+#: subject the owner is not — a `subject_ref` naming another person, or a
+#: mention that is neither an owner-only word nor the legacy birth domain word
+#: — is somebody else's birth however its subject resolved, so it is dropped
+#: from the reading when another candidate is about the owner alone.
+OWNER_BIRTH_IS_ABOUT_NOBODY_ELSE = (
+    "the owner's age anchor is the birth group that names NOBODY but him; a "
+    "birth group that also names another person is that person's birth, "
+    "whatever its resolved subject says, and never the owner's age anchor"
+)
+
+
+def _birth_names_only_the_owner(group: dict, owner: str) -> bool:
+    """Is every subject this birth group names the OWNER
+    (:data:`OWNER_BIRTH_IS_ABOUT_NOBODY_ELSE`)?"""
+    owner_key = normalized_mention_key(owner)
+    for claim in group.get("claims") or ():
+        row = claim if isinstance(claim, dict) else {}
+        ref = collapsed_text(row.get("subject_ref"))
+        if ref and normalized_mention_key(ref) != owner_key:
+            return False
+        mention = row.get("subject_mention")
+        if not collapsed_text(mention):
+            continue
+        if normalized_mention_key(mention) == owner_key:
+            continue
+        if is_owner_reference_only(mention):
+            continue
+        if ident.is_owner_birth_domain_word(mention, row.get("event_kind")):
+            continue
+        return False
+    return True
+
+
+def _owner_birth_readings(groups: dict, owner: str, *, reads_as_owner) -> list:
+    """``[(node_id, group)]`` — every birth group that reads as the owner's own.
+
+    ONE definition, read by both seats (the frames' origin and the ages'
+    anchor), so the two can never disagree about whose birthday it is. When
+    more than one group answers to the owner and exactly one of them is about
+    him ALONE, that one is the reading; anything else is handed back whole, so
+    a genuinely ambiguous vault still refuses with its own diagnostic rather
+    than picking a birthday.
+    """
+    rows = [
+        (node_id, group)
+        for node_id, group in sorted(groups.items())
+        if collapsed_text(group.get("event_kind")) == "birth" and reads_as_owner(group)
+    ]
+    if len(rows) < 2:
+        return rows
+    alone = [row for row in rows if _birth_names_only_the_owner(row[1], owner)]
+    return alone if len(alone) == 1 else rows
+
+
 # --------------------------------------------------------------------------
 # Claims to date records
 # --------------------------------------------------------------------------
@@ -2648,16 +2717,23 @@ def _owner_birth(groups: dict, calculated: dict, placed: dict, owner: str,
     block's two-step fallback. Zero groups and two groups are both refusals
     with their own diagnostic: frames calculated from a birthday nobody can
     identify would be a coordinate system for somebody else's life.
+
+    v340 reads the candidates through :func:`_owner_birth_readings`, the ONE
+    definition the ages' anchor reads too, so a relative's birth that a bind
+    gave the owner's subject cannot make this ambiguous
+    (:data:`OWNER_BIRTH_IS_ABOUT_NOBODY_ELSE`).
     """
     any_birth = [
         (node_id, group)
         for node_id, group in sorted(groups.items())
         if group.get("event_kind") == "birth"
     ]
-    births = [
-        (node_id, group) for node_id, group in any_birth
-        if normalized_mention_key(_subject_handle_of(group)) == normalized_mention_key(owner)
-    ]
+    births = _owner_birth_readings(
+        {node_id: group for node_id, group in any_birth}, owner,
+        reads_as_owner=lambda group: (
+            normalized_mention_key(_subject_handle_of(group)) == normalized_mention_key(owner)
+        ),
+    )
     if not births:
         # A vault with NO birth at all is not a surprise and mints no finding:
         # the substrate already says so through the `missing_anchor birth_date`
@@ -4307,14 +4383,22 @@ def derive_calculated_timeline(
         # and it was wrong in both directions: with a child's birth filed it
         # matched two and picked nothing, and with none of the owner's filed it
         # silently promoted somebody else's birthday to the owner's age anchor.
-        births = [
-            group
-            for group in groups.values()
-            if group["event_kind"] == "birth" and _is_owner_birth_group(group, owner)
-        ]
+        # v340: and it is still never a generic fallback. What changed is that
+        # two groups answering to the owner are no longer both refused when one
+        # of them is somebody else's birth wearing his subject
+        # (:data:`OWNER_BIRTH_IS_ABOUT_NOBODY_ELSE`), and a reading that stays
+        # ambiguous now SAYS so instead of dropping every age placement mute.
+        births = _owner_birth_readings(
+            groups, owner, reads_as_owner=lambda group: _is_owner_birth_group(group, owner)
+        )
         if len(births) == 1:
-            seeded = _reconcile_group(births[0], birth=None, diagnostics=[])
+            seeded = _reconcile_group(births[0][1], birth=None, diagnostics=[])
             owner_birth = seeded["best"]
+        elif len(births) > 1:
+            diagnostics.append({
+                "finding": "owner_birth_anchor_ambiguous", "subject_ref": owner,
+                "node_ids": [node_id for node_id, _ in births],
+            })
 
     birth_candidates_by_subject: dict[str, list[object]] = {}
     for group in groups.values():

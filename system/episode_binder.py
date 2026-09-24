@@ -257,6 +257,33 @@ EXACT_IDENTITY_RULE_TEXT = (
     "refused by a human `not_same` exactly as R1 is."
 )
 
+#: v340. *"A binder apply never moves a dated moment."* :func:`_dates_agree`
+#: has refused a contradiction since v333, but it only ever read the dates a
+#: telling's own claims STATE — and a moment that sits on the timeline at a
+#: date the FOLD calculated (containment inside a stay, an anchor, an era's
+#: span) states nothing at all, so both sides read as undated and the rung
+#: waved them through. That is how, on 2026-09-23, the owner's vault bound
+#: "Family moved to Yucaipa" (the childhood move, 1981-07-11/1982-07 — inferred
+#: from the Yucaipa stay) to "Family moved to Yucaipa" (2013-06/.., inferred
+#: from the North Desert Village stay) on `R2c`'s identical label, and the
+#: childhood move came back out of the apply dated 2013: two different moves,
+#: one label, 32 years apart.
+#:
+#: So `R2c` and `R2d` — the two rungs whose key is words rather than arithmetic
+#: — read BOTH intervals. A pair is refused when the dates its tellings state
+#: contradict, and refused again when the dates the fold already has them at
+#: contradict. `R2a` (a reading names exactly one node) and `R2b` (one subject's
+#: one birth) are deliberately untouched: their key is the identity of the fact,
+#: two readings of one fact that disagree about its date are exactly the
+#: contradiction a fold is FOR, and the vault's four duplicate-birth nodes fold
+#: precisely because it does.
+A_MERGE_NEVER_MOVES_A_DATED_MOMENT = (
+    "R2c and R2d refuse a pair whose sides sit at non-overlapping dated "
+    "windows — the dates the tellings state AND the dates the fold already "
+    "placed them at — because a label said twice is not a reason to move a "
+    "moment onto another moment's date"
+)
+
 #: A resolver reading of a node is not a second event (v333 defect A). The
 #: resolver answers a question ABOUT a node and files its date as a claim; when
 #: that claim declares no telling, `event_identity.telling_ref_for_claim` falls
@@ -682,6 +709,10 @@ class TellingView:
     documents: frozenset
     bounds: object = None
     dated: bool = False
+    #: v340. The interval the FOLD already has this telling's node at, which is
+    #: not the same question as ``bounds``
+    #: (:data:`A_MERGE_NEVER_MOVES_A_DATED_MOMENT`).
+    placed_bounds: object = None
     containment: frozenset = frozenset()
     created_at: str = ""
     eligible: bool = True
@@ -726,6 +757,7 @@ class TellingView:
             "eras": sorted(self.eras),
             "documents": sorted(self.documents),
             "dated": self.dated,
+            "placed": self.placed_bounds is not None,
             "containment": sorted(self.containment),
             "entities": sorted(self.entities),
             "subject_entities": sorted(self.subject_entities),
@@ -1254,7 +1286,8 @@ def _bounds_of(claims: Sequence[object]) -> tuple[object, bool]:
 
 def telling_views(claims: object, *, manifest: object = None,
                   era_memberships: object = None, entity_index: object = None,
-                  participation_kinds: object = None) -> dict:
+                  participation_kinds: object = None,
+                  placed_windows: object = None) -> dict:
     """``{telling_ref: TellingView}`` — pure, over the claims and nothing else.
 
     The claim→telling map is `episode_fold.claim_telling_index`, which is C1's
@@ -1275,6 +1308,12 @@ def telling_views(claims: object, *, manifest: object = None,
     same family and a house was in no family of its own. The domain is the
     kind (design §3.2); it is read off the promoted source's own frontmatter
     and never guessed from the words.
+
+    ``placed_windows`` (v340) is ``{telling_ref: the interval the timeline
+    already has that telling's node at}`` — :func:`placed_windows_of`' map, an
+    argument for the same reason every other derived input here is one, and
+    what :data:`A_MERGE_NEVER_MOVES_A_DATED_MOMENT` reads. A vault that hands
+    over none simply has no placed-window half to its date test.
 
     ``entity_index`` (I2b) is the vault's rosters as one
     `episode_containers.EntityIndex`, and is an argument for the same reason —
@@ -1300,6 +1339,12 @@ def telling_views(claims: object, *, manifest: object = None,
         collapsed_text(key): collapsed_text(value)
         for key, value in dict(participation_kinds or {}).items()
     }
+
+    placed_by_telling: dict[str, object] = {}
+    for key, value in dict(placed_windows or {}).items():
+        record = value if isinstance(value, chrono.DateRecord) else chrono.from_dict(value)
+        if record is not None and collapsed_text(key):
+            placed_by_telling[collapsed_text(key)] = record
 
     views: dict[str, TellingView] = {}
     for telling_ref in sorted(by_telling):
@@ -1341,6 +1386,7 @@ def telling_views(claims: object, *, manifest: object = None,
             documents=_documents_of(telling_ref, rows_here),
             bounds=bounds,
             dated=dated,
+            placed_bounds=placed_by_telling.get(telling_ref),
             containment=containment_targets(_claim_texts(rows_here)),
             entities=entities,
             subject_entities=subject_entities,
@@ -2473,6 +2519,20 @@ def _dates_agree(left: object, right: object) -> bool:
     return chrono.intersect(left, right) is not None
 
 
+def _placements_agree(left: "TellingView", right: "TellingView") -> bool:
+    """Do the dates the FOLD already has these two tellings at leave a date
+    they could both be (:data:`A_MERGE_NEVER_MOVES_A_DATED_MOMENT`)?
+
+    The same arithmetic as :func:`_dates_agree` over a different pair of
+    intervals: a telling whose node the fold has not placed agrees with
+    everything, and two placed nodes must intersect. Read TOGETHER with
+    :func:`_dates_agree` rather than instead of it — a telling may state a date
+    its node's group does not carry, and either contradiction is enough to
+    refuse.
+    """
+    return _dates_agree(left.placed_bounds, right.placed_bounds)
+
+
 def _same_people(left: frozenset, right: frozenset) -> bool:
     """Do two tellings name the same non-owner people?
 
@@ -2573,7 +2633,9 @@ def same_label_links(views: Mapping[str, TellingView]) -> list:
       are what make it one fact.
     * a label of one significant token is not an identity, so both sides carry
       at least :data:`RESTATEMENT_MIN_TOKENS` minus one, and the dates must not
-      contradict.
+      contradict — neither the dates the tellings THEMSELVES state nor the dates
+      the fold already has them at
+      (:data:`A_MERGE_NEVER_MOVES_A_DATED_MOMENT`, v340).
     """
     buckets: dict[str, list] = {}
     repeatable: set[str] = set()
@@ -2601,6 +2663,8 @@ def same_label_links(views: Mapping[str, TellingView]) -> list:
                     continue
                 if not _dates_agree(a.bounds, b.bounds) or _milestone_conflict(a, b):
                     continue
+                if not _placements_agree(a, b):
+                    continue
                 if not _same_people(a.people, b.people):
                     continue
                 rows.append(ExactLink(
@@ -2627,7 +2691,8 @@ def restatement_links(views: Mapping[str, TellingView], *, index: object = None)
       tokens and SHARE at least :data:`RESTATEMENT_SHARED_TOKENS` of them, one
       of which must be the bucket's own entity token;
     * the people agree, the kinds are in one family, no repeatable kind takes
-      part, and the dates do not contradict.
+      part, and the dates do not contradict — the stated ones and the placed
+      ones both (:data:`A_MERGE_NEVER_MOVES_A_DATED_MOMENT`, v340).
     """
     buckets: dict[str, list] = {}
     repeatable: set[str] = set()
@@ -2667,6 +2732,8 @@ def restatement_links(views: Mapping[str, TellingView], *, index: object = None)
                 if not kinds_compatible(a.event_kind, b.event_kind):
                     continue
                 if not _dates_agree(a.bounds, b.bounds) or _milestone_conflict(a, b):
+                    continue
+                if not _placements_agree(a, b):
                     continue
                 if not _same_people(a.people, b.people):
                     continue
@@ -3008,7 +3075,7 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
          answered_pairs: Sequence = (), open_items: Sequence = (),
          entity_index: object = None, question_contexts: object = None,
          containment_authority: object = None, landmark_entries: object = (),
-         now: object = None) -> BinderPlan:
+         placed_windows: object = None, now: object = None) -> BinderPlan:
     """One binder run, decided and not written. Pure.
 
     Deterministic end to end: tellings are swept in sorted order, candidates
@@ -3021,6 +3088,12 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
     the recorder's own stamp (§12b ruling 5); ``containment_authority`` is the
     HOST's flag (§12b ruling 6) and chooses one field — ``origin`` — on the
     records the containment rung mints, and nothing else about them.
+
+    ``placed_windows`` (v340) is where the timeline already has each telling,
+    keyed by telling ref — :func:`placed_windows_of`, supplied by
+    :func:`read_vault_inputs` over the published generation and the fold's own
+    derivation — and it is what keeps `R2c`/`R2d` off a merge that would move a
+    dated moment (:data:`A_MERGE_NEVER_MOVES_A_DATED_MOMENT`).
     """
     authority = collapsed_text(containment_authority) or ec.DEFAULT_CONTAINMENT_AUTHORITY
     # Refuse an unknown flag HERE, before a whole run is decided against it.
@@ -3029,6 +3102,7 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
         claims, manifest=manifest, era_memberships=era_memberships,
         entity_index=entity_index,
         participation_kinds=lp.participation_kinds_by_telling(landmark_entries),
+        placed_windows=placed_windows,
     )
     units = candidates(views, episode_records=episode_records)
     records = ef.normalize_episode_records(episode_records)
@@ -3496,14 +3570,31 @@ def read_vault_inputs(vault_root: str | Path, *, now: object = None) -> dict:
     on the records the vault already holds. §5.7's budget is the fold's own and
     is unchanged by being read from here — and the binder is a maintenance
     step, never a turn and never a compile.
+
+    v340 adds one more read and no more derivations: the PUBLISHED generation,
+    for the placements the bare fold cannot compute
+    (:data:`PLACEMENTS_COME_FROM_THE_PUBLISHED_GENERATION`). A vault that has
+    never published simply has the fold's own answer, which is what it had.
     """
     index = store.fold_active_index(vault_root)
     claims = [row for row in (index.get("claims") or ()) if isinstance(row, dict)]
     records = ef.load_episode_records(vault_root)
+    # v340: ONE derivation, read twice — the frames and the placements — and
+    # the PUBLISHED generation over the top
+    # (:data:`PLACEMENTS_COME_FROM_THE_PUBLISHED_GENERATION`).
+    derivation = fold_derivation(claims, episode_records=records, now=now)
+    import temporal_publication as pub  # noqa: PLC0415
+    published = pub.read_projection(vault_root) or {}
+    windows = fold_placed_windows(claims, derivation=derivation)
+    windows.update(placed_windows_of(
+        published.get("nodes") or (), claims,
+        aliases=published.get("node_aliases"),
+    ))
     return {
         "claims": claims,
         "episode_records": records,
-        "frames": fold_age_frames(claims, episode_records=records, now=now),
+        "frames": tuple(derivation.age_frames) if derivation is not None else (),
+        "placed_windows": windows,
         "entity_index": ec.load_entity_index(vault_root),
         "question_contexts": read_question_contexts(vault_root, claims),
         "landmark_entries": lp.load_landmark_sources(vault_root),
@@ -3566,6 +3657,26 @@ def read_question_contexts(vault_root: str | Path, claims: object) -> dict:
     return found
 
 
+def fold_derivation(claims: object, *, episode_records: object = (),
+                    now: object = None) -> object:
+    """The `CalculatedTimeline` THE FOLD derives for these claims. Pure.
+
+    ONE derivation per binder run (:data:`FRAMES_COME_FROM_THE_FOLD`), read by
+    both the frames and the placements, so v340's second reader costs nothing
+    and the two can never disagree about which projection they are reading.
+    ``None`` when there is nothing to derive.
+    """
+    import temporal_timeline as tt  # noqa: PLC0415
+
+    rows = [dict(row) for row in (claims or ()) if isinstance(row, dict)]
+    if not rows:
+        return None
+    return tt.derive_calculated_timeline(
+        {"version": store.INDEX_VERSION, "claims": rows},
+        episode_records=episode_records, now=now,
+    )
+
+
 def fold_age_frames(claims: object, *, episode_records: object = (),
                     now: object = None) -> tuple:
     """The age frames THE FOLD calculated for these claims. Pure.
@@ -3574,16 +3685,119 @@ def fold_age_frames(claims: object, *, episode_records: object = (),
     a host that already holds a `CalculatedTimeline` can hand over
     ``result.age_frames`` instead of paying for a second pass.
     """
-    import temporal_timeline as tt  # noqa: PLC0415
+    result = fold_derivation(claims, episode_records=episode_records, now=now)
+    return tuple(result.age_frames) if result is not None else ()
 
-    rows = [dict(row) for row in (claims or ()) if isinstance(row, dict)]
-    if not rows:
-        return ()
-    result = tt.derive_calculated_timeline(
-        {"version": store.INDEX_VERSION, "claims": rows},
-        episode_records=episode_records, now=now,
+
+def placed_windows_of(nodes: object, claims: object, *,
+                     aliases: object = None, manifest: object = None) -> dict:
+    """``{telling_ref: the interval these NODES put that telling at}``. Pure.
+
+    The other half of :data:`A_MERGE_NEVER_MOVES_A_DATED_MOMENT`, and it is the
+    projection's own answer rather than a second one. A telling reaches its node
+    two ways and both are read, because on the owner's vault the two do not
+    agree about which claims a node lists:
+
+    * the node whose ``input_claim_refs`` name one of the telling's claims;
+    * **the node a claim NAMES as its own event** (``event_ref``) — the fold's
+      own answer to "which event is this claim about", which is the same field
+      :data:`RULE_ID_DERIVED_READING` reads. This is the half the Yucaipa
+      incident needed: both "Family moved to Yucaipa" tellings declare their
+      node in every claim, and the published node lists only ONE of the
+      telling's claims, so a reader that went by the node's list alone found no
+      window for either side and the guard never fired.
+
+    The claim→telling map is `episode_fold.claim_telling_index`, the same one
+    :func:`telling_views` buckets by, so the keys here and the views' keys are
+    the same keys. ``aliases`` is the projection's own ``node_aliases``, so a
+    claim still naming a node id an earlier bind re-keyed reaches the node it
+    became (Law 5). A telling whose nodes disagree keeps nothing, for exactly
+    :func:`_bounds_of`'s reason: a contradiction inside one telling is not this
+    module's to settle.
+    """
+    rows = [row for row in (claims or ()) if isinstance(row, dict)]
+    telling_of = ef.claim_telling_index(rows, manifest)
+    alias_map = {collapsed_text(key): collapsed_text(value)
+                 for key, value in dict(aliases or {}).items()}
+
+    def canonical(node_id: object) -> str:
+        found = collapsed_text(node_id)
+        for _ in range(8):
+            nxt = alias_map.get(found)
+            if not nxt or nxt == found:
+                break
+            found = nxt
+        return found
+
+    window_of_node: dict[str, object] = {}
+    claim_home: dict[str, str] = {}
+    for node in nodes or ():
+        row = node if isinstance(node, dict) else {}
+        node_id = collapsed_text(row.get("node_id"))
+        record = chrono.from_dict(row.get("best_temporal_value"))
+        if not node_id:
+            continue
+        for claim_id in (row.get("input_claim_refs") or ()):
+            claim_home[collapsed_text(claim_id)] = node_id
+        if record is not None:
+            window_of_node[node_id] = record
+
+    found: dict[str, dict] = {}
+    for row in rows:
+        claim_id = collapsed_text(row.get("claim_id"))
+        telling_ref = collapsed_text(telling_of.get(claim_id))
+        if not telling_ref:
+            continue
+        reached = {claim_home.get(claim_id, "")}
+        if collapsed_text(row.get("event_ref")).startswith("node:"):
+            reached.add(canonical(row.get("event_ref")))
+        for node_id in reached:
+            record = window_of_node.get(node_id)
+            if record is not None:
+                found.setdefault(telling_ref, {})[node_id] = record
+
+    windows: dict[str, object] = {}
+    for telling_ref in sorted(found):
+        records = [found[telling_ref][node_id] for node_id in sorted(found[telling_ref])]
+        window = records[0] if len(records) == 1 else chrono.intersect(*records)
+        if window is not None:
+            windows[telling_ref] = window
+    return windows
+
+
+def fold_placed_windows(claims: object, *, episode_records: object = (),
+                        now: object = None, derivation: object = None) -> dict:
+    """:func:`placed_windows_of` over the fold's OWN derivation. Pure.
+
+    ``derivation`` lets a caller that already paid for one hand it over.
+    """
+    result = derivation if derivation is not None else fold_derivation(
+        claims, episode_records=episode_records, now=now
     )
-    return tuple(result.age_frames)
+    if result is None:
+        return {}
+    return placed_windows_of(result.nodes, claims, aliases=result.node_aliases)
+
+
+#: v340, and it is the reason :func:`read_vault_inputs` reads the PUBLISHED
+#: projection beside the fold's own. The window that matters is where a moment
+#: SITS — and the placements that come from containment inside a stay, from a
+#: resolver answer, from an era's span or from a landmark entry are computed
+#: from inputs `temporal_publication.load_derivation_inputs` supplies and this
+#: module's one-argument derivation does not have. On the owner's vault that is
+#: the whole Yucaipa incident: the childhood move's 1981-07-11/1982-07 is
+#: `basis: "anchor", confidence: "inferred"` with no provenance of its own, so
+#: the binder's bare fold leaves it UNPLACED and a guard reading only that fold
+#: sees two undated retellings again. The published generation is what a reader
+#: could see, it is what the apply is about to contradict, and it is therefore
+#: what the rule is measured against; the bare fold fills in a telling filed
+#: since that generation, so the two together are never less than either.
+PLACEMENTS_COME_FROM_THE_PUBLISHED_GENERATION = (
+    "a merge is measured against the placements a reader can already see — the "
+    "published projection — with the binder's own fold filling in whatever has "
+    "been filed since, because a containment, a resolver answer or an era span "
+    "places a moment through inputs only the publisher holds"
+)
 
 
 def apply_plan(vault_root: str | Path, result: BinderPlan) -> dict:
@@ -3656,6 +3870,7 @@ def bind_episodes(vault_root: str | Path, *, apply: bool = False,
         entity_index=inputs["entity_index"],
         question_contexts=inputs["question_contexts"],
         landmark_entries=inputs["landmark_entries"],
+        placed_windows=inputs["placed_windows"],
         containment_authority=containment_authority,
         question_cap=question_cap, trigger=trigger, now=now,
     )
@@ -3730,6 +3945,7 @@ __all__ = [
     "LABEL_TOKEN_STOPWORDS",
     "MAINTENANCE_STEP_IS_A_DRY_RUN",
     "MATURE_EPISODE_MEMBERS",
+    "A_MERGE_NEVER_MOVES_A_DATED_MOMENT",
     "NON_TRANSITIVE_RULE_TEXT",
     "OVERMERGE_DISJOINT_REASON",
     "PLAUSIBILITY_FLOOR",
@@ -3796,6 +4012,10 @@ __all__ = [
     "describe_pair",
     "disjoint_bounds_item_id",
     "fold_age_frames",
+    "fold_derivation",
+    "fold_placed_windows",
+    "placed_windows_of",
+    "PLACEMENTS_COME_FROM_THE_PUBLISHED_GENERATION",
     "independent_of_the_label",
     "independent_signals",
     "is_repeatable",
