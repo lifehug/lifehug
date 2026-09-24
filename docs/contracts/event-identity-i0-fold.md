@@ -131,6 +131,24 @@ and dropped from the table, because a redirect to one of the two things an id
 means is worse than no redirect. The invariant, checkable in one line: no key of
 `node_aliases` is the id of a node the drawing publishes.
 
+**Amendment (v345): the DRAWING can re-key a node too, and it publishes the
+redirect.** v342 named three ways a node id moves and closed all three, and each
+of them is an act of the identity layer — a bind, a mint, an absorbed episode.
+There is a fourth that no bind can see: a node id is derived FROM its event
+kind, so a reading that changes what a landmark entry's date DATES changes the
+id the entry is drawn at. `landmark_projection.A_LANDMARK_IS_DRAWN_AS_WHAT_IT_IS`
+is exactly such a reading — a `family` entry whose subject is a couple dates
+their wedding and not a birth — and on the owner's vault it moved
+`node:9ca9a5b1…` "Parents's birth" to a `married` node at the same 1976-06-25
+while every work item, session and URL still named the old id.
+`temporal_timeline._landmark_redraw_aliases` publishes the redirect under the
+same invariant and with the same two refusals the carry has: a key some claim
+still mints is not redirected (it is a node the drawing publishes), and a claim
+carrying its own `event_ref` never moved, because its id was never derived from
+its kind. The row is reported `landmark_date_kind_redrawn`, so the re-key is
+never silent, and the identity layer's own tables still win a collision: a
+person's decision outranks a redraw.
+
 ### Entailment (§2.2)
 
 `entailed_not_same()` computes `same(A,E) ∧ not_same(B,E) ⇒ not_same(A,B)` and

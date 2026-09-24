@@ -339,6 +339,161 @@ def is_birth_domain_word(text: object) -> bool:
     body = collapsed_text(text).casefold().translate(_BIRTH_WORD_APOSTROPHES)
     return bool(body) and body in BIRTH_DOMAIN_WORDS
 
+
+# --------------------------------------------------------------------------
+# v345 — the evidence may NAME the kind the classifier's wildcard did not
+# --------------------------------------------------------------------------
+
+#: The single-word members of :data:`BIRTH_DOMAIN_WORDS`, read as whole TOKENS
+#: rather than as a whole text. :func:`is_birth_domain_word` asks *"is this
+#: whole text the domain's own vocabulary, naming nobody"*; :func:`names_a_birth`
+#: asks the opposite question — *"does this sentence say a birth, and whose"* —
+#: so the same words are matched inside a phrase and the rest of the phrase is
+#: the name. Derived from the one set rather than re-listed, so a word added
+#: there reaches both readers (recurring-defect doctrine).
+BIRTH_PHRASE_WORDS = frozenset(
+    word for word in BIRTH_DOMAIN_WORDS if " " not in word
+)
+
+#: The verbs a life's ARRIVAL is said with when no birth noun is present, and
+#: the reason this rule exists at all: the owner's vault holds *"Harvey
+#: arriving"*, whose evidence reads *"Birth of Harvey during the Etherfuse
+#: chapter"*, classified as the `moment` wildcard — so the binder could not see
+#: that a birth is what it is. Closed and small, exactly as
+#: the binder's own `EVENT_VERB_STEMS` table is closed: a verb outside the list
+#: leaves the sentence unread, which can only ever refuse a fold.
+BIRTH_ARRIVAL_VERBS = ("was born", "arriving", "arrived", "arrives", "arrive")
+
+_BIRTH_PHRASE_ALTERNATION = "|".join(
+    re.escape(word) for word in sorted(BIRTH_PHRASE_WORDS, key=len, reverse=True)
+)
+_BIRTH_ARRIVAL_ALTERNATION = "|".join(
+    re.escape(verb) for verb in sorted(BIRTH_ARRIVAL_VERBS, key=len, reverse=True)
+)
+
+#: Where a NAME stops inside a birth phrase. A birth sentence in the wild
+#: carries the rest of the story with it ("Birth of Harvey during the Etherfuse
+#: chapter"), and the name is the part before the first of these.
+_BIRTH_NAME_STOP_RE = re.compile(
+    r"(?<!\w)(?:during|in|on|at|after|before|while|when|and|as|to|from|the)"
+    r"(?!\w)|[,;:()\[\]\u2014\u2013.!?\"]",
+    re.IGNORECASE,
+)
+
+#: The birth phrase shapes, in the order they are tried. Each captures ``who``.
+_BIRTH_PHRASE_RES = (
+    re.compile(rf"(?<!\w)(?:{_BIRTH_PHRASE_ALTERNATION})\s+of\s+(?P<who>.+)$",
+               re.IGNORECASE),
+    re.compile(rf"^(?P<who>.+?)['\u2019]s\s+(?:{_BIRTH_PHRASE_ALTERNATION})(?!\w)",
+               re.IGNORECASE),
+    re.compile(rf"^(?P<who>.+?)\s+(?:{_BIRTH_ARRIVAL_ALTERNATION})(?!\w)",
+               re.IGNORECASE),
+)
+
+#: A name longer than this is prose the shapes above failed to cut, not a
+#: person. Refusing it is cheaper than half-reading it.
+MAX_BIRTH_PHRASE_NAME = 80
+
+#: A birth named AFTER one of these is an ADJUNCT: it says when the telling
+#: happened, not what the telling is. The owner's vault taught both halves of
+#: this list on the first two runs of this release. *"Katie and James joined the
+#: author in Seattle once she was able to fly after childbirth (when_hint:
+#: shortly after James's birth; anchor: James's birth)"* is a FLIGHT, and reading
+#: it as James's birth folded a trip dated 2013-06/2013-07 onto a birthday dated
+#: 2013-05-10. *"I remember her, when James was born, saying, 'I love him'"* is a
+#: four-year-old's DECLARATION about her brother, and the subordinating
+#: conjunction is the whole difference: a birth inside a ``when`` clause is the
+#: clock the sentence is read against, never the sentence's own event.
+BIRTH_PHRASE_IS_AN_ADJUNCT_AFTER = frozenset({
+    "after", "before", "since", "until", "till", "during", "following",
+    "shortly", "just", "soon", "post", "pre", "around", "near", "by",
+    "when", "whenever", "once", "while", "as", "because", "though",
+    "although", "remember", "remembers", "remembered",
+})
+
+#: The classifier's own WHEN metadata, which rides inside an evidence quote in
+#: parentheses. Everything past one of these markers is a statement about when a
+#: moment happened — very often *by naming another moment* — so it is cut before
+#: the shapes are read at all. Whole-marker and casefolded.
+BIRTH_PHRASE_WHEN_MARKERS = ("when_hint:", "anchor:", "spine:")
+
+#: Determiners and possessives that carry no act, dropped before the adjunct
+#: test looks at the word in front of a birth phrase — *"shortly after THE birth
+#: of James"* is as much an adjunct as *"shortly after James's birth"*.
+_BIRTH_PHRASE_QUALIFIERS = frozenset({
+    "a", "an", "the", "my", "our", "his", "her", "their", "its", "of",
+})
+
+
+def _leads_the_phrase(text: object) -> str:
+    """The last word that carries anything, in the run of words before a phrase."""
+    for token in reversed(collapsed_text(text).split()):
+        word = token.casefold().strip(".,;:()[]\u2014\u2013\"'")
+        if word and word not in _BIRTH_PHRASE_QUALIFIERS:
+            return word
+    return ""
+
+
+def names_a_birth(text: object) -> str:
+    """Whose birth this sentence says it is, or ``""``.
+
+    The three shapes a birth is said in — ``birth of X``, ``X's birth``,
+    ``X arriving`` / ``X was born`` — read over :data:`BIRTH_PHRASE_WORDS` and
+    :data:`BIRTH_ARRIVAL_VERBS`, whole-token in both directions so *"Bornstein"*
+    and *"rebirth"* say nothing. The answer is a NAME and never a verdict: the
+    caller is required to check that the name is somebody the telling is
+    already about, because *"the birth of the company"* is not a person's birth
+    and no word list can tell the difference.
+
+    Two refusals keep the shapes off a birth the sentence names as an ANCHOR
+    rather than as its own event, and both are the owner's vault's own lesson:
+    the classifier's when-metadata is cut first
+    (:data:`BIRTH_PHRASE_WHEN_MARKERS`), and a birth introduced by a temporal
+    preposition is an adjunct (:data:`BIRTH_PHRASE_IS_AN_ADJUNCT_AFTER`) —
+    *"shortly after James's birth"* dates a flight and is not one.
+    """
+    body = collapsed_text(text)
+    if not body:
+        return ""
+    lowered = body.casefold()
+    for marker in BIRTH_PHRASE_WHEN_MARKERS:
+        cut = lowered.find(marker)
+        if cut >= 0:
+            body, lowered = body[:cut], lowered[:cut]
+    body = collapsed_text(body)
+    if not body:
+        return ""
+    for index, pattern in enumerate(_BIRTH_PHRASE_RES):
+        match = pattern.search(body)
+        if match is None:
+            continue
+        who = collapsed_text(match.group("who"))
+        if not who:
+            continue
+        lead = ""
+        if index == 0:
+            # ``birth of X`` puts the name FIRST and the story after it, so the
+            # adjunct word sits before the birth NOUN.
+            lead = _leads_the_phrase(body[: match.start()])
+            stops = list(_BIRTH_NAME_STOP_RE.finditer(who))
+            if stops:
+                who = who[: stops[0].start()]
+        else:
+            # The other two put the story first and the name last, so the
+            # adjunct word is the token the name was cut away from.
+            stops = list(_BIRTH_NAME_STOP_RE.finditer(who))
+            if stops:
+                lead = collapsed_text(who[stops[-1].start():stops[-1].end()])
+                who = who[stops[-1].end():]
+        if collapsed_text(lead).casefold().strip(".,;:()") in \
+                BIRTH_PHRASE_IS_AN_ADJUNCT_AFTER:
+            continue
+        who = collapsed_text(who).strip(" '\u2019\u2014-")
+        if who and len(who) <= MAX_BIRTH_PHRASE_NAME:
+            return who
+    return ""
+
+
 #: How far a ``birth`` record's year may sit from the year the owner STATED
 #: and still be read as a correction of it rather than a different person's
 #: birth. Fifteen years is under the shortest plausible generation gap and
@@ -718,6 +873,298 @@ def date_event_kind(row: object) -> str:
 
 
 # --------------------------------------------------------------------------
+# v345 — a landmark is drawn as WHAT IT IS
+# --------------------------------------------------------------------------
+
+#: v345. *"A collective/couple entry never has a birth; a family entry whose
+#: date semantics are unknown should not be drawn as one."* (owner review of
+#: staging, 2026-09-24.)
+#:
+#: :func:`date_event_kind` answers for a DOMAIN, and it is the right answer for
+#: eight of the nine: a ``children`` entry dates a birth and a ``losses`` entry
+#: dates a death whatever else the record happens to carry. ``family`` is the
+#: one domain whose entries are not all the same shape. It declares
+#: ``date_semantics: birth`` because a sibling entry dates a sibling's birth —
+#: and the owner's own vault holds ONE ``family`` entry,
+#: ``{"label": "parents", "who": "parents", "relation": "parent",
+#: "date": 1976-06-25}``, which is his parents' WEDDING. Read as the domain
+#: declares, that entry drew ``node:9ca9a5b1…`` "Parents's birth" at
+#: 1976-06-25, beside ``node:6ece5329…`` "Parents' wedding date" at the same
+#: day: one fact, two nodes, and one of them a birth nobody has ever had.
+#:
+#: A couple is not born. The one date two people share is the day they became
+#: two people who share dates, so a collective subject's date is read as the
+#: wedding — and a collective that may not be a COUPLE (three enumerated
+#: siblings) is read as :data:`UNDISAMBIGUATED_EVENT_KIND`, which is this
+#: module's existing word for *"a date whose event the record does not say"*.
+A_LANDMARK_IS_DRAWN_AS_WHAT_IT_IS = (
+    "a landmark entry's date is drawn as the event the ENTRY dates, not only "
+    "as the event its domain declares: a collective subject has no birth, and "
+    "the one date a couple shares is the day they became one — so a `family` "
+    "entry whose subject is `parents` draws a wedding and never `<who>'s birth`"
+)
+
+#: The event kind a couple's shared date is. `landmarks_interaction`'s own
+#: vocabulary (`DATE_SEMANTICS`), not a new word.
+MARRIAGE_EVENT_KIND = "married"
+
+#: Subjects that name exactly ONE couple, compared WHOLE and casefolded for the
+#: reason :func:`is_birth_domain_word` is — "Parents" names a couple and
+#: "Parenteau" names a man. A person has one set of parents and therefore one
+#: parents' wedding, which is what makes this list's date readable at all.
+COUPLE_SUBJECT_WORDS = frozenset({
+    "parents", "my parents", "our parents", "the parents", "both parents",
+    "mom and dad", "my mom and dad", "dad and mom", "mum and dad",
+    "mother and father", "my mother and father", "father and mother",
+    "husband and wife", "the couple", "my folks",
+})
+
+#: Subjects that name a GROUP but not necessarily one couple. Their date is not
+#: a birth either — nobody is born collectively — but which event it IS cannot be
+#: read, so it lands on :data:`UNDISAMBIGUATED_EVENT_KIND`. ``grandparents`` is
+#: the reason this list is separate: a person has up to four of them and two of
+#: their weddings, exactly the ambiguity that keeps the word out of
+#: `identity_resolution.COUPLE_OF_RELATION_WORD`.
+COLLECTIVE_SUBJECT_WORDS = frozenset({
+    "grandparents", "my grandparents", "our grandparents", "the grandparents",
+    "siblings", "my siblings", "brothers", "sisters", "my brothers",
+    "my sisters", "the kids", "my kids", "children", "my children",
+    "the family", "my family", "family",
+})
+
+#: Words in an entry's OWN text that say its date is the wedding. Read as whole
+#: tokens; ``anniversary`` is here because a wedding anniversary is the wedding
+#: day said another way, and a record that offers one is offering the other.
+MARRIAGE_DATE_WORDS = frozenset({
+    "married", "marriage", "marry", "wedding", "wed", "wedded", "anniversary",
+})
+
+#: Where an entry states a birth OUTRIGHT, beside the ladder's own ``date``.
+#: An entry that carries one of these is a birth however collective its label
+#: reads — the record said so — and the refinement leaves it alone.
+ENTRY_BIRTH_FIELDS = ("birth", "born", "birthday", "birth_date", "date_of_birth",
+                      "birth_year", "birthdate")
+
+
+def _folded(text: object) -> str:
+    return collapsed_text(text).casefold().translate(_BIRTH_WORD_APOSTROPHES)
+
+
+def is_couple_subject(text: object) -> bool:
+    """Does this subject name exactly ONE couple?
+
+    WHOLE-text and casefolded, over :data:`COUPLE_SUBJECT_WORDS`, with the
+    typographic apostrophes folded exactly as :func:`is_birth_domain_word`
+    folds them.
+    """
+    body = _folded(text)
+    return bool(body) and body in COUPLE_SUBJECT_WORDS
+
+
+def is_collective_subject(text: object) -> bool:
+    """Does this subject name a GROUP of people rather than one person?
+
+    A couple is one (:func:`is_couple_subject`); so is every group in
+    :data:`COLLECTIVE_SUBJECT_WORDS`, and so is any enumeration of two or more
+    names (`temporal_claims.split_subject_enumeration`). Nobody in any of them
+    was born collectively.
+    """
+    body = _folded(text)
+    if not body:
+        return False
+    return (body in COUPLE_SUBJECT_WORDS
+            or body in COLLECTIVE_SUBJECT_WORDS
+            or len(split_subject_enumeration(collapsed_text(text))) > 1)
+
+
+def entry_subject_text(entry: object, row: object, domain: object) -> str:
+    """The subject an entry NAMES, before any fallback to the domain word.
+
+    :func:`entry_subject_mention` is the claim-side reader and always returns
+    something, because the substrate requires a non-empty mention. This one may
+    return ``""``, which is what the refinement below needs: an entry that
+    named nobody has no collective subject either.
+    """
+    if not isinstance(entry, dict):
+        return ""
+    named = landmarks_interaction.identity_named(entry, row) if isinstance(row, dict) else None
+    if not named:
+        for field in BIRTH_SUBJECT_FIELDS:
+            value = entry.get(field)
+            if isinstance(value, str) and value.strip():
+                named = value.strip()
+                break
+    return collapsed_text(named)
+
+
+def entry_words_name_a_marriage(entry: object) -> bool:
+    """Do the entry's own words say its date is a wedding?
+
+    Whole tokens over :data:`MARRIAGE_DATE_WORDS`, across the same free-text
+    fields :data:`BIRTH_TEXT_FIELDS` names plus ``relation``, so a record that
+    says ``married`` anywhere is read as saying it.
+    """
+    if not isinstance(entry, dict):
+        return False
+    for field in (*BIRTH_TEXT_FIELDS, "relation", "event"):
+        value = entry.get(field)
+        if not isinstance(value, str):
+            continue
+        for token in re.split(r"[^a-z]+", value.casefold()):
+            if token and token in MARRIAGE_DATE_WORDS:
+                return True
+    return False
+
+
+def entry_states_a_birth(entry: object) -> bool:
+    """Does the entry carry an explicit birth of its own?"""
+    return isinstance(entry, dict) and any(
+        entry.get(field) for field in ENTRY_BIRTH_FIELDS
+    )
+
+
+def entry_date_event_kind(domain: object, entry: object, *, row: object = None) -> str:
+    """Which event THIS ENTRY's own ``date`` field dates.
+
+    :data:`A_LANDMARK_IS_DRAWN_AS_WHAT_IT_IS`. The domain's declared answer
+    (:func:`date_event_kind`) stands for every entry that does not contradict
+    it, so eight domains and every ordinary sibling entry are untouched. Only a
+    declared ``birth`` is ever refined, and only three ways:
+
+    * the entry STATES a birth of its own (:func:`entry_states_a_birth`) — it
+      is a birth, whatever else it says;
+    * the entry's own words name a marriage (:func:`entry_words_name_a_marriage`)
+      — ``married``, because the record said so;
+    * the entry's subject is exactly ONE couple (:func:`is_couple_subject`) —
+      ``married``, because the one date a couple shares is the day they became
+      one; and a collective that is not one couple
+      (:func:`is_collective_subject` — ``grandparents``, an enumeration of
+      three) is :data:`UNDISAMBIGUATED_EVENT_KIND`, a date whose event the
+      record does not say.
+
+    PURE and read at three seats — :func:`entry_claims` at filing,
+    :func:`_attach_dates` and `temporal_timeline` at draw — so a vault that
+    already holds the record heals on its next redraw with no migration, the
+    way item 10's and item 16's rules do.
+    """
+    declared = date_event_kind(row if isinstance(row, dict) else domain_row_or_none(domain))
+    if declared != "birth":
+        return declared
+    if entry_states_a_birth(entry):
+        return declared
+    if entry_words_name_a_marriage(entry):
+        return MARRIAGE_EVENT_KIND
+    subject = entry_subject_text(entry, row if isinstance(row, dict)
+                                 else domain_row_or_none(domain), domain)
+    if not subject:
+        return declared
+    if is_couple_subject(subject):
+        return MARRIAGE_EVENT_KIND
+    if is_collective_subject(subject):
+        return UNDISAMBIGUATED_EVENT_KIND
+    return declared
+
+
+def wedding_mention_for(subject: object) -> str:
+    """``"parents"`` -> ``"Parents' wedding"`` — what to CALL a couple's date.
+
+    The node's human text comes from what somebody said about it
+    (`temporal_timeline._node_what` reads the claims' ``event_mention``), and a
+    landmark record says nothing: its claims carry no mention at all, so the
+    old drawing fell back to the subject and the kind table and printed
+    ``Parents's birth``. This is the entry's own words, made into the phrase the
+    entry is: never ``<who>'s birth``, and never the event kind.
+    """
+    body = collapsed_text(subject)
+    if not body:
+        return ""
+    titled = body[0].upper() + body[1:]
+    tail = "'" if titled.casefold().endswith("s") else "'s"
+    return f"{titled}{tail} wedding"
+
+
+def landmark_date_readings(sources: object) -> dict:
+    """``{source_id: {"event_kind", "declared_event_kind", "event_mention"}}``.
+
+    One row per filed landmark record whose own ``date`` dates something other
+    than the event its domain declares (:func:`entry_date_event_kind`). Records
+    that agree with their domain are absent, so an ordinary vault gets an empty
+    mapping and no reader does any work.
+
+    PURE, over `load_landmark_sources`' list. It is the ARGUMENT shape the fold
+    and the binder both read, for the reason `participation_kinds_by_telling`
+    is one: a roster read inside a pure function is the drift this program
+    exists to remove.
+    """
+    readings: dict[str, dict] = {}
+    for source in sources or ():
+        if not isinstance(source, dict):
+            continue
+        source_id = collapsed_text(source.get("source_id"))
+        domain = collapsed_text(source.get("domain"))
+        record = source.get("record")
+        if not source_id or not domain or not isinstance(record, dict):
+            continue
+        row = domain_row_or_none(domain)
+        declared = date_event_kind(row)
+        kind = entry_date_event_kind(domain, record, row=row)
+        if kind == declared:
+            continue
+        mention = ""
+        if kind == MARRIAGE_EVENT_KIND:
+            mention = wedding_mention_for(entry_subject_text(record, row, domain))
+        readings[source_id] = {
+            "event_kind": kind,
+            "declared_event_kind": declared,
+            "event_mention": mention,
+        }
+    return readings
+
+
+def read_landmark_dates(claims: object, sources: object) -> list[dict]:
+    """The claims, with every landmark date claim read as what its entry dates.
+
+    :data:`A_LANDMARK_IS_DRAWN_AS_WHAT_IT_IS`, applied once so that every reader
+    downstream — the grouping, the node label, the milestone rung, the binder's
+    views — sees one answer. Returns a new list of new dicts; **no receipt is
+    rewritten**, which is what makes this a reading and not a migration: the
+    claim on disk still says what the importer read out of the record, and the
+    drawing says what the record means.
+
+    A claim is rewritten only when it is a ``date`` claim of a source
+    :func:`landmark_date_readings` has a row for, and only when its stored
+    ``event_kind`` is the one the domain DECLARED or the one the entry says — a
+    span bound, or an alternate filed at a third kind, is left exactly as it is.
+    Both spellings are accepted because both are real on disk: a receipt written
+    before this release carries the declared kind and a receipt written after it
+    carries the entry's, and the only difference the reading makes to the second
+    one is the ``event_mention``, which is filled in only where the claim has
+    none — the person's own words are never overwritten.
+    """
+    rows = [row for row in (claims or ()) if isinstance(row, dict)]
+    readings = landmark_date_readings(sources)
+    if not readings:
+        return rows
+    out: list[dict] = []
+    for row in rows:
+        ref = row.get("source_ref")
+        source_id = collapsed_text(ref.get("source_id")) if isinstance(ref, dict) else ""
+        reading = readings.get(source_id)
+        kind = collapsed_text(row.get("event_kind"))
+        if (reading is None
+                or collapsed_text(row.get("claim_type")) != "date"
+                or kind not in (reading["declared_event_kind"], reading["event_kind"])):
+            out.append(row)
+            continue
+        updated = dict(row)
+        updated["event_kind"] = reading["event_kind"]
+        if reading["event_mention"] and not collapsed_text(updated.get("event_mention")):
+            updated["event_mention"] = reading["event_mention"]
+        out.append(updated)
+    return out
+
+
+# --------------------------------------------------------------------------
 # Owner relevance — a stated relationship AND an owner-relevant occurrence
 # --------------------------------------------------------------------------
 
@@ -851,6 +1298,7 @@ def _date_claim(
     extractor_version: str,
     now: object,
     subject_annotation: dict,
+    event_mention: str = "",
 ) -> dict | None:
     """One dated claim read out of one stored `chronology` record, or ``None``.
 
@@ -863,6 +1311,7 @@ def _date_claim(
     if parsed is None:
         return None
     basis = CLAIM_BASIS_BY_DATE_BASIS.get(parsed.basis, "inferred")
+    named = {"event_mention": event_mention} if collapsed_text(event_mention) else {}
     return validate_temporal_claim(
         {
             "source_ref": source_ref,
@@ -870,6 +1319,7 @@ def _date_claim(
             "claim_type": "date",
             "subject_mention": mention,
             **subject_annotation,
+            **named,
             "event_kind": event_kind,
             "temporal_value": parsed.to_dict(),
             "evidence": [_evidence_for(entry, domain, field_label)],
@@ -944,7 +1394,10 @@ def entry_claims(
         )
     row = domain_row_or_none(name)
     mention = entry_subject_mention(entry, row, name)
-    kind = date_event_kind(row)
+    # v345, :data:`A_LANDMARK_IS_DRAWN_AS_WHAT_IT_IS`. The ENTRY's own kind, not
+    # only the domain's: a `family` entry whose subject is a couple dates their
+    # wedding, and a newly filed record says so on its own receipt.
+    kind = entry_date_event_kind(name, entry, row=row)
     # Keep ordinary old receipts identical on re-file. Only names refused by
     # the untyped heuristic need the question set's non-person qualification.
     subject_annotation = {}
@@ -990,6 +1443,12 @@ def entry_claims(
         for alternate in _as_list(span_alternates.get(bound)):
             plan.append((alternate, bound_kind, "span"))
 
+    # v345. A re-read entry is NAMED on its own receipt, so a record filed from
+    # today forward needs no read-side help to be drawn as the thing it is.
+    # `event_mention` is outside `derive_claim_id`'s digest, so this adds a name
+    # and changes no identity.
+    event_mention = (wedding_mention_for(entry_subject_text(entry, row, name))
+                     if kind == MARRIAGE_EVENT_KIND else "")
     for record, event_kind, field_label in plan:
         if not record:
             continue
@@ -1004,6 +1463,7 @@ def entry_claims(
             extractor_version=extractor_version,
             now=now,
             subject_annotation=subject_annotation,
+            event_mention=event_mention if event_kind == kind else "",
         )
         if claim is not None:
             claims.append(claim)
@@ -1807,15 +2267,26 @@ def project_landmark_entries(active_index: object, *, sources: object,
             entry = landmarks_interaction.merge_landmark_entry(entry, skeleton)
         entry = skeleton_of(entry)
         row = domain_row_or_none(domain)
-        _attach_dates(entry, group["claims"], row=row)
+        _attach_dates(entry, group["claims"], row=row, domain=domain)
         domains.setdefault(domain, []).append(entry)
 
     return {"version": LANDMARKS_SCHEMA_VERSION, "domains": domains}
 
 
-def _attach_dates(entry: dict, claims: list[dict], *, row: object) -> None:
-    """Reconcile one group's dated claims onto the entry it belongs to."""
-    kind = date_event_kind(row)
+def _attach_dates(entry: dict, claims: list[dict], *, row: object,
+                  domain: object = None) -> None:
+    """Reconcile one group's dated claims onto the entry it belongs to.
+
+    v345: the bucket is the ENTRY's own kind (:func:`entry_date_event_kind`),
+    read off the merged skeleton. A vault whose ``family`` entry is a couple's
+    wedding holds its date claim at ``birth`` — the kind the importer read from
+    the domain — and reading the claim as the wedding it is without moving this
+    bucket with it would drop the date out of the drawing altogether. Both
+    spellings are accepted, so an already-corrected receipt and a legacy one
+    land in the same bucket.
+    """
+    kind = entry_date_event_kind(domain, entry, row=row) if domain else date_event_kind(row)
+    declared = date_event_kind(row)
     buckets: dict[str, list[dict]] = {}
     for claim in claims:
         if claim.get("claim_type") != "date":
@@ -1825,7 +2296,10 @@ def _attach_dates(entry: dict, claims: list[dict], *, row: object) -> None:
             continue
         buckets.setdefault(str(claim.get("event_kind") or ""), []).append(record.to_dict())
 
-    best, alternates = _reconciled(buckets.get(kind))
+    dated = list(buckets.get(kind) or ())
+    if declared != kind:
+        dated += [row for row in (buckets.get(declared) or ()) if row not in dated]
+    best, alternates = _reconciled(dated)
     _set_or_drop(entry, "date", best)
     _set_or_drop(entry, landmarks_interaction.DATE_ALTERNATES_KEY, alternates or None)
 

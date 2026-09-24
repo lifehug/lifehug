@@ -222,7 +222,17 @@ from temporal_claims import (  # noqa: E402
 #: prompt text for an unmoved gerund-phrase node — a different node set and a
 #: different work-item set for claims nobody edited, which is what moves this
 #: number.
-CALCULATION_RULE_VERSION = "timeline-rules:13"
+#: ``timeline-rules:14`` (v345): A TELLING OF A LANDMARK FOLDS ONTO IT, AND
+#: A LANDMARK IS DRAWN AS WHAT IT IS. A `family` landmark entry's date is read
+#: as the event the ENTRY dates rather than the one its domain declares, so a
+#: couple's wedding stops being drawn as ``<who>'s birth`` and the id it used to
+#: be drawn at is redirected; the milestone rung reads the kind the EVIDENCE
+#: names and keys a marriage on the COUPLE, so the tellings of a dated landmark
+#: fold onto it; and an age claim that agrees with the date a node is placed at
+#: is recorded as agreeing evidence instead of as a rival reading. The same
+#: claims calculate to a different node set, a different alternates set and a
+#: different work-item set for claims nobody edited.
+CALCULATION_RULE_VERSION = "timeline-rules:14"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -1853,20 +1863,151 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
     return groups
 
 
+#: v345. Reported, never raised: the id a landmark entry USED to be drawn at,
+#: redirected to the id it is drawn at now. Not a fault — it is the one line
+#: that says a redraw which changed what an entry's date DATES did not lose the
+#: node it used to draw.
+DIAGNOSTIC_LANDMARK_DATE_REDRAWN = "landmark_date_kind_redrawn"
+
+
+def _landmark_redraw_aliases(claims: list[dict], readings: object, *,
+                             groups: dict, owner_ref: str) -> tuple[dict, list]:
+    """``({old node id: new node id}, findings)`` for the entries read anew.
+
+    `landmark_projection.A_LANDMARK_IS_DRAWN_AS_WHAT_IT_IS` changes an entry's
+    event kind, and a node id is minted FROM the event kind — so a vault that
+    drew ``node:9ca9a5b1…`` "Parents's birth" yesterday draws a wedding node at
+    a different id today, and every work item, session and URL still names the
+    old one. `episode_fold.AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES` is
+    the standing rule and this is the FOURTH way a node id moves — v342 closed
+    three, and every one of them is an act of the identity layer. This one is
+    the drawing re-reading the fact.
+
+    The target is the node the claim ACTUALLY landed on, read out of ``groups``
+    rather than minted a second time: a bind may have put the claim in an
+    episode, and an alias to an id the drawing does not publish is the very
+    thing this rule exists to forbid. Two refusals, both quiet, both for the
+    reason the fold's carry has them: a key some claim STILL publishes is not
+    redirected (a redirect to a live node is worse than none), and a claim that
+    carries its own ``event_ref`` never moved at all, because its id was never
+    derived from its kind.
+    """
+    aliases: dict[str, str] = {}
+    findings: list[dict] = []
+    rows = dict(readings or {})
+    if not rows:
+        return aliases, findings
+    landed: dict[str, str] = {}
+    for node_id, group in groups.items():
+        for row in group.get("claims") or ():
+            key = collapsed_text(row.get("claim_id")) if isinstance(row, dict) else ""
+            if key:
+                landed[key] = node_id
+    for claim in claims:
+        ref = claim.get("source_ref")
+        source_id = collapsed_text(ref.get("source_id")) if isinstance(ref, dict) else ""
+        reading = rows.get(source_id)
+        if reading is None or collapsed_text(claim.get("claim_type")) != "date":
+            continue
+        if collapsed_text(claim.get("event_ref")):
+            continue
+        kind = collapsed_text(claim.get("event_kind"))
+        declared = collapsed_text(reading.get("declared_event_kind"))
+        if not declared or kind != collapsed_text(reading.get("event_kind")):
+            continue
+        subject = _subject_handle(claim)
+        now_id = landed.get(collapsed_text(claim.get("claim_id")))
+        if not subject or not now_id:
+            continue
+        was = _mint_node_id(event_kind=declared, subject=subject, owner_ref=owner_ref)
+        if was == now_id or was in groups:
+            continue
+        if aliases.get(was) not in (None, now_id):
+            continue
+        aliases[was] = now_id
+        findings.append({
+            "finding": DIAGNOSTIC_LANDMARK_DATE_REDRAWN,
+            "node_id": now_id,
+            "was_node_id": was,
+            "was_event_kind": declared,
+            "event_kind": kind,
+            "claim_id": collapsed_text(claim.get("claim_id")),
+        })
+    return aliases, findings
+
+
 # --------------------------------------------------------------------------
 # Reconciliation: the best-supported reading, with every rival kept
 # --------------------------------------------------------------------------
 
 
-def _reconcile_group(group: dict, *, birth: object, diagnostics: list) -> dict:
+#: v345. Reported, never raised: an age claim whose window CONTAINS the date the
+#: node is placed at. *"There are two ways for you to have resolved this"* (owner,
+#: 2026-09-24) — so both ways are recorded and neither is picked.
+DIAGNOSTIC_AGE_CORROBORATES = "age_corroborates_placement"
+
+#: The other half, and the one that must never be silent: an age claim whose
+#: window EXCLUDES the date the node is placed at. The window stays in the
+#: reconciliation as the rival it is, so `chronology.conflict_strength` scores
+#: the disagreement and the work-item seat mints the contradiction card naming
+#: both — v340's own ruling, not a second copy of it.
+DIAGNOSTIC_AGE_CONTRADICTS = "age_contradicts_placement"
+
+#: v345, the owner's ruling in one sentence.
+AN_AGE_AND_A_DATE_CORROBORATE = (
+    "an age claim that folds onto a moment the vault already dates is read "
+    "against the subject's own birth: a window that CONTAINS the date is "
+    "agreeing evidence on the placement and never a rival, and a window that "
+    "excludes it stays a rival so the contradiction card names both"
+)
+
+
+def _window_text(record: object) -> str:
+    """An age window as the STRETCH it is, not as its midpoint.
+
+    `chronology.to_edtf` renders a record's ``best``, and an age band's best is
+    a hedged year (``1976~``) — which is the right thing to publish and the
+    wrong thing to say in a finding about whether a day falls inside a window.
+    """
+    parsed = chrono.from_dict(record) if isinstance(record, dict) else record
+    earliest = collapsed_text(getattr(parsed, "earliest", ""))
+    latest = collapsed_text(getattr(parsed, "latest", ""))
+    if earliest and latest:
+        return earliest if earliest == latest else f"{earliest}/{latest}"
+    return chrono.to_edtf(parsed) or ""
+
+
+def _reconcile_group(group: dict, *, birth: object, diagnostics: list,
+                     birth_of_claim: object = None) -> dict:
     """One node's claims → ``{best, alternates, conflict, ...}``. Never destructive.
 
     §6.5: reconciliation runs in the deterministic derivation, returns the
     best-supported value *and* every materially supported alternative *and*
     enough provenance to mint a stable Mirror row — and never deletes the losing
     claim merely because another currently ranks higher.
+
+    **v345, :data:`AN_AGE_AND_A_DATE_CORROBORATE`.** Two things change for an
+    ``age`` claim and nothing else changes at all.
+
+    *An age is the age of the person the CLAIM is about.* ``birth_of_claim`` is
+    the caller's ``claim -> that subject's birth`` reader; without one every age
+    reads against ``birth`` exactly as it always did. The owner's vault is why:
+    "Mom married dad at 21" folds onto his parents' wedding, and the group's
+    subject is the couple while the age is his MOTHER's. Measuring her age
+    against the node's subject would be measuring it against the wrong person.
+
+    *An age that agrees is evidence, not a rival.* The dated claims reconcile
+    FIRST; an age window that intersects the winner joins its provenance and is
+    never published as an alternate, because a window a day sits inside is
+    corroboration at a coarser grain (`chronology.conflict_strength`'s own
+    words) and publishing it as a rival is how one fact reads as two answers.
+    An age window that does NOT intersect stays in the list, so the winner is
+    reconciled against it and the disagreement is scored and asked about. The
+    age never places a moment the vault already dates, which is the difference
+    between "1976-06-25, and she was 21" and "placed by age".
     """
     records: list[chrono.DateRecord] = []
+    ages: list[tuple[dict, chrono.DateRecord]] = []
     relations: list[dict] = []
     durations: list[dict] = []
     for claim in group["claims"]:
@@ -1877,9 +2018,10 @@ def _reconcile_group(group: dict, *, birth: object, diagnostics: list) -> dict:
                 records.append(record)
             continue
         if claim_type == "age":
-            record, finding = _record_for_age_claim(claim, birth)
+            anchor = birth_of_claim(claim) if callable(birth_of_claim) else birth
+            record, finding = _record_for_age_claim(claim, anchor)
             if record is not None:
-                records.append(record)
+                ages.append((claim, record))
             elif finding:
                 diagnostics.append(
                     {
@@ -1896,10 +2038,38 @@ def _reconcile_group(group: dict, *, birth: object, diagnostics: list) -> dict:
             value = claim.get("temporal_value")
             if isinstance(value, dict):
                 relations.append({"claim": claim, "relation": value})
+    agreeing: list[dict] = []
+    if ages:
+        placed = chrono.reconcile(records)["best_supported"] if records else None
+        for claim, record in ages:
+            if placed is not None and chrono.intersect(placed, record) is not None:
+                agreeing.extend(record.provenance)
+                diagnostics.append({
+                    "finding": DIAGNOSTIC_AGE_CORROBORATES,
+                    "node_id": group["node_id"],
+                    "claim_id": collapsed_text(claim.get("claim_id")),
+                    "placed": chrono.to_edtf(placed) or "",
+                    "age_window": _window_text(record),
+                })
+                continue
+            records.append(record)
+            if placed is not None:
+                diagnostics.append({
+                    "finding": DIAGNOSTIC_AGE_CONTRADICTS,
+                    "node_id": group["node_id"],
+                    "claim_id": collapsed_text(claim.get("claim_id")),
+                    "placed": chrono.to_edtf(placed) or "",
+                    "age_window": _window_text(record),
+                })
     outcome = chrono.reconcile(records)
     span = _era_span(group)
+    best = span if span is not None else outcome["best_supported"]
+    if best is not None and agreeing:
+        kept = tuple(item for item in agreeing if item not in best.provenance)
+        if kept:
+            best = replace(best, provenance=best.provenance + kept)
     return {
-        "best": span if span is not None else outcome["best_supported"],
+        "best": best,
         "alternates": list(outcome["alternates"]),
         "conflict": float(outcome["conflict"]),
         "relations": relations,
@@ -4461,6 +4631,17 @@ def derive_calculated_timeline(
 
     claims = active_claim_rows(active_index)
 
+    # v345, `landmark_projection.A_LANDMARK_IS_DRAWN_AS_WHAT_IT_IS`. FIRST,
+    # before resolution, identity or grouping, because every one of them reads
+    # `event_kind`: a landmark date claim is read as the event its ENTRY dates
+    # rather than as the event its domain declares, so the `family` entry that is
+    # a couple's wedding stops being drawn as `<who>'s birth`. A reading, never a
+    # migration — the receipt on disk is untouched and the vault heals on this
+    # redraw alone. The binder's own `telling_views` applies the identical read, so
+    # the binder and the drawing cannot disagree about what the date is.
+    landmark_date_readings = lp.landmark_date_readings(landmark_entries)
+    claims = lp.read_landmark_dates(claims, landmark_entries)
+
     # E3 (§4.3): EVENT resolution, before subjects and before grouping,
     # because the grouping key IS the resolved `event_ref`. This is the same
     # seam `resolution_records` already is, extended from subjects to events:
@@ -4515,6 +4696,13 @@ def derive_calculated_timeline(
     identity.adopt_participation_episodes(participation.node_of_episode)
     groups = _group_claims(resolved, owner_ref=owner, era_views=era_views,
                            identity=identity, participation=participation)
+    # v345. The node id a re-read landmark entry used to be drawn at, redirected
+    # to the id it is drawn at now — computed AFTER grouping, so a key the
+    # drawing still publishes is never made an alias of anything.
+    landmark_aliases, landmark_alias_findings = _landmark_redraw_aliases(
+        resolved, landmark_date_readings, groups=groups, owner_ref=owner
+    )
+    diagnostics.extend(landmark_alias_findings)
     roster_names = _roster_names(roster_snapshot)
     displays = {
         node_id: _subject_display(group["subject"], group["claims"], roster_names)
@@ -4598,9 +4786,31 @@ def derive_calculated_timeline(
         # owner-only mention; a named or unbound subject stays unplaced.
         return None
 
+    def birth_for_claim(group: dict) -> object:
+        """v345: ``claim -> the birth the AGE on it is measured from``.
+
+        The claim's own subject when the vault knows that person's birthday,
+        the group's anchor otherwise — so nothing a vault held before this
+        release is read against a different birth than it was, and an age about
+        somebody the group is not about stops being read against the group's
+        subject (:data:`AN_AGE_AND_A_DATE_CORROBORATE`).
+        """
+        fallback = birth_for_group(group)
+
+        def resolve(claim: object) -> object:
+            row = claim if isinstance(claim, dict) else {}
+            for value in (row.get("subject_ref"), row.get("subject_mention")):
+                key = normalized_mention_key(value)
+                if key and key in births_by_subject:
+                    return births_by_subject[key]
+            return fallback
+
+        return resolve
+
     calculated = {
         node_id: _reconcile_group(
-            group, birth=birth_for_group(group), diagnostics=diagnostics
+            group, birth=birth_for_group(group), diagnostics=diagnostics,
+            birth_of_claim=birth_for_claim(group),
         )
         for node_id, group in sorted(groups.items())
     }
@@ -5088,7 +5298,10 @@ def derive_calculated_timeline(
         # own re-key when its first stated start moved its discriminator. The
         # identity layer wins a collision: a person's decision outranks an
         # arithmetic one, and this map is read to FOLLOW citations.
-        node_aliases={**participation.node_aliases, **identity.node_aliases()},
+        # v345 adds the third source and takes the LOWEST precedence: a
+        # person's decision and a stay's own re-key both outrank a redraw.
+        node_aliases={**landmark_aliases, **participation.node_aliases,
+                      **identity.node_aliases()},
         episode_aliases=identity.episode_aliases(),
         identity_rule_version=efc.IDENTITY_RULE_VERSION,
         identity_diagnostics=identity.identity_diagnostics(),

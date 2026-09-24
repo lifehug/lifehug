@@ -46,7 +46,9 @@ The rule, built in the smallest right places, ONE definition each:
    `identity_resolution.identity_work_item` never offers the OWNER as a
    candidate for the owner's own given name (`owner_refs`); fewer than two
    real candidates after that mints nothing.
-4. `temporal_timeline.CALCULATION_RULE_VERSION` moves to ``timeline-rules:13``
+4. `temporal_timeline.CALCULATION_RULE_VERSION` moves (to ``timeline-rules:13``
+   at v343; the assertion below pins whatever the LIVE value is, which later
+   releases move on from)
    — the same claims now calculate to a different node set and a different
    work-item set for claims nobody edited, exactly what moves that number.
 
@@ -482,7 +484,7 @@ class EndToEndIdentityCardsTests(unittest.TestCase):
 
 class CalculationRuleVersionTests(unittest.TestCase):
     def test_the_rule_version_is_v343s(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:13")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:14")
 
 
 if __name__ == "__main__":

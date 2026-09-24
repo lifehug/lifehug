@@ -345,7 +345,16 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:13 -->
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:14 -->
+`timeline-rules:14` (v345), which made a landmark be drawn as what it IS and a
+telling of one fold onto it: a `family` entry's date is read as the event the
+ENTRY dates rather than the one the domain declares — so a couple's wedding stops
+being drawn a second time as `<who>'s birth`, and the id it used to be drawn at is
+redirected instead of vanishing — the milestone rung reads the kind the EVIDENCE
+names ("Birth of Harvey" behind a telling called "Harvey arriving") and keys a
+marriage on the COUPLE rather than on one of its two people, and an age claim
+whose window contains the date a node is placed at is recorded as agreeing
+evidence on that placement instead of as a rival reading.
 `timeline-rules:13` (v343, owner staging review 2026-09-24), which made a card
 askable only when a person could answer it. Three defects, one number: a claim
 whose only label is a pronoun/placeholder (`landmarks_interaction.EMPTY_SUBJECT_LABELS`)
