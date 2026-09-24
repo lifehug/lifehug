@@ -1135,19 +1135,41 @@ def cmd_bind_episodes(args: argparse.Namespace) -> int:
     except TemporalContractError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    # v348 (`episode_binder.NOTHING_TO_BIND_COSTS_NOTHING`): a pass whose
+    # cheap signature matched the last apply's receipt derived nothing —
+    # `outcome["plan"]` is `None`, and there is no `BinderPlan` to serialize.
+    nothing_new = outcome.get("reason") == "nothing_new"
     if getattr(args, "json", False):
-        payload = outcome["plan"].as_dict()
-        payload["applied"] = outcome["applied"]
-        payload["filed"] = outcome["filed"]
-        payload["age_frames"] = outcome["frames"]
-        payload["roster_entities"] = outcome["entities"]
-        payload["question_context_stamps"] = outcome["question_contexts"]
+        if nothing_new:
+            last = outcome.get("last_summary") or {}
+            payload = {
+                "rule_version": episode_binder.RULE_VERSION,
+                "rule_id": episode_binder.RULE_ID,
+                "applied": False,
+                "reason": "nothing_new",
+                "counts": last.get("counts"),
+                "filed": None,
+                "last_filed": last.get("filed"),
+                "age_frames": outcome["frames"],
+                "roster_entities": outcome["entities"],
+                "question_context_stamps": outcome["question_contexts"],
+            }
+        else:
+            payload = outcome["plan"].as_dict()
+            payload["applied"] = outcome["applied"]
+            payload["reason"] = outcome.get("reason")
+            payload["filed"] = outcome["filed"]
+            payload["age_frames"] = outcome["frames"]
+            payload["roster_entities"] = outcome["entities"]
+            payload["question_context_stamps"] = outcome["question_contexts"]
         print(json.dumps(payload, indent=2, sort_keys=True, default=str))
         return 0
     print("\n".join(outcome["report"]))
     print(f"  age_frames: {outcome['frames']}")
     print(f"  roster_entities: {outcome['entities']}")
     print(f"  question_context_stamps: {outcome['question_contexts']}")
+    if nothing_new:
+        return 0
     if apply:
         filed = outcome["filed"] or {}
         print(f"✓ filed {len(filed.get('envelopes', []))} envelope(s), "

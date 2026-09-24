@@ -42,7 +42,10 @@ Synthetic data only; this module NEVER references any real vault.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -77,6 +80,7 @@ from temporal_claims import (  # noqa: E402
     digest_id,
     normalized_mention_key,
 )
+from vault_paths import atomic_write_vault_text  # noqa: E402
 
 # --------------------------------------------------------------------------
 # Vocabulary — imported, never restated (ADR 0021)
@@ -3692,6 +3696,350 @@ FRAMES_COME_FROM_THE_FOLD = (
 )
 
 
+# --------------------------------------------------------------------------
+# v348 — nothing to bind costs nothing
+# --------------------------------------------------------------------------
+
+#: `read_vault_inputs`' one `fold_derivation` plus `plan()`'s R1/R2 candidate
+#: search over every telling is the honest cost of BINDING something
+#: (`FRAMES_COME_FROM_THE_FOLD`). It is not the honest cost of confirming
+#: there is nothing to bind. On the owner's vault (~2000 claims, ~1190
+#: nodes) that confirmation ALONE — `bind-episodes --apply` immediately
+#: after a full sweep had already applied everything — measured 187s wall on
+#: a fast Mac and 300-450s on the hosted 2-vCPU worker (2026-09-24). Every
+#: timeline answer rides a file-claims job that runs this binder, so ten
+#: answers cost ten full derivations serialized through one vault lease.
+#:
+#: THE RULE: a pass whose CHEAP signature — the telling manifest's own
+#: digest, the bindings store's own digest, the landmark sources' own digest
+#: (measured on the rig: `go-dig-import --apply` files a landmark record
+#: WITHOUT touching a claim, a binding, the active index or the telling
+#: manifest, so a signature without it would fast-path past a landmark that
+#: really did change what a telling's containment rung would decide), this
+#: module's `RULE_VERSION` and `temporal_timeline.CALCULATION_RULE_VERSION`
+#: — matches the receipt left by the last successful `--apply` does NO
+#: derivation at all: no `fold_derivation`, no `plan()`. It returns that
+#: apply's own summary, read back, with `applied: False, reason:
+#: "nothing_new"`. Any difference — a new or changed telling, a changed
+#: binding, a changed landmark record, a moved rule version, or no receipt
+#: at all — is the full pass, exactly as before it existed.
+#:
+#: Deliberately NOT built here: restricting the R2a-R2d candidate search to
+#: only the NEW tellings and reusing a cached fold derivation for everything
+#: else. That would need the fold's own candidate retrieval
+#: (:func:`retrieve`, :func:`independent_signals`, the containment rung) to
+#: be provably indifferent to which OTHER tellings are in scope when it
+#: judges one pair — a claim this module is not in a position to prove for
+#: every rung without risking exactly the silent-loss class v340 and v342
+#: exist to refuse. The full pass is the honest fallback for anything short
+#: of "nothing changed at all", and it is what a NEW telling still gets.
+NOTHING_TO_BIND_COSTS_NOTHING = (
+    "a binder pass whose cheap signature (the telling manifest's digest, the "
+    "bindings store's digest, the landmark sources' digest, RULE_VERSION and "
+    "temporal_timeline.CALCULATION_RULE_VERSION) matches the receipt left by "
+    "the last successful --apply does no derivation at all — no "
+    "fold_derivation, no plan() — and returns that apply's own summary with "
+    "applied: False, reason: \"nothing_new\"; any difference (a new or "
+    "changed telling, a changed binding, a changed landmark record, a moved "
+    "rule version, or no receipt) is the full pass, exactly as before"
+)
+
+#: `state/temporal_claims/binder_receipt.json` — beside the bindings store
+#: and `event_identity.TELLING_MANIFEST_FILE`. A PROJECTION of the last
+#: successful `--apply`, never evidence: delete it and the next pass simply
+#: pays the full cost once, the same as a vault that has never applied.
+BINDER_RECEIPT_FILE = f"{ei.TEMPORAL_STATE_DIR}/binder_receipt.json"
+
+#: Bumped only if the receipt's own SHAPE changes in a way an old reader
+#: could misread as a match (a field renamed or repurposed). Adding a new
+#: informational field is not such a change.
+BINDER_RECEIPT_SCHEMA_VERSION = 1
+
+#: The four directories `event_identity.apply_plan` files through, both
+#: authorities. Read here to build :func:`_bindings_store_digest`, never to
+#: build the records themselves — `event_identity.load_event_identities`
+#: does that, and it pays for the parse and the validation this digest is
+#: built to avoid paying for twice.
+_BINDING_STORE_DIRECTORIES = (
+    ei.HUMAN_BINDINGS_DIR, ei.STATE_BINDINGS_DIR,
+    ei.HUMAN_OPERATIONS_DIR, ei.STATE_OPERATIONS_DIR,
+)
+
+
+def _framework_version() -> int | None:
+    """`system/version.json`'s own `version`, read beside this module.
+
+    Cheap by construction: one small file next to `episode_binder.py`
+    itself, never a vault walk. `None` when it cannot be read, which simply
+    means the receipt records nothing for this field and can never match it.
+    """
+    try:
+        payload = json.loads((SYSTEM_DIR / "version.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    value = payload.get("version") if isinstance(payload, dict) else None
+    return value if isinstance(value, int) else None
+
+
+def _vault_head(vault_root: str | Path) -> str | None:
+    """The vault's own git HEAD, if it has one. INFORMATIONAL ONLY — never a
+    gate (:func:`_signature_matches` never reads it): most vaults are not
+    the framework's own git history, and a vault with no git repo simply has
+    no head to report."""
+    try:
+        root = store.store_path(vault_root, ".")
+    except store.TemporalStoreError:
+        return None
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, ValueError):
+        return None
+    text = completed.stdout.strip()
+    return text if completed.returncode == 0 and text else None
+
+
+def _telling_digest(manifest: Mapping) -> str:
+    """The manifest's own tellings, digested — claim ids, active claim ids,
+    revisions and status, per telling ref.
+
+    Cheap by construction: the manifest is already on disk
+    (`event_identity.read_telling_manifest`), so this reads no receipt and
+    derives no fold — exactly :data:`NOTHING_TO_BIND_COSTS_NOTHING`'s
+    "not by deriving the fold". A telling's `bound_identity_ids` are
+    deliberately NOT part of this digest; that half of the manifest is only
+    as fresh as the last rebuild (classify and resolve rebuild it, `--apply`
+    does not), so the BINDINGS half of the signature is
+    :func:`_bindings_store_digest`'s own, read straight off the store this
+    module writes through.
+    """
+    rows = sorted(
+        (
+            {
+                "telling_ref": collapsed_text(row.get("telling_ref")),
+                "status": collapsed_text(row.get("status")),
+                "claim_ids": sorted(collapsed_text(v) for v in (row.get("claim_ids") or ())),
+                "active_claim_ids": sorted(
+                    collapsed_text(v) for v in (row.get("active_claim_ids") or ())
+                ),
+                "extraction_revisions": sorted(
+                    collapsed_text(v) for v in (row.get("extraction_revisions") or ())
+                ),
+                "document_revision": collapsed_text(row.get("document_revision")),
+                "superseded_by": collapsed_text(row.get("superseded_by")),
+            }
+            for row in (manifest.get("tellings") or ())
+            if isinstance(row, dict)
+        ),
+        key=lambda row: row["telling_ref"],
+    )
+    return digest_id("bindertelling", rows)
+
+
+def _bindings_store_digest(vault_root: str | Path) -> str:
+    """A content digest of every filed binding and operation, both
+    authorities.
+
+    Cheap by construction relative to what a full pass already pays:
+    `event_identity.load_event_identities` parses and validates every
+    binding into a record; this reads the same files' RAW bytes and hashes
+    them, which is the one thing that has to happen for a digest to mean
+    anything and the only thing it does. A file this function cannot read
+    is skipped rather than raising, the same as a full pass's own readers —
+    an unreadable binding is that pass's problem, not this signature's.
+    """
+    root = store.store_path(vault_root, ".")
+    entries: list[list[str]] = []
+    for directory in _BINDING_STORE_DIRECTORIES:
+        base = store.store_path(root, directory)
+        if not base.is_dir():
+            continue
+        for path in sorted(base.glob("*.json")):
+            try:
+                content = path.read_bytes()
+            except OSError:
+                continue
+            entries.append([f"{directory}/{path.name}", hashlib.sha256(content).hexdigest()])
+    return digest_id("binderbindings", sorted(entries))
+
+
+def _landmark_sources_digest(vault_root: str | Path) -> str:
+    """A content digest of every promoted landmark record
+    (`landmark_projection.LANDMARK_SOURCES_DIR`).
+
+    Measured, not assumed: a landmark import (`go-dig-import --apply`, the
+    Add Landmark interaction) files `sources/landmarks/entry-*.md` and
+    `state/landmarks.json` WITHOUT filing a receipt or touching the active
+    index or the telling manifest at all — confirmed on the owner's own
+    vault via the rig, where a fresh `go-dig-import --apply` left
+    `state/temporal_claims/active_index.json`'s claim count and the telling
+    manifest both byte-for-byte unchanged. `plan()` reads landmark entries
+    for `participation_kinds_by_telling` and
+    :data:`A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT` — a stay's dates widening,
+    or a participant added, can change what an EXISTING telling's containment
+    rung decides without any claim or binding moving at all. Cheap the same
+    way :func:`_bindings_store_digest` is cheap: raw bytes, sha256, no
+    frontmatter parse — a vault the size this release is about holds this in
+    the low hundreds of files, not the thousands its claims and bindings do.
+    """
+    base = store.store_path(vault_root, lp.LANDMARK_SOURCES_DIR)
+    if not base.is_dir():
+        return digest_id("binderlandmarks", [])
+    entries: list[list[str]] = []
+    for path in sorted(base.glob("entry-*.md")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            content = path.read_bytes()
+        except OSError:
+            continue
+        entries.append([path.name, hashlib.sha256(content).hexdigest()])
+    return digest_id("binderlandmarks", sorted(entries))
+
+
+def _cheap_pass_signature(vault_root: str | Path) -> dict | None:
+    """The vault's cheap signature, or `None` when it cannot be read cheaply.
+
+    `None` when the telling manifest has never been built — the ordinary
+    state of a vault the classifier has never rebuilt one for — and the full
+    pass is therefore the only honest answer; a missing manifest is not
+    "nothing new", it is "unknown". NEVER derives the fold.
+    """
+    manifest = ei.read_telling_manifest(vault_root)
+    if manifest is None:
+        return None
+    return {
+        "telling_digest": _telling_digest(manifest),
+        "bindings_digest": _bindings_store_digest(vault_root),
+        "landmark_digest": _landmark_sources_digest(vault_root),
+        "rule_version": RULE_VERSION,
+        "calculation_rule_version": tt.CALCULATION_RULE_VERSION,
+        "framework_version": _framework_version(),
+    }
+
+
+#: The six fields a receipt and a fresh signature must agree on for a pass
+#: to be `nothing_new`. Named once so :func:`_signature_matches` and a test
+#: that wants to prove "this field alone gates the fast path" read the same
+#: list.
+BINDER_RECEIPT_SIGNATURE_FIELDS = (
+    "telling_digest", "bindings_digest", "landmark_digest", "rule_version",
+    "calculation_rule_version", "framework_version",
+)
+
+
+def _signature_matches(receipt: Mapping | None, signature: Mapping | None) -> bool:
+    if not receipt or not signature:
+        return False
+    if receipt.get("schema_version") != BINDER_RECEIPT_SCHEMA_VERSION:
+        return False
+    return all(
+        receipt.get(key) == signature.get(key) for key in BINDER_RECEIPT_SIGNATURE_FIELDS
+    )
+
+
+def read_binder_receipt(vault_root: str | Path) -> dict | None:
+    """The last successful `--apply`'s receipt, or `None` when there is none
+    yet (a vault that has never applied, or one where it was deleted —
+    :data:`BINDER_RECEIPT_FILE` is a projection and deleting it is always
+    safe, the next pass just pays the full cost once)."""
+    text = store.read_store_text(vault_root, BINDER_RECEIPT_FILE)
+    if text is None:
+        return None
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def write_binder_receipt(vault_root: str | Path, receipt: Mapping) -> Path:
+    """Publish the receipt atomically, the same way `write_telling_manifest`
+    publishes the manifest beside it."""
+    root = store.store_path(vault_root, ".")
+    path = store.store_path(root, BINDER_RECEIPT_FILE)
+    text = json.dumps(receipt, indent=2, sort_keys=True, ensure_ascii=False, default=str) + "\n"
+    atomic_write_vault_text(path, text, vault_root=root)
+    return path
+
+
+def _compact_report_summary(report: Sequence[str]) -> list[str]:
+    """The `Summary` tail of a `describe()` report, never the per-pair
+    narrative in front of it.
+
+    `describe()`'s own report is O(candidate pairs judged) — thousands of
+    lines on a vault the size the whole point of this release is about — and
+    a RECEIPT meant to stay small has no business holding a copy of it. The
+    aggregate counts a person actually wants back on a `nothing_new` run are
+    all after the line literally spelled ``"Summary"`` (:func:`describe`
+    appends it verbatim); a report shaped some other way is returned whole
+    rather than guessed at.
+    """
+    rows = list(report)
+    try:
+        index = rows.index("Summary")
+    except ValueError:
+        return rows
+    return rows[max(index - 1, 0):]
+
+
+def _write_receipt_after_apply(vault_root: str | Path, *, result: BinderPlan,
+                               report: Sequence[str], filed: Mapping,
+                               frames: int, entities: int,
+                               question_contexts: int) -> None:
+    """The receipt :data:`NOTHING_TO_BIND_COSTS_NOTHING` reads back.
+
+    Computed AFTER `apply_plan` has written, so the bindings digest reflects
+    what THIS run just filed — the next pass's own cheap signature is
+    measured against what is on disk now, not against what was on disk
+    before this apply ran. A vault with no telling manifest yet writes no
+    receipt: there is nothing safe to compare a future signature against.
+    """
+    signature = _cheap_pass_signature(vault_root)
+    if signature is None:
+        return
+    receipt = dict(signature)
+    receipt["schema_version"] = BINDER_RECEIPT_SCHEMA_VERSION
+    receipt["rule"] = "episode_binder.NOTHING_TO_BIND_COSTS_NOTHING"
+    receipt["vault_head"] = _vault_head(vault_root)
+    receipt["summary"] = {
+        "report": _compact_report_summary(report),
+        "counts": dict(result.counts),
+        "filed": dict(filed),
+        "frames": frames,
+        "entities": entities,
+        "question_contexts": question_contexts,
+    }
+    write_binder_receipt(vault_root, receipt)
+
+
+def _fast_path_outcome(receipt: Mapping) -> dict:
+    """`bind_episodes`'s return shape for a `nothing_new` pass — everything a
+    caller (the CLI, `binder_step`) reads off a normal outcome, `plan` and
+    `filed` both `None` because neither was derived."""
+    summary = receipt.get("summary") or {}
+    report = [
+        *(summary.get("report") or []),
+        "",
+        ("nothing to bind: no new telling or binding since the last apply "
+         "(episode_binder.NOTHING_TO_BIND_COSTS_NOTHING)"),
+    ]
+    return {
+        "plan": None,
+        "report": report,
+        "applied": False,
+        "reason": "nothing_new",
+        "filed": None,
+        "frames": summary.get("frames", 0),
+        "entities": summary.get("entities", 0),
+        "question_contexts": summary.get("question_contexts", 0),
+        "last_summary": summary,
+        "fast_path": True,
+    }
+
+
 def read_vault_inputs(vault_root: str | Path, *, now: object = None) -> dict:
     """Everything one run needs, off a vault. The only impure read here.
 
@@ -3997,7 +4345,23 @@ def bind_episodes(vault_root: str | Path, *, apply: bool = False,
 
     Returns ``{"plan", "report", "applied", "filed"}`` — the plan for a
     caller, the lines for a terminal, and what was filed when anything was.
+
+    v348 (:data:`NOTHING_TO_BIND_COSTS_NOTHING`): the FIRST thing every pass
+    does, dry run or apply, is compare the vault's cheap signature against
+    the receipt the last successful `--apply` left. A match means nothing
+    the fold would decide has moved, so nothing is derived — ``"plan"`` and
+    ``"filed"`` come back `None`, ``"applied"`` is `False` even when the
+    caller asked for `apply=True`, because nothing WAS applied this run, and
+    ``"reason"`` is ``"nothing_new"``. Anything else — a new or changed
+    telling, a changed binding, a moved rule version, or no receipt at all —
+    runs the full pass exactly as before, and a successful `--apply` writes
+    a fresh receipt afterward so the NEXT pass can be the fast one.
     """
+    signature = _cheap_pass_signature(vault_root)
+    receipt = read_binder_receipt(vault_root) if signature is not None else None
+    if _signature_matches(receipt, signature):
+        return _fast_path_outcome(receipt)
+
     inputs = read_vault_inputs(vault_root, now=now)
     result = plan(
         inputs["claims"], episode_records=inputs["episode_records"],
@@ -4010,14 +4374,25 @@ def bind_episodes(vault_root: str | Path, *, apply: bool = False,
         question_cap=question_cap, trigger=trigger, now=now,
     )
     filed = apply_plan(vault_root, result) if apply else None
+    report = describe(result, applied=bool(apply))
+    frames = len(inputs["frames"])
+    entities = inputs["entity_index"].size()
+    question_contexts = len(inputs["question_contexts"])
+    if apply and filed is not None:
+        _write_receipt_after_apply(
+            vault_root, result=result, report=report, filed=filed,
+            frames=frames, entities=entities, question_contexts=question_contexts,
+        )
     return {
         "plan": result,
-        "report": describe(result, applied=bool(apply)),
+        "report": report,
         "applied": bool(apply),
+        "reason": None,
         "filed": filed,
-        "frames": len(inputs["frames"]),
-        "entities": inputs["entity_index"].size(),
-        "question_contexts": len(inputs["question_contexts"]),
+        "frames": frames,
+        "entities": entities,
+        "question_contexts": question_contexts,
+        "fast_path": False,
     }
 
 
@@ -4036,6 +4411,30 @@ def binder_step(vault_root: str | Path, *, now: object = None,
                             containment_authority=containment_authority,
                             trigger="maintenance_sweep")
     result = outcome["plan"]
+    if result is None:
+        # v348 fast path (:data:`NOTHING_TO_BIND_COSTS_NOTHING`): nothing
+        # changed since the last apply, so there is nothing this dry run
+        # would decide that the last apply's own receipt does not already
+        # say. The step is still a dry run either way
+        # (:data:`MAINTENANCE_STEP_IS_A_DRY_RUN`) — reading nothing costs
+        # nothing, so it reports the last summary's counts rather than
+        # deriving a plan only to discard it.
+        last = outcome.get("last_summary") or {}
+        authority = containment_authority or ec.DEFAULT_CONTAINMENT_AUTHORITY
+        block_name = "containments" if authority == "applied" else "containment_proposals"
+        return {
+            "counts": dict(last.get("counts") or {}),
+            "report": outcome["report"],
+            "questions": [],
+            "overmerges": [],
+            block_name: [],
+            "containment_diagnostics": [],
+            "containment_ambiguities": [],
+            "containment_upgrades": [],
+            "containment_kept_stronger": [],
+            "wrote": False,
+            "reason": "nothing_new",
+        }
     return {
         "counts": dict(result.counts),
         "report": outcome["report"],
@@ -4063,6 +4462,10 @@ __all__ = [
     "CONTAINMENT_AUTHORITIES",
     "BINDER_ERROR_CODES",
     "BINDER_OUTPUT_FILE",
+    "BINDER_RECEIPT_FILE",
+    "BINDER_RECEIPT_SCHEMA_VERSION",
+    "BINDER_RECEIPT_SIGNATURE_FIELDS",
+    "NOTHING_TO_BIND_COSTS_NOTHING",
     "CANONICAL_DIRECTION_RULE",
     "CLUSTER_RULE_TEXT",
     "CONTAINMENT_PHRASES",
@@ -4171,6 +4574,7 @@ __all__ = [
     "prospective_episode_id",
     "question_row",
     "r1_conditions",
+    "read_binder_receipt",
     "read_question_contexts",
     "read_vault_inputs",
     "reaudit_findings",
@@ -4182,4 +4586,5 @@ __all__ = [
     "telling_views",
     "unit_of",
     "verdict_for",
+    "write_binder_receipt",
 ]
