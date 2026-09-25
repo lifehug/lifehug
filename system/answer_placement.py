@@ -718,6 +718,10 @@ def empty_report() -> dict:
             "answers": 0, "placed": 0, "tellings": 0, "filed": [],
             "by_reading": {name: 0 for name in READINGS},
             "refused": {name: 0 for name in REFUSALS},
+            # v358: answers to a relation-word card, which carry a word about
+            # a person rather than a time about a moment
+            # (`relation_words.file_relation_answer`).
+            "relation_words": [],
             "errors": []}
 
 
@@ -745,6 +749,10 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
     projection = pub.read_projection(root) or {}
     for row in answers:
         report["answers"] += 1
+        relation = _relation_answer(root, row, work_items=work_items, dry_run=dry_run,
+                                    report=report)
+        if relation:
+            continue
         card, refusal = card_for_answer(root, row["session_ref"],
                                         work_items=work_items, projection=projection)
         if card is None:
@@ -776,6 +784,30 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
     return report
 
 
+def _relation_answer(root: Path, row: dict, *, work_items: object, dry_run: bool,
+                     report: dict) -> bool:
+    """v358: an answer to a relation-word card files the owner's word, not a time.
+
+    `relation_words.file_relation_answer` is the whole rule; this is the seat.
+    ``True`` when the answer named a relation-word card — whatever the reply
+    said — so the time readings below never read it.
+    """
+    import relation_words as rw  # noqa: PLC0415
+
+    try:
+        filed = rw.file_relation_answer(root, session_ref=row["session_ref"],
+                                        text=row["text"], work_items=work_items,
+                                        dry_run=dry_run)
+    except Exception as exc:  # noqa: BLE001 — one bad answer never stops the rest
+        report["errors"].append(
+            f"{row['source_path']}: {type(exc).__name__}: {str(exc)[:200]}")
+        return True
+    if filed is None:
+        return False
+    report["relation_words"].append({**filed, "source_path": row["source_path"]})
+    return True
+
+
 def describe(report: object) -> list[str]:
     """One human line per fact a run produced, for a CLI to print."""
     row = report if isinstance(report, dict) else {}
@@ -788,6 +820,11 @@ def describe(report: object) -> list[str]:
     for name, count in sorted((row.get("refused") or {}).items()):
         if count:
             lines.append(f"  refused {name}: {count}")
+    for filed in row.get("relation_words") or ():
+        outcome = (f"relation word {filed.get('relation_gender')}"
+                   if filed.get("relation_gender") and not filed.get("refused")
+                   else f"refused {filed.get('refused')}")
+        lines.append(f"  {filed.get('subject_ref')}: {outcome}")
     for problem in row.get("errors") or ():
         lines.append(f"  error {problem}")
     return lines

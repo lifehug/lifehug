@@ -86,12 +86,17 @@ REQUESTED_FIELD_BIRTH_DATE = "birth_date"
 REQUESTED_FIELD_DATE = "date"
 REQUESTED_FIELD_START_DATE = "start_date"
 REQUESTED_FIELD_ORDER = "order"
+#: v358 (`relation_words`): not a time at all — which FORM of a relationship
+#: word the owner uses for one person. Canonical in its own right, so it passes
+#: through untouched rather than widening to ``date``.
+REQUESTED_FIELD_RELATION_GENDER = "relation_gender"
 
 CANONICAL_REQUESTED_FIELDS = (
     REQUESTED_FIELD_BIRTH_DATE,
     REQUESTED_FIELD_DATE,
     REQUESTED_FIELD_START_DATE,
     REQUESTED_FIELD_ORDER,
+    REQUESTED_FIELD_RELATION_GENDER,
 )
 
 #: The keystone lane's single pre-O-E6 spelling. It is DEPRECATED and this

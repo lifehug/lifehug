@@ -1124,6 +1124,9 @@ WORK_ITEM_PLACEMENT_GAIN = {
     # whole new entry rather than one date, so it is scored a little below
     # `missing_anchor`'s single-node recall.
     "chain_gap": 0.6,
+    # v358 (`relation_words`): the answer is a word, not a date — it places
+    # nothing, and it is a Timeline-only row the daily queue never reads.
+    "relation_word": 0.0,
 }
 
 #: What an item is worth when it says nothing. Neutral on value and fit, mildly

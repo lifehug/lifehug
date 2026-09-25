@@ -94,6 +94,7 @@ import era_memberships as era  # noqa: E402
 import event_binding as eb  # noqa: E402
 import identity_resolution as ident  # noqa: E402
 import landmark_projection as lp  # noqa: E402
+import relation_words as rw  # noqa: E402
 import temporal_placement as tpl  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_receipts as trcpt  # noqa: E402
@@ -662,6 +663,25 @@ def _without_stakeless_date_cards(payloads: dict) -> list[dict]:
     return [dropped[key] for key in sorted(dropped)]
 
 
+def _with_relation_words(payloads: dict, *, roster_snapshot: object, index: object,
+                         landmark_entries: object, owner_names: object,
+                         now: object) -> None:
+    """`relation_words.with_relation_words` over the rendered pair, in place.
+
+    Guarded like the placement score: a problem reading relation words must
+    never take a publish down — it costs the words and the cards, and nothing
+    the fold derived.
+    """
+    try:
+        claims = store.active_claims(index) if isinstance(index, dict) else ()
+        rw.with_relation_words(
+            payloads, projection_key=PROJECTION_FILE, roster=roster_snapshot,
+            claims=claims, landmark_entries=landmark_entries or (),
+            owner_names=owner_names or (), now=now)
+    except Exception:  # noqa: BLE001
+        return
+
+
 def rebuild_signature(payload: object) -> dict:
     """A published file reduced to what a rebuild must reproduce exactly.
 
@@ -1042,6 +1062,14 @@ def publish(
     # Owner ruling 2 (2026-09-23): and now that the window IS on the card, the
     # cards that the window shows buy nothing come off. Same seam, same rule.
     stakeless_cards = _without_stakeless_date_cards(payloads)
+    # v358 (owner ruling 2026-09-25, `relation_words`): the word each roster
+    # person is spoken of by, and at most one card per person whose word is not
+    # yet known. Read from the roster and the claims this fold already holds —
+    # a display decision over the SAME generation, so `calculation_rule_version`
+    # does not move.
+    _with_relation_words(payloads, roster_snapshot=roster_snapshot, index=index,
+                         landmark_entries=derivation_inputs.get("landmark_entries"),
+                         owner_names=owner_names, now=published_at)
 
     # THE SEMANTIC NO-OP (eras design §3.4). Age frames make the projection a
     # function of the clock as well as of the receipts, so "publish again"
@@ -1157,6 +1185,8 @@ def _rule_identity() -> dict:
         "projection_schema_version": tp.projection_schema_version(),
         "calculation_rule_version": tt.CALCULATION_RULE_VERSION,
         "score_formula_version": tt.SCORE_FORMULA_VERSION,
+        # v358: what a projection says about relation words and their cards.
+        "relation_word_rule_version": rw.RELATION_WORD_RULE_VERSION,
     }
 
 
@@ -1433,6 +1463,11 @@ EMPTY_VIEW = {
     # so the collapse is checkable rather than mysterious.
     "landmark_opportunities": (),
     "landmark_sufficiency": {},
+    # v358 (`relation_words`). SERVED, because it is what a person page reads
+    # its relationship word from: one row per roster person with a
+    # relationship — the neutral word, the gendered word when the owner has
+    # said it, and the neutral plural. Empty is "no roster relationships".
+    "relation_words": (),
     "reached_frame_epoch": {"count": 0, "current": None},
     "counts": {"nodes": 0, "work_items": 0, "memberships": 0, "claims": 0,
                "unplaced": 0},
@@ -1608,6 +1643,9 @@ def calculated_view(vault_root: str | Path) -> dict:
         # generation that never measured it knows.
         "landmark_opportunities": tuple(payload.get("landmark_opportunities") or ()),
         "landmark_sufficiency": dict(payload.get("landmark_sufficiency") or {}),
+        # Tolerant by construction: a projection published before v358 (or a
+        # vault with no roster relationships) carries none.
+        "relation_words": tuple(payload.get("relation_words") or ()),
         "reached_frame_epoch": dict(epoch) if isinstance(epoch, dict) else {
             "count": 0, "current": None
         },
@@ -1680,22 +1718,23 @@ def verify(
     # The oracle reads every receipt: an answer that trusted a cache would be
     # asserting the cache rather than checking the substrate.
     index = store.rebuild_active_index(vault_root, full=True)
+    derivation_inputs = load_derivation_inputs(
+        vault_root,
+        event_resolution_records=event_resolution_records,
+        episode_records=episode_records,
+        era_views=era_views,
+        constraints=constraints,
+        membership_assertions=membership_assertions,
+        display_decisions=display_decisions,
+        frame_display_decisions=frame_display_decisions,
+        landmark_entries=landmark_entries,
+    )
     result = tt.derive_calculated_timeline(
         index,
         resolution_records=resolution_records,
         roster_snapshot=roster_snapshot,
         owner_names=owner_names,
-        **load_derivation_inputs(
-            vault_root,
-            event_resolution_records=event_resolution_records,
-            episode_records=episode_records,
-            era_views=era_views,
-            constraints=constraints,
-            membership_assertions=membership_assertions,
-            display_decisions=display_decisions,
-            frame_display_decisions=frame_display_decisions,
-            landmark_entries=landmark_entries,
-        ),
+        **derivation_inputs,
         birth_date=birth_date,
         owner_ref=owner_ref,
         projection_generation=_generation_of(published),
@@ -1708,6 +1747,13 @@ def verify(
         timings=dict(result.timings or {}),
         owner_identity_digest=owner_identity_digest(roster_snapshot, owner_names),
     )
+    # v358: the same seam `publish` applies, so a generation carrying relation
+    # words reproduces here rather than reading as drift.
+    _with_relation_words({PROJECTION_FILE: fresh}, roster_snapshot=roster_snapshot,
+                         index=index,
+                         landmark_entries=derivation_inputs.get("landmark_entries"),
+                         owner_names=owner_names,
+                         now=str(published.get("published_at") or ""))
     want, have = rebuild_signature(fresh), rebuild_signature(published)
     return {
         "published": True,

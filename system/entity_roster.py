@@ -36,6 +36,7 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SYSTEM_DIR))
 
 import chronology
+import relation_words
 import roster_relations
 from ai_provider import failure_metadata
 from lifehug_core import (
@@ -347,7 +348,10 @@ def preserve_existing_object_roster(entity_type: str, entities: list[dict],
 #: entity-candidate refresh, whose whole input is mention statistics. Omitting
 #: them would mean a roster refresh silently drops the most common datable
 #: facts in a life story.
-_SETTLED_IDENTITY_FIELDS = ("relationship", "living", "born", "died", *roster_relations.PLACE_IDENTITY_FIELDS)
+_SETTLED_IDENTITY_FIELDS = ("relationship", "living", "born", "died", *roster_relations.PLACE_IDENTITY_FIELDS,
+                            # v358: the owner's answer to the relation-word card.
+                            relation_words.RELATION_GENDER_FIELD,
+                            relation_words.RELATION_GENDER_BASIS_FIELD)
 _SETTLED_PLACE = object()
 
 #: The two date-shaped settled fields, as a subset of the tuple above. Named

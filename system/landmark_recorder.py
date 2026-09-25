@@ -576,9 +576,16 @@ def file_claims(vault_root, outcome: object, *, message_text: str,
     card, _refusal = ap.card_for_answer(vault_root, session_ref)
     if card is not None:
         drafts = ap.aim_drafts(drafts, card)
-    if not drafts and card is None:
-        return None
+    # v358: a reply to a relation-word card is the owner's word for a person
+    # (`relation_words.file_relation_answer`) — it writes the roster field, and
+    # the republish below is what takes the card off the queue.
+    relation = _relation_answer(vault_root, session_ref, message_text)
     from temporal_publication import publish  # noqa: PLC0415
+
+    if not drafts and card is None:
+        if relation:
+            publish(vault_root, now=now)
+        return None
     from temporal_store import file_message_extraction  # noqa: PLC0415
 
     metadata = {"session_ref": session_ref, "turn_ref": turn_ref,
@@ -620,6 +627,22 @@ def file_claims(vault_root, outcome: object, *, message_text: str,
         return None
     publish(vault_root, now=now)
     return filed
+
+
+def _relation_answer(vault_root, session_ref, message_text) -> bool:
+    """Whether this reply wrote a relation word (v358).
+
+    Never raises: the word is an ADDITION to this filing, and losing it must
+    never cost the claims.
+    """
+    import relation_words as rw  # noqa: PLC0415
+
+    try:
+        filed = rw.file_relation_answer(vault_root, session_ref=session_ref,
+                                        text=message_text)
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(filed and filed.get("written"))
 
 
 def _promote_for_answer(vault_root, message_text: str, metadata: dict):

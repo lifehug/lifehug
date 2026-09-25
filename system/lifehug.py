@@ -1512,7 +1512,8 @@ def cmd_place_answers(args: argparse.Namespace) -> int:
         sources=getattr(args, "source", None),
         dry_run=dry_run,
     )
-    if report["filed"] and not dry_run:
+    relation_written = any(row.get("written") for row in report.get("relation_words") or ())
+    if (report["filed"] or relation_written) and not dry_run:
         # A claim nobody derived from is a fact the person cannot see (v231):
         # the filing is not done until the projection moves, and it moves
         # through the SAME one publisher every other filing seat uses.
