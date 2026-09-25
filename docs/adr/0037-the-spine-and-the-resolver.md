@@ -715,6 +715,118 @@ import provenance ADR 0033 requires. Those six never acquired claims at all,
 which is the likeliest reason 29 corrections covered 30 entries. The wipe was
 rule 3 and nothing else; the parked records are their own issue.
 
+## Amendment (v350, 2026-09-24): one couple, one alias, one label
+
+Three defects on the owner's own vault, all visible in the same sweep and all
+three a READING the substrate makes of words somebody wrote. The sweep itself was
+ordinary — `entity-roster --ensure-introduced`, `bind-episodes --apply`,
+`publish` — and the roster introduction is what armed all three.
+
+**1. A couple is two people, not one relationship word.**
+`node:b8681112f7eed9342e7e4d56` *"Wedding reception in mother-in-law's
+backyard"* — the OWNER's reception, subject `self`, his own anniversary
+2007-01-11 — was folded into `node:536bdbed274f9512cc6c0378` at **1976-06-25**,
+his PARENTS' wedding, beside `claim:34c92ccbf218e122a181ca5f` (*"Mom married dad
+at 21"*) and `claim:e331cefd22c5a2c5670d861b` (*"Parents' wedding date"*). It
+surfaced as a contradiction card, so v340 held; the merge was still wrong.
+
+The path was not v345's couple key. The introduction filed `mother` as an alias
+of `person/desiree-taylor`, `episode_containers.resolve_entities` matches a
+contiguous TOKEN RUN, and `mother-in-law` tokenizes to `(mother, in, law)` — so
+the word inside the compound resolved to the owner's mother, the reception's
+person tokens became `{desiree, taylor}`, and `R2b`'s **per-person** milestone
+bucket read the reception and the age telling as two tellings of one marriage.
+
+Two legs, one seat each (`episode_binder.A_COUPLE_IS_TWO_PEOPLE`):
+
+1. **A compound relationship word is never the simple word inside it**
+   (`identity_resolution.A_COMPOUND_RELATION_IS_NEVER_THE_WORD_INSIDE_IT`,
+   `_not_a_simple_relation` — the analogue of v347's `_NOT_A_POSSESSOR`). A run
+   that is one relationship word is refused when the words around it make it a
+   different relationship: an in-law suffix behind it, read through the ONE
+   `IN_LAW_RE` (moved from `axis_membership` to sit beside the vocabulary it
+   reads, and re-exported there so `roster_relations` still finds it), or a
+   `COMPOUND_RELATION_PREFIXES` word in front of it — step, grand, great, half,
+   god, foster, adoptive, ex, former, late. It sits in `resolve_entities`, the
+   seat that resolved the wrong person, so every rung reading a roster match is
+   fixed once rather than `R2b` alone. A LONGER key is the compound itself and
+   still matches: a roster that knows a mother-in-law by that phrase resolves her
+   by it.
+2. **A couple key is read from the telling's own SUBJECTS**
+   (`identity_resolution.couple_key`, now handed
+   `episode_binder.TellingView.subject_mentions`). The subjects are what a
+   telling is ABOUT; a word in a backyard is not. The owner's own subject
+   (`self`, `me`, `narrator`, and the first-person plural `we`/`our`) names the
+   OWNER's couple, so a telling of *"our wedding"* belongs to his couple and can
+   never reach his parents'. v345's vocabulary is unchanged and its pinned pair
+   still meets across two vocabularies — and under a resolved roster the
+   subject-side reading RESTORES it, because the introduction had already turned
+   the age telling's person tokens into `{desiree, taylor}` and the old
+   people-side key had stopped finding the couple it was written for.
+
+**2. An identity re-key publishes an alias.** v346 documented the seam; this
+closes it, as the fifth way a node id moves (ADR 0031's fold contract carries the
+full amendment). A node id is derived from its subject, so *"Dad graduated"*
+resolving to `person/james-taylor` moved `node:1bdbc9ecc7305d5a90c6e4a4` (1987)
+to `node:2156ca1018344c8248882c44` (1987) for the identical claim
+`claim:cd8e993b6bf95a5f4c80c862`, with no redirect — a lost placement to the
+v340/v342 audit, and a broken URL to anybody holding the old id.
+`temporal_timeline._identity_rekeys` derives the map from the mention the claim
+still carries (resolution is data ABOUT a claim, never an edit of one), so the
+former id is arithmetic rather than a cache and nothing is read off the previous
+publication. Both of v342's dispositions apply unchanged: a key nothing publishes
+any more becomes a redirect, reported `identity_subject_rekeyed`; a key some
+claim still publishes is not redirected and that claim is CARRIED onto the new
+id. The carry is what the duplicate undated *"Mom babysat Kodi and Acey Nixon"*
+node needed — the resolver reading of that stay froze the old id into its own
+`event_ref`, so the derived key moved out from under it and one fact was drawn
+twice, the undated copy carrying a *"when?"* card the node beside it answers.
+
+**3. A card never shows a node id as its label.** v343's *"a card is asked only
+when a person could answer it"*, reaching the one rung that had escaped it.
+`question_planner` minted `missing_anchor` items whose whole question was *"When
+was node:0809d05e26d18f128fd83126?"* — 28 `missing_anchor` cards on the hosted
+head, 22 of them with an id in the prompt, 13 and 10 after the sweep — because a
+cross-dating anchor may be a NODE REF and the composer asked about whatever text
+it was handed. Two seats
+(`temporal_timeline.A_CARD_NEVER_SHOWS_A_NODE_ID_AS_ITS_LABEL`). The rung mints
+nothing for a handle that names an internal id
+(`conversation_lints.names_an_internal_id`), reporting
+`anchor_without_a_human_label` with the nodes that were waiting — and dropping
+the card loses nothing, because every one of those nodes already carries a card
+of its own (48 of 48 on the head this was measured on). And the LINT refuses any
+composed sentence carrying one, so no template in any composer can emit an id
+even by accident. The shape is DERIVED from the minter — `temporal_claims.ID_RE`'s
+`<prefix>:<digest>` — rather than from a list of prefixes, because v349's lesson
+is that a centralized definition whose inputs are a hand list is not
+centralized. The genuine anchors are kept, and one grammar rule joins them: a
+phrase that LEADS with a verb is a bare predicate whatever its length
+(`_leads_with_a_verb`, `_is_gerund_phrase`'s mirror, sharing its
+`_ING_EVENT_NOUNS` vocabulary), so *"left Kristen"* is quoted back the way
+*"moved in with dad"* already was instead of becoming *"When was left Kristen?"*.
+
+`CALCULATION_RULE_VERSION` moves to `timeline-rules:17`: nodes, aliases and cards
+all change for a vault nobody edited.
+
+**Measured** on a scratch clone of the owner's vault (`/private/tmp/lifehug-rig-v350`,
+head `cf3d996a`; the original was never written to), repaired first with
+`landmark-reinstate --domain residences --since 2026-09-24T19:17:00Z --apply`
+(29 supersessions, 89 claims, 33 entries drawn) and then swept:
+`entity-roster --ensure-introduced` (4 rows), `bind-episodes --apply`
+(7 envelopes, 338 proposals), `publish`. The wedding reception stays
+`node:b8681112f7eed9342e7e4d56` at 2007-01-11, subject `self`, conflict state
+`none`, before and after the sweep. Nine node ids moved across the sweep and all
+nine carry an alias; the lost-placement audit is empty in all three legs (lost,
+moved, drawn-at-an-alias). Zero of the 57 open cards carry `node:` in their
+prompt; the five `missing_anchor` cards read *"When was 701 North Williams
+foreclosure?"*, *"When was Dad's death?"*, *"You mentioned earning Eagle Scout in
+Arizona — when was that?"*, *"You mentioned moved in with dad — when was that?"*
+and *"You mentioned left Kristen — when was that?"*. Nineteen anchor handles were
+refused as `anchor_without_a_human_label` and five subjects re-keyed. On a
+separate copy of the already-swept vault the three readings take open cards
+76 → 65, `missing_anchor` 13 → 3, cards carrying an id 10 → 0, and the
+*"Mom babysat"* nodes 4 → 3 with the date carried onto the surviving one.
+
 ## Consequences
 
 - The classifier's validator is no longer the place where placement is won or

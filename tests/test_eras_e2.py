@@ -1003,7 +1003,7 @@ class OwnerRelevanceTests(VaultTestCase):
                     tt._mention_names_another_person({"subject": mention, "claims": []}))  # noqa: SLF001
 
     def test_the_rule_version_is_nine(self) -> None:
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:16")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:17")
 
     def test_the_owners_own_life_domains_never_reach_the_subject_question(self) -> None:
         """residences/schools/work/military/birth are the owner's own life —

@@ -104,6 +104,7 @@ episode identity, and a display label is never a primary key.
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -332,27 +333,96 @@ COUPLE_OF_RELATION_WORD = {
 #: How a couple key is spelled, so no caller composes one by hand.
 COUPLE_KEY_PREFIX = "couple"
 
+#: v350. The first-person PLURAL subject words, read as the owner's couple and
+#: nowhere else. *"our wedding"*, *"we got married"* — a marriage told in the
+#: first person plural on the owner's own timeline is his own, and
+#: :data:`ONCE_PER_COUPLE_EVENT_KINDS` is the only vocabulary that consults
+#: this, so the reading cannot reach a telling where "we" might be the owner and
+#: his brothers. Deliberately NOT added to :data:`OWNER_SUBJECT_MENTIONS`: that
+#: set is what drops a mention before two tellings are compared at all, and "we"
+#: names somebody besides the owner as well as the owner.
+OWNER_COUPLE_SUBJECT_WORDS = frozenset({"we", "us", "our", "ourselves"})
 
-def couple_key(people: object) -> str:
-    """``"couple:parents"`` for the people who ARE one couple, else ``""``.
+#: v350. The couple a telling belongs to when its own subject is the OWNER.
+#: A life holds one *"our wedding"*, so the owner's own subject names his own
+#: couple and never anybody else's — which is the leg the owner's wedding
+#: reception needed (:data:`episode_binder.A_COUPLE_IS_TWO_PEOPLE`).
+OWNER_COUPLE = "spouse"
 
-    The people are a telling's non-owner person TOKENS
-    (`episode_binder.TellingView.people`). Every one of them must map to the
-    SAME couple through :data:`COUPLE_OF_RELATION_WORD`, so ``{mother}``,
-    ``{parents}`` and ``{mom, dad}`` are one key and ``{mother, katie}`` is no
-    key at all — a telling that names a couple AND somebody outside it is not a
-    telling about the couple alone.
+#: v350, the one sentence.
+A_COUPLE_IS_READ_FROM_THE_TELLINGS_OWN_SUBJECTS = (
+    "a couple key is read from a telling's own SUBJECTS and never from a word "
+    "loose in what it is called: the owner's subject names the owner's couple, "
+    "a couple word names that couple, and a compound relationship word is "
+    "never the simple word inside it"
+)
+
+
+def couple_relation_word(subject: object) -> str:
+    """The COUPLE-naming relationship word one SUBJECT mention states, or ``""``.
+
+    :data:`COUPLE_OF_RELATION_WORD`'s own vocabulary, read whole-token out of a
+    mention that may carry a possessive or a qualifier around it — *"Author's
+    parents"* states ``parents``, *"my mom"* states ``mom``.
+
+    Compound-aware, and that is the whole reason this function exists rather
+    than a dictionary lookup on the mention
+    (:data:`A_COMPOUND_RELATION_IS_NEVER_THE_WORD_INSIDE_IT`): *"mother-in-law"*
+    states NOTHING here, because she is not the owner's mother and her
+    daughter's wedding is not the owner's parents'.
+    """
+    body = normalized_mention_key(subject)
+    if not body or IN_LAW_RE.search(body):
+        return ""
+    tokens = body.split()
+    for index, token in enumerate(tokens):
+        if index and tokens[index - 1] in COMPOUND_RELATION_PREFIXES:
+            continue
+        for candidate in (token, depluralized(token)):
+            if candidate in COUPLE_OF_RELATION_WORD:
+                return candidate
+    return ""
+
+
+def couple_key(subjects: object) -> str:
+    """``"couple:parents"`` for the couple a telling's own SUBJECTS name, else ``""``.
+
+    ``subjects`` are the telling's ``subject_mention`` texts
+    (`episode_binder.TellingView.subject_mentions`) — who it is ABOUT, not
+    every name it happens to contain. Every one of them must name the SAME
+    couple, so ``{mother}``, ``{parents}`` and ``{mom, dad}`` are one key and
+    ``{mother, katie}`` is no key at all: a telling about a couple AND somebody
+    outside it is not a telling about the couple alone.
+
+    The OWNER's own subject names :data:`OWNER_COUPLE` — ``self``, ``me``,
+    ``narrator`` (:data:`OWNER_SUBJECT_MENTIONS`) and the first-person plural
+    ``we``/``our`` (:data:`OWNER_COUPLE_SUBJECT_WORDS`). A life holds one
+    *"our wedding"*, and a telling about it belongs to that couple rather than
+    to whichever relationship word its label mentions.
 
     A name resolves nothing here: ``{katie}`` has no couple key, and *"Married
     Katie"* meets *"Getting married to Katie"* through the ordinary subject rung
     on the name, which is the discriminator a vault that holds two marriages
     actually has.
+
+    **v350 changed what is read, not what is decided.** It used to be handed
+    the telling's non-owner person TOKENS — every name anywhere in it,
+    tokenized — and the owner's vault paid for it: *"Wedding reception in
+    mother-in-law's backyard"*, the owner's own reception, reached his PARENTS'
+    1976 wedding because the word ``mother`` was found inside
+    ``mother-in-law``. The subjects are what a telling is about; a word in a
+    backyard is not.
     """
-    keys = {
-        COUPLE_OF_RELATION_WORD.get(normalized_mention_key(token))
-        for token in (people or ())
-        if collapsed_text(token)
-    }
+    keys = set()
+    for subject in subjects or ():
+        body = collapsed_text(subject)
+        if not body:
+            continue
+        key = normalized_mention_key(body)
+        if key in OWNER_SUBJECT_MENTIONS or key in OWNER_COUPLE_SUBJECT_WORDS:
+            keys.add(OWNER_COUPLE)
+            continue
+        keys.add(COUPLE_OF_RELATION_WORD.get(couple_relation_word(body)))
     if len(keys) != 1:
         return ""
     only = keys.pop()
@@ -449,6 +519,113 @@ RELATIONSHIP_MENTION_WORDS = {
     "nephew": frozenset({"nephew"}),
     "niece": frozenset({"niece"}),
 }
+
+
+#: An in-law is never immediate family, whatever relation word the phrase is
+#: built out of — "mother-in-law" contains "mother" and is not the owner's
+#: mother. Checked on the WHOLE mention before any word is read, because the
+#: hyphenated word is the thing that changes the answer.
+#:
+#: **v350 moved it here**, beside the vocabulary it is a reading OF.
+#: `axis_membership.IN_LAW_RE` is this same object under its historical name
+#: (that module is what `roster_relations` reads it through), and it had to
+#: move because the reading is now needed by `episode_containers` — which
+#: `axis_membership` imports, so the old seat could not be imported back.
+IN_LAW_RE = re.compile(r"(?<!\w)in[-\s]?laws?(?!\w)", re.IGNORECASE)
+
+#: The words that COMPOUND a relationship word into a DIFFERENT relationship.
+#: A step-mother is not a mother, a grandmother is not a mother, a half-brother
+#: is not a brother, an ex-wife is not a wife. Kept as the words that stand in
+#: FRONT of the simple word, because the one that stands behind it is the
+#: in-law suffix and :data:`IN_LAW_RE` is already its one reading.
+#:
+#: ``grandmother`` and ``grandparent`` are also whole entries of
+#: :data:`RELATIONSHIP_MENTION_WORDS` in their own right — the single-word
+#: spelling never needed this list, because a whole-token vocabulary has never
+#: read ``mother`` out of ``grandmother``. This list is for the spellings a
+#: person actually writes with a hyphen or a space in them.
+COMPOUND_RELATION_PREFIXES = frozenset({
+    "step", "grand", "great", "half", "god", "foster", "adoptive", "ex",
+    "former", "late",
+})
+
+#: v350, and the analogue of v347's `roster_relations._NOT_A_POSSESSOR`: the
+#: rule that a relationship word is only the word it IS.
+A_COMPOUND_RELATION_IS_NEVER_THE_WORD_INSIDE_IT = (
+    "a compound relationship word is never the simple word inside it: "
+    "mother-in-law is not mother, step-mother is not mother, ex-wife is not "
+    "wife — so neither the roster nor a couple key may read the simple word "
+    "out of the compound one"
+)
+
+
+def depluralized(text: object) -> str:
+    """``"parents"`` -> ``"parent"``; anything already singular is unchanged.
+
+    The one plural reading this module does, so a vocabulary keyed on singular
+    words can still answer about the plural a person wrote. Deliberately
+    shallow — ``s`` off a word of more than three characters that does not end
+    in ``ss`` — which is `axis_membership._singularized`'s own rule for the
+    same job on the tier side.
+    """
+    body = collapsed_text(text).casefold()
+    if len(body) > 3 and body.endswith("s") and not body.endswith("ss"):
+        return body[:-1]
+    return body
+
+
+def relation_word_stem(text: object) -> str:
+    """The :data:`RELATIONSHIP_MENTION_WORDS` word ``text`` IS, or ``""``.
+
+    Whole-word, singular or plural. ``"grandson"`` is not ``"son"`` and
+    ``"childhood"`` is not ``"child"``, for the reason
+    `roster_relations._relation_words_in` says so: the vocabulary is read whole
+    tokens in both directions.
+    """
+    body = normalized_mention_key(text)
+    for candidate in (body, depluralized(body)):
+        if candidate in RELATIONSHIP_MENTION_WORDS:
+            return candidate
+    return ""
+
+
+def _not_a_simple_relation(tokens: object, start: int, end: int) -> bool:
+    """Do the words AROUND ``tokens[start:end]`` make it a COMPOUND relation?
+
+    :data:`A_COMPOUND_RELATION_IS_NEVER_THE_WORD_INSIDE_IT`, as the token-level
+    predicate a run-matching reader needs. It answers only about a run that is
+    ONE relationship word — a longer key is the compound itself and matching it
+    is the right answer, and a run that is no relationship word at all has no
+    compound to be part of.
+
+    :data:`A_COMPOUND_RELATION_IS_NEVER_THE_WORD_INSIDE_IT`, as the token-level
+    predicate a run-matching reader needs.
+
+    Two ways the surrounding words change the answer, and both are read from a
+    declaration rather than a case list. The tokens BEHIND the run read as an
+    in-law suffix through :data:`IN_LAW_RE` — which is how ``"mother"`` inside
+    ``"mother-in-law's backyard"`` stops being the owner's mother, and how the
+    roster alias ``"my mother"`` stops being her inside ``"my mother-in-law"``.
+    Or the token in FRONT of the run is one of
+    :data:`COMPOUND_RELATION_PREFIXES` — ``"step mother"``, ``"ex wife"``.
+
+    It answers only about a run that ENDS (for the suffix) or BEGINS (for the
+    prefix) on a relationship word. A run whose own last token is ``law`` is the
+    compound itself and matching it is the right answer: a roster that knows a
+    mother-in-law by that phrase resolves her by it.
+    """
+    words = [normalized_mention_key(token) for token in tokens or ()]
+    if not (0 <= start < end <= len(words)):
+        return False
+    if relation_word_stem(words[end - 1]) and IN_LAW_RE.search(
+        " ".join(words[end:end + 2])
+    ):
+        return True
+    return bool(
+        start
+        and relation_word_stem(words[start])
+        and words[start - 1] in COMPOUND_RELATION_PREFIXES
+    )
 
 
 class IdentityResolutionError(TemporalContractError):
@@ -1652,7 +1829,16 @@ __all__ = [
     "ONCE_PER_SUBJECT_EVENT_KINDS",
     "COUPLE_OF_RELATION_WORD",
     "COUPLE_KEY_PREFIX",
+    "OWNER_COUPLE",
+    "OWNER_COUPLE_SUBJECT_WORDS",
     "couple_key",
+    "couple_relation_word",
+    "A_COUPLE_IS_READ_FROM_THE_TELLINGS_OWN_SUBJECTS",
+    "A_COMPOUND_RELATION_IS_NEVER_THE_WORD_INSIDE_IT",
+    "COMPOUND_RELATION_PREFIXES",
+    "IN_LAW_RE",
+    "depluralized",
+    "relation_word_stem",
     "OWNER_SUBJECT_MENTIONS",
     "REPEATABLE_EVENT_KINDS",
     "RESOLUTIONS",

@@ -843,10 +843,14 @@ class ManifestTests(unittest.TestCase):
             with self.subTest(name):
                 self.assertIn(name, manifest["framework_files"])
 
-    def test_the_release_is_v349(self) -> None:
+    def test_the_release_is_v349_or_later(self) -> None:
+        """v350 loosened the equality this pinned. The assertion is that the
+        release this file guards has SHIPPED, not that nothing has shipped
+        since — an equality here makes every later bump fail a test about a
+        landmark rule, which is not what it is for."""
         manifest = json.loads(
             (ROOT / "system" / "version.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["version"], 349)
+        self.assertGreaterEqual(manifest["version"], 349)
 
 
 if __name__ == "__main__":

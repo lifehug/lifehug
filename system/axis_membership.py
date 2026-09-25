@@ -143,7 +143,13 @@ DISTANT_RELATION_WORDS = frozenset({
 #: built out of — "mother-in-law" contains "mother" and is not the owner's
 #: mother. Checked on the WHOLE mention before any word is read, because the
 #: hyphenated word is the thing that changes the answer.
-IN_LAW_RE = re.compile(r"(?<!\w)in[-\s]?laws?(?!\w)", re.IGNORECASE)
+#:
+#: v350 moved the DEFINITION to `identity_resolution.IN_LAW_RE`, beside the
+#: relationship vocabulary it is a reading of, because `episode_containers`
+#: needs it too and that module is imported by this one. This name is the same
+#: object and stays because `roster_relations` reads the in-law suffix through
+#: it — one reading, two spellings of where it lives, never two regexes.
+IN_LAW_RE = ir.IN_LAW_RE
 
 #: The tiers this module reads a subject into. ``unknown`` is not ``distant``,
 #: and since v338 that distinction reaches the published reason: nothing in the

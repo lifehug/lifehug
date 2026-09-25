@@ -258,7 +258,22 @@ from temporal_claims import (  # noqa: E402
 #: as a grandparent, so the same claims calculate to a different SUBJECT set, a
 #: different axis membership and a different age-anchor set for claims nobody
 #: edited. The number moves because what a reader is looking at moves with it.
-CALCULATION_RULE_VERSION = "timeline-rules:16"
+#: ``timeline-rules:17`` (v350): ONE COUPLE, ONE ALIAS, ONE LABEL. Three
+#: readings changed and each one changes the drawing for claims nobody edited.
+#: A couple key is read from a telling's own SUBJECTS and a compound
+#: relationship word is no longer the simple word inside it
+#: (the binder's own `A_COUPLE_IS_TWO_PEOPLE` — named without its module, so
+#: `test_the_binder_never_runs_inside_compile`'s sweep of this file still holds),
+#: so the owner's own wedding
+#: reception stops folding into his parents' 1976 wedding — a different NODE
+#: set. A subject that newly resolves publishes the id it used to be drawn at
+#: as a redirect and carries the claims still holding it
+#: (:data:`AN_IDENTITY_RE_KEY_IS_A_WAY_A_NODE_ID_MOVES`) — a different ALIAS
+#: table and one fewer node drawn twice. And an anchor whose handle is an
+#: internal id mints no card at all, while no composer may emit one
+#: (:data:`A_CARD_NEVER_SHOWS_A_NODE_ID_AS_ITS_LABEL`) — a different WORK-ITEM
+#: set, with a grammar pass on the anchor sentence beside it.
+CALCULATION_RULE_VERSION = "timeline-rules:17"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -1531,6 +1546,27 @@ _CLAUSE_VERB_RE = re.compile(
 )
 
 
+def _leads_with_a_verb(text: object) -> bool:
+    """Does this phrase LEAD with a verb — *"left Kristen"*, *"moved in with dad"*?
+
+    v350, and it is :func:`_is_gerund_phrase`'s mirror rather than a second
+    heuristic: that one reads SUBJECT + participle at the END of a phrase, this
+    one reads the bare PREDICATE at the start of one, and both are refused as
+    names an event could be called by. Same vocabulary in both directions —
+    :data:`_ING_EVENT_NOUNS` keeps "wedding reception" and "meeting with Sam" the
+    noun phrases they are, and :data:`_CLAUSE_VERB_RE` is the one verb reading.
+
+    It replaces a word COUNT. *"moved in with dad"* was a clause because it has
+    four words and *"left Kristen"* was not because it has two, so the first was
+    quoted back and the second was conjugated into *"When was left Kristen?"* —
+    the same phrase shape, asked two ways, one of them not a sentence.
+    """
+    words = collapsed_text(text).split()
+    if len(words) < 2 or words[0].casefold() in _ING_EVENT_NOUNS:
+        return False
+    return bool(_CLAUSE_VERB_RE.fullmatch(words[0]))
+
+
 def owner_rewrite(text: object) -> str:
     """Every third-person handle for the vault owner, in second person.
 
@@ -1944,6 +1980,33 @@ def _english_list(items, *, joiner: str) -> str:
     return ", ".join(rows[:-1]) + f", {joiner} {rows[-1]}"
 
 
+#: v350 (`timeline-rules:17`), and it is v343's *"a card is asked only when a
+#: person could answer it"* reaching the one rung that had escaped it. The
+#: owner's hosted head carried 28 `missing_anchor` cards, 13 of them after a
+#: sweep, whose whole question was *"When was node:0809d05e26d18f128fd83126?"* —
+#: the anchor handle was an internal id, because a cross-dating anchor may be a
+#: node ref and the composer asked about whatever text it was handed.
+#:
+#: Two seats, and the second one is the one that cannot fall behind. The RUNG
+#: mints nothing for a handle that names an internal id
+#: (`conversation_lints.names_an_internal_id`) — there is no sentence to
+#: withhold, because a digest is not a thing the person mentioned, and every
+#: node that was waiting on it already carries a card of its own (48 of 48, on
+#: the head this was measured on). And the LINT refuses any composed sentence
+#: carrying one (`conversation_lints._QUESTION_INTERNAL_ID_RE`), so no template
+#: in any composer can emit an id even by accident.
+A_CARD_NEVER_SHOWS_A_NODE_ID_AS_ITS_LABEL = (
+    "an anchor with no human label is not asked about: the rung mints no card "
+    "for a handle that is an internal id, and no composer's sentence may carry "
+    "one — a person can answer about a thing they mentioned and never about a "
+    "digest"
+)
+
+#: Reported, never raised: an anchor handle that named an internal id rather
+#: than anything a person said, and the nodes that were waiting on it.
+DIAGNOSTIC_ANCHOR_WITHOUT_A_LABEL = "anchor_without_a_human_label"
+
+
 def compose_anchor_question(text: object) -> str | None:
     """The sentence for an ANCHOR HANDLE — free text nobody has resolved yet.
 
@@ -1974,7 +2037,12 @@ def compose_anchor_question(text: object) -> str | None:
         question = f"You mentioned {phrase} \u2014 whose {noun} was that, and when?"
         return None if cl.lint_question(question) else question
     words = body.split()
-    clause = len(words) >= 3 and bool(_CLAUSE_VERB_RE.search(body))
+    # v350. A phrase that LEADS with a verb is a bare predicate whatever its
+    # length (:func:`_leads_with_a_verb`), so it is quoted back like any other
+    # clause instead of being dropped into "When was {what}?".
+    clause = _leads_with_a_verb(body) or (
+        len(words) >= 3 and bool(_CLAUSE_VERB_RE.search(body))
+    )
     question = (
         f"You mentioned {body} — when was that?" if clause else f"When was {body}?"
     )
@@ -2118,6 +2186,17 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
     # alias key a claim is noted and carried under is its own event_ref or the
     # id the fold mints, and never one of these.
     seeded = set(groups)
+    # v350, `AN_IDENTITY_RE_KEY_IS_A_WAY_A_NODE_ID_MOVES`. A node id is derived
+    # from its subject, so a subject that newly resolved moved it. The claims
+    # that still hold the OLD id — a resolver reading's frozen `event_ref` is the
+    # live case — are carried onto the new one, because a claim follows the node
+    # it folds under whichever act moved that node. A key a SEEDED node holds is
+    # never redirected, for v342's own reason: the recorder still holds it.
+    rekeys = {
+        was: now_id
+        for was, now_id in _identity_rekeys(claims, owner_ref=owner_ref).items()
+        if was not in seeded and now_id not in seeded
+    }
     # Pass one: what each claim's OWN key is, and what the identity layer says
     # about it. Both halves of v342 need the whole set before any group is made
     # — a claim's key can only be redirected once the bind that re-keyed it has
@@ -2142,7 +2221,8 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
         subject = _subject_handle(claim)
         if not subject or (not event_kind and not stay):
             continue
-        own_key = stay or collapsed_text(claim.get("event_ref")) or _mint_node_id(
+        stated = collapsed_text(claim.get("event_ref"))
+        own_key = stay or rekeys.get(stated, stated) or _mint_node_id(
             event_kind=event_kind, subject=subject, owner_ref=owner_ref
         )
         alias_key = "" if (stay or own_key in seeded) else own_key
@@ -2219,6 +2299,125 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
                 group["subjects"].append(born)
                 group["subjects"].sort()
     return groups
+
+
+#: v350. Reported, never raised: the id a node was drawn at before its SUBJECT
+#: resolved, redirected to the id it is drawn at now. Not a fault — it is the
+#: one line that says an identity re-key did not lose the node it used to draw.
+DIAGNOSTIC_IDENTITY_SUBJECT_REKEYED = "identity_subject_rekeyed"
+
+#: v350 (the owner's vault, 2026-09-24). `episode_fold`'s
+#: `AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES` is the standing rule, and
+#: this is the FIFTH way a node id moves: v342 closed three (all acts of the
+#: identity layer), v345 added the landmark redraw (the drawing re-reading the
+#: fact), and this one is the RESOLVER naming a subject nobody had named before.
+#:
+#: A node id is derived from its subject (`_mint_node_id`), and `_subject_handle`
+#: reads "the resolved ref when identity landed, the raw mention when it did
+#: not". So the moment a roster introduction makes *"Dad graduated"* resolve to
+#: `person/james-taylor`, every node whose id was derived from the mention
+#: `Dad` is drawn at a different id — `node:1bdbc9ecc7305d5a90c6e4a4` became
+#: `node:2156ca1018344c8248882c44` for the identical claim
+#: `claim:cd8e993b6bf95a5f4c80c862` — and until this release NO redirect was
+#: published, so the v340/v342 audit read it as a lost placement and every card,
+#: session and URL still naming the old id broke. v346 documented the seam; this
+#: closes it.
+#:
+#: Both of v342's own dispositions apply, unchanged, because they are the two
+#: things that can be true of a key that moved:
+#:
+#: * a key nothing publishes any more is published as a REDIRECT, `old -> new`;
+#: * a key some claim STILL publishes is not redirected — and the claim that
+#:   holds it is carried along instead. That second half is what the owner's
+#:   duplicate undated *"Mom babysat Kodi and Acey Nixon"* node needed: the
+#:   resolver reading of that stay carries the OLD id frozen in its own
+#:   `event_ref`, so when the derived key moved the fold drew the same fact
+#:   twice — once dated 1982-08/1986-06 under the old id, once undated under the
+#:   new one, with a fresh "when?" card on the copy the node beside it answers.
+#:   A claim follows the node it folds under, whichever act moved that node.
+AN_IDENTITY_RE_KEY_IS_A_WAY_A_NODE_ID_MOVES = (
+    "a node id is derived from its subject, so a subject that newly resolves "
+    "moves it: the id it used to be drawn at is published as a redirect when "
+    "nothing publishes it any more, and every claim still holding that id — a "
+    "resolver reading's frozen event_ref among them — is carried onto the new "
+    "one instead, so one fact is never drawn twice"
+)
+
+
+def _identity_rekeys(claims: list[dict], *, owner_ref: str) -> dict[str, str]:
+    """``{the id a claim's key USED to mint: the id it mints now}``.
+
+    :data:`AN_IDENTITY_RE_KEY_IS_A_WAY_A_NODE_ID_MOVES`, as one pure map, and
+    the ONE definition of it: :func:`_group_claims` reads it to carry the claims
+    of a key that moved, and :func:`_identity_rekey_aliases` reads the same map
+    to publish the redirect. Two readers, never two derivations.
+
+    Derived, never remembered: resolution is data ABOUT a claim and never an
+    edit of one (`_subject_handle`), so the claim still carries the
+    ``subject_mention`` its id used to be minted from and the former id is
+    arithmetic rather than a cache. Nothing is read off the previous
+    publication, which is what keeps the drawing a function of the receipts.
+
+    Three refusals. A claim carrying its own ``event_ref`` never moved, because
+    its id was never derived from a subject. A mention that resolved to itself
+    moved nothing. And a former id two claims disagree about the destination of
+    is dropped whole — a redirect to one of two things is worse than none,
+    which is `episode_fold`'s own ruling about a contested alias.
+    """
+    moves: dict[str, str] = {}
+    contested: set[str] = set()
+    for claim in claims or ():
+        if not isinstance(claim, dict) or collapsed_text(claim.get("event_ref")):
+            continue
+        ref = collapsed_text(claim.get("subject_ref"))
+        mention = collapsed_text(claim.get("subject_mention"))
+        if not ref or not mention or ref == mention:
+            continue
+        event_kind = _read_event_kind(claim, owner_ref=owner_ref)
+        if not event_kind:
+            continue
+        now_id = _mint_node_id(event_kind=event_kind, subject=ref, owner_ref=owner_ref)
+        was = _mint_node_id(event_kind=event_kind, subject=mention, owner_ref=owner_ref)
+        if was == now_id:
+            continue
+        if moves.setdefault(was, now_id) != now_id:
+            contested.add(was)
+    for key in contested:
+        moves.pop(key, None)
+    # A former id that is also somebody's DESTINATION would make the table a
+    # chain, and a chain is a redirect whose answer depends on how many times
+    # it is followed. Neither end of such a pair is redirected.
+    targets = set(moves.values())
+    for key in sorted(set(moves) & targets):
+        moves.pop(key, None)
+    return moves
+
+
+def _identity_rekey_aliases(claims: list[dict], *, groups: dict,
+                            owner_ref: str) -> tuple[dict, list]:
+    """``({old node id: new node id}, findings)`` for the subjects that resolved.
+
+    v345's `_landmark_redraw_aliases` in the mirror: the same two quiet refusals
+    read off ``groups`` AFTER grouping, because
+    `episode_fold.AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES` is checkable
+    in one line only if the drawing is already known. A key the drawing still
+    publishes is not redirected (the carry in :func:`_group_claims` is what
+    empties it, and a key still standing after that is one some seeded node or
+    frozen ref holds), and a target the drawing does NOT publish is no redirect
+    at all.
+    """
+    aliases: dict[str, str] = {}
+    findings: list[dict] = []
+    for was, now_id in sorted(_identity_rekeys(claims, owner_ref=owner_ref).items()):
+        if was in groups or now_id not in groups:
+            continue
+        aliases[was] = now_id
+        findings.append({
+            "finding": DIAGNOSTIC_IDENTITY_SUBJECT_REKEYED,
+            "node_id": now_id,
+            "was_node_id": was,
+        })
+    return aliases, findings
 
 
 #: v345. Reported, never raised: the id a landmark entry USED to be drawn at,
@@ -5070,6 +5269,13 @@ def derive_calculated_timeline(
         resolved, landmark_date_readings, groups=groups, owner_ref=owner
     )
     diagnostics.extend(landmark_alias_findings)
+    # v350, `AN_IDENTITY_RE_KEY_IS_A_WAY_A_NODE_ID_MOVES`. Same seat and the
+    # same reason as the line above: AFTER grouping, so a key the drawing still
+    # publishes is never made an alias of anything.
+    rekey_aliases, rekey_alias_findings = _identity_rekey_aliases(
+        resolved, groups=groups, owner_ref=owner
+    )
+    diagnostics.extend(rekey_alias_findings)
     roster_names = _roster_names(roster_snapshot)
     displays = {
         node_id: _subject_display(group["subject"], group["claims"], roster_names)
@@ -5660,8 +5866,10 @@ def derive_calculated_timeline(
         # arithmetic one, and this map is read to FOLLOW citations.
         # v345 adds the third source and takes the LOWEST precedence: a
         # person's decision and a stay's own re-key both outrank a redraw.
-        node_aliases={**landmark_aliases, **participation.node_aliases,
-                      **identity.node_aliases()},
+        # v350 adds the fourth beside it, at the same lowest precedence and for
+        # the same reason: an arithmetic re-key never outranks a decision.
+        node_aliases={**rekey_aliases, **landmark_aliases,
+                      **participation.node_aliases, **identity.node_aliases()},
         episode_aliases=identity.episode_aliases(),
         identity_rule_version=efc.IDENTITY_RULE_VERSION,
         identity_diagnostics=identity.identity_diagnostics(),
@@ -6131,6 +6339,20 @@ def _derive_work_items(
         raw = len(handle_reach.get(key, ()))
         text = handle_text[key]
         refs = sorted(handle_claims.get(key, ()))
+        # v350, `A_CARD_NEVER_SHOWS_A_NODE_ID_AS_ITS_LABEL`. Before the roster is
+        # asked about it, because a digest is not a name and there is nothing
+        # here anybody could answer about. The nodes waiting on it are named in
+        # the finding, which is the only place this was ever visible.
+        if cl.names_an_internal_id(text):
+            diagnostics.append({
+                "finding": DIAGNOSTIC_ANCHOR_WITHOUT_A_LABEL,
+                "anchor": text,
+                "node_ids": sorted(
+                    node_id for node_id in handle_reach.get(key, ()) if node_id
+                ),
+                "claim_ids": refs,
+            })
+            continue
         name, noun_kind = _anchor_handle_subject(text)
         cands = ident.candidates_for(name, roster_snapshot) if name else ()
         if len(cands) == 1:
