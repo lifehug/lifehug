@@ -92,6 +92,27 @@ WHERE IT RUNS — two seats, one derivation:
   in the vault — the owner's three — and the backstop that makes "never
   silently nothing" true of a road this module was not told about.
 
+AN EPISODE TARGET IS NOT REFUSED (v353, decided from the code and written here
+so it is not re-litigated). The card an answer lands on is often about an
+EPISODE — the repeat kinds are where "when did X happen?" clusters (moves, jobs,
+schools, teams, residences: `identity_resolution.REPEATABLE_EVENT_KINDS`) — and
+the owner's reply really is another telling of that episode, which is exactly
+the unit :func:`answer_telling_ref` already mints (v337: one fact inside one
+message, keyed on the NODE's digest so two answers to one card are two tellings
+of the same fact). So the claim is filed unchanged and there is no
+``card_is_an_episode`` refusal: refusing would drop the owner's answers for the
+most common card class there is, and it would contradict this module's own
+receipt. What v353 fixed is on the other side of the wire, where it belongs: the
+FOLD reads "is this node an episode?" off the node id rather than off whichever
+claim it read first
+(`episode_fold.AN_EPISODE_NODES_KIND_IS_THE_NODES_AND_NOT_ITS_FIRST_CLAIMS`).
+Two things here are load-bearing for that and must not drift:
+:func:`answer_claim` takes ``event_kind`` from the CARD's node, which for an
+episode is that episode's canonical kind, so the claim never argues with the
+node about what it is; and the telling is declared and NOT bound — binding is
+`episode_binder`'s decision under Law 6 (*a miss is cheap, a wrong link is
+not*), never a claim filer's.
+
 Synthetic data only; this module NEVER references a real vault.
 """
 
