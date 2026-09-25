@@ -191,6 +191,34 @@ skeleton; **keystones** are the per-person gaps that skeleton leaves — the one
 date that would place the most moments, computed from the dependency graph;
 and **whispers** and **keystone questions** are the two ways the loop asks.
 
+### The substrate nouns
+
+The nouns above are the *chronology* vocabulary — how one date is represented
+and reasoned about. Beneath them sits the **claim substrate**, the durable layer
+the calculated projection is folded from, and it has its own named set. They are
+defined once, with their files and their code seats, in the framework README
+under [The substrate](https://github.com/lifehug/lifehug#the-substrate--the-nouns-the-timeline-is-actually-made-of);
+this page uses them with exactly those meanings:
+
+**source** (immutable raw text) → **telling** (one account of one event inside
+one source) → **claim** (one assertion, with an interval, a basis, a confidence
+and a quote; seven `claim_type`s, of which `identity` and `occurrence` carry no
+interval at all) → **receipt** (the append-only file a filing writes) → **the
+fold** (the pure function from every receipt to the drawing) → **node** (a group
+of claims about one event — a dated moment) and **work item** (the card asking
+what is still missing). Beside them: **episode** and **binding envelope** (the
+identity layer's answer to *"are these two tellings one event?"*), **alias** (a
+published redirect from an id that moved), **landmark entry** and its **domain
+ladder**, **frame** (calculated period) and **era** (person-created period),
+**axis membership**, **the spine** and **the resolver**.
+
+Two invariants a reader should carry into every section below. The receipts are
+the only authority — everything else, including `state/landmarks.json` and the
+published projection, is a *drawing* that is recomputed, which is why un-drawing
+a record never loses it and why a correction needs no migration. And a losing
+claim is never deleted: it is `superseded`, `retracted` or left `disputed`
+beside the claim it disagrees with.
+
 ## 3. How it works
 
 **Where a date comes from.** The classifier records only what the author
@@ -451,8 +479,10 @@ calculating placement against a spine**:
   the derivation do not read it; the page floats the dot over it and draws
   its height as the window's width. A wide range the resolver itself filed is
   re-asked once when an exact date arrives and only a narrower verified
-  answer replaces it; `resolve --estimate-missing` backfills the windows
-  once. See ADR 0037's v325 amendment.
+  answer replaces it; `python3 system/resolver.py --vault-root <root>
+  --estimate-missing` backfills the windows once (the module's own entrypoint —
+  `lifehug.py resolve` does not forward this flag). See ADR 0037's v325
+  amendment.
 - **It is not asked for what "recent" already says** (v333, owner ruling,
   2026-09-23). A moment the person called recent in a telling the vault knows
   the capture date of is PLACED, not estimated: `chronology.RECENCY_RUNGS` is
@@ -488,10 +518,12 @@ The resolver never dates a residence episode (two stays that look alike are an
 identity problem), never edits a source, and lets owner statements outrank
 inference with the latest dated correction winning. It runs after every
 accepted classification batch (`classification_refresh.run_batch`) and by hand
-as `lifehug resolve --execute`; `--eval` answers known-answer questions without
-filing. Since v316 that run is also available as two halves a host can run
-apart — `lifehug resolve --plan --out <file>` writes the prompts it would buy
-and touches nothing in the vault, `lifehug resolve --from-response <envelope>`
+as `lifehug.py resolve --execute`. (`--eval`, which answers known-answer
+questions without filing, is on `system/resolver.py`'s own entrypoint and is not
+forwarded by the wrapper.) Since v316 that run is also available as two halves a
+host can run apart — `lifehug.py resolve --plan --out <file>` writes the prompts
+it would buy and touches nothing in the vault, `lifehug.py resolve
+--from-response <envelope>`
 files the answers that come back (refusing any whose story has changed since),
 and a card carries the resolver's own proposed question rather than the
 generic one. Since v317 the resolver can also answer that a listed moment is
@@ -505,6 +537,41 @@ What is *not* a landmark never becomes a node in the first place (v317): a
 or `schools` record that names no organization is refused at filing rather
 than drawn as a tenure. Design and consequences:
 [ADR 0037](../adr/0037-the-spine-and-the-resolver.md).
+
+### The laws that protect the drawing
+
+Deciding two tellings are one event, and deciding a landmark entry no longer
+stands, are both *destructive* readings: get them wrong and a dated moment
+leaves the page silently. Each of the following is one named constant with one
+seat, added because a real vault lost something real, and each is guarded by a
+test that reproduces the loss with the guard removed.
+
+| Law | Constant | Seat | What it refuses |
+|---|---|---|---|
+| A merge never moves a dated moment (v340) | `episode_binder.A_MERGE_NEVER_MOVES_A_DATED_MOMENT` | `R2c`, `R2d` | a pair whose **stated** dates contradict, *and* a pair whose dates the **fold already has them at** contradict — the second half is what two *"Family moved to Yucaipa"* 32 years apart needed, since a moment placed by containment states nothing of its own. `R2a`/`R2b` are deliberately ungoverned: two readings of *one fact* disagreeing about its date is the contradiction a fold exists to surface, as a card naming both dates with the loser kept as an alternate. |
+| An alias never names a node the drawing publishes (v342) | `episode_fold.AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES` | `EpisodeIdentity.plan_carries` | a redirect to one of the two things an undiscriminated id means. A claim **follows** the node it folds under; a leftover whose own date contradicts the merge does not follow, and a key some claim still holds is dropped from the table entirely (`identity_node_alias_contested`). Checkable in one line: no key of `node_aliases` is the id of a node the drawing publishes. |
+| A stated entry is never retired by shape (v349) | `landmarks_interaction.A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE` | `entry_superseded_by`, `timeline.save_landmark` | retiring an entry for the fields it happens to carry. Only a demonstrable machine-collapsed aggregate counts, the readable set is **derived** from the writer rather than hand-listed, **provenance outranks shape** (an entry with its own promoted source is never retired by rule 3), and **one answer is one entry** — a record that would retire more than one prior entry retires *nothing* and says so (`SUPERSESSION_FAN_OUT_LINT`). A `none` is exempt: retiring the whole domain is what *"I never served"* means. The record itself always files. |
+| Nothing to bind costs nothing (v348) | `episode_binder.NOTHING_TO_BIND_COSTS_NOTHING` | `bind_episodes` | deriving a plan a receipt already holds. `BINDER_RECEIPT_SIGNATURE_FIELDS` is the six fields a receipt and a fresh signature must agree on — three content digests (`telling_digest` over the telling manifest, `bindings_digest` over the binding and operation stores, `landmark_digest` over the filed `sources/landmarks/entry-*.md`) and three versions (`rule_version`, `calculation_rule_version`, `framework_version`) — checked against a receipt of the matching `BINDER_RECEIPT_SCHEMA_VERSION`. Any difference is the full pass. A vault with no telling manifest has no cheap signature and always takes the full pass: a missing manifest is *unknown*, never *nothing new*. |
+
+**The five ways a node id moves.** A node id is derived — from the episode, the
+event kind and the subject — never assigned, so a reading that changes any of
+those moves the id while every work item, session and URL still names the old
+one. All five publish a redirect under the second law, and all five report it:
+
+| # | Cause | Reported | Release |
+|---|---|---|---|
+| 1 | a **bind** re-keys the node a telling folds under | `node_aliases` (Law 5 of the identity design) | v342 |
+| 2 | the fold **minted** an id for a telling the I0 contract cannot see | `identity_node_alias_followed` | v342 |
+| 3 | an episode **absorbed** by a merge takes a new episode id, and a node id derives from it | `episode_aliases` composed through `node_aliases` | v342 |
+| 4 | a **landmark redraw** changes what an entry's date dates | `landmark_date_kind_redrawn` | v345 |
+| 5 | an **identity re-key** — a subject that newly resolves | `identity_subject_rekeyed` | v350 |
+
+Three refusals are shared: a claim carrying its own `event_ref` never moved (its
+id was never derived), a former id two claims disagree about the destination of
+is dropped whole, and a map that would be a chain drops both ends. The identity
+layer's own tables win a collision with a redraw, because a person's decision
+outranks arithmetic. The full amendment history is
+[the I0 fold contract](../contracts/event-identity-i0-fold.md).
 
 ## 4. The algorithm
 
@@ -684,6 +751,17 @@ in Cuts 2–5 and this table is rewritten at Cut 7b.
 | Plan a timeline Play | `lifehug.py arc-plan-target --timeline [--era <slug>]` |
 | Durable state | `state/timeline_placements.json` |
 | The claim substrate and its fold | `system/temporal_store.py` (`write_receipt`, `fold_active_index`, `rebuild_active_index`) |
+| The fold that groups claims into nodes, and its rule version | `system/temporal_timeline.py` (`CALCULATION_RULE_VERSION`, `_group_claims`, `_births_by_subject`, `_identity_rekeys`, `_landmark_redraw_aliases`) |
+| The projection's shape, its kinds and its work items | `system/temporal_projection.py` (`PROJECTION_SCHEMA_VERSION`, `WORK_ITEM_KINDS`, `WORK_ITEM_STATES`, `derive_node_id`) |
+| Which card is worth minting | `system/temporal_work_items.py` (`date_card_changes_something`, `dangling_anchor_reason`) |
+| Whose moments ride the owner's axis | `system/axis_membership.py` (`on_owner_axis`, `relationship_tier`, `IN_LAW_RE` re-exported from `identity_resolution`) |
+| Which tellings are one event (the binder) and its rungs | `system/episode_binder.py` (`EXACT_IDENTITY_RULE_IDS` — `R2a`…`R2d`, `A_MERGE_NEVER_MOVES_A_DATED_MOMENT`, `A_COUPLE_IS_TWO_PEOPLE`, `NOTHING_TO_BIND_COSTS_NOTHING`) |
+| The pure fold/merge/split decisions the binder and the fold call | `system/episode_fold_contract.py`, `system/episode_routing_contract.py`, `system/episode_fold.py` (`AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES`) |
+| Who a mention names, and once-per-life/once-per-couple kinds | `system/identity_resolution.py` (`resolve_mention`, `roster_index`, `ONCE_PER_SUBJECT_EVENT_KINDS`, `ONCE_PER_COUPLE_EVENT_KINDS`, `couple_key`) |
+| A relationship phrase that introduces a person | `system/roster_relations.py` (`AN_INTRODUCTION_NAMES_ONE_PERSON_IN_ONE_CLAUSE`, `A_RECORDED_RELATION_OUTRANKS_AN_INTRODUCED_ONE`); write seat `entity_roster.ensure_introduced_relatives`, verb `entity-roster --ensure-introduced` |
+| What a landmark entry's date dates, and what is not a landmark | `system/landmark_projection.py` (`A_LANDMARK_IS_DRAWN_AS_WHAT_IT_IS`, `entry_date_event_kind`, `not_a_landmark`, `birth_landmark_not_owner`, `BIRTH_DOMAIN_WORDS`, `reinstate_domain`) |
+| When a landmark entry stops standing, and the repair | `system/landmarks_interaction.py` (`A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE`, `supersession_reason`, `collapsed_aggregate_fields`); verb `landmark-reinstate --domain <d> --apply` |
+| The model that dates what is left, and its ledger | `system/resolver.py` (`spine`, `age_table`, `plan_items`, `file_envelope`), `state/resolver/resolutions.json`; verb `resolve [--execute\|--plan\|--from-response]` |
 | What the fold reads, and what it skips re-reading | `system/temporal_store.py` (`fold_inputs`, `FOLD_CACHE_FILE` → `state/temporal_claims/fold-cache.json`) |
 | What the standing publication was derived from | `system/temporal_publication.py` (`derivation_fingerprint`, `PUBLICATION_CACHE_FILE` → `state/temporal_claims/publication-cache.json`) |
 | Whose timeline this is — the roster and the owner's own spellings every publish seat folds with (v328) | `system/temporal_publication.py` (`owner_identity_inputs`, `owner_names_from_profile`, `owner_name_variants`, `owner_identity_digest`) |
@@ -779,5 +857,9 @@ difference until the next publish. Guard: `tests/test_owner_identity_inputs.py`.
 - [ADR 0024 — Chronology with basis](../adr/0024-chronology-with-basis.md) — dates as intervals, asking anchor-first, contradictions that keep both claims, derived order, keystones, and the fifth child interaction (amended v196: the deferral state is deleted, and a keystone is asked as a whisper or a minted question).
 - [ADR 0026 — Cross-dating](../adr/0026-cross-dating.md) — a resolved anchor places its dependent moments; leverage counts only what the pass can actually derive.
 - [ADR 0027 — The placement score](../adr/0027-the-placement-score.md) — the level and its margin are one arithmetic; width never presence; a floor, a pair, and a band.
+- [ADR 0037 — The spine and the resolver](../adr/0037-the-spine-and-the-resolver.md) — how the timeline places itself: the spine, the model, mechanical verification, the ledger, and every amendment through v350 (the two legs for hosts, what is not a landmark and not an event, revisits/aim/estimates, the birth landmark, a birthday is a birth, an introduction names one person in one clause, a stated entry is never retired by shape, one couple/one alias/one label).
+- [The I0 fold contract](../contracts/event-identity-i0-fold.md) — fold semantics, id mapping, the merge/split routing table, and the five ways a node id moves.
+- [Eras — the fold's contract version](eras.md#the-folds-contract-version) — what `timeline-rules:N` means and the bump-by-bump table from `:8` to `:17`.
 - [The Timeline Interaction](interactions/timeline.md) — the conversation that places a memory.
+- [The Landmarks Interaction](interactions/landmarks.md) — the universal dating set, its ladders, its recorder and its general listener.
 - [ADR 0023](../adr/0023-arc-walking.md) — the sibling child whose stage and caller-fact shape this one copies.
