@@ -12,7 +12,8 @@ salvages a failed resolution and the CLI path; v339 (amended v341) makes the
 measures every age from its own subject's birth; v347 narrows an introduction to
 one person in one clause; v349 stops a stated entry being retired by shape and
 adds `landmark-reinstate`; v350 fixes the couple key, the identity re-key's
-alias and the card that showed a node id.
+alias and the card that showed a node id; v352 makes an answer to a card place
+the moment that card is about.
 
 Every amendment below carries the version that shipped it in its own heading.
 The CLI verb is `resolve`; `resolver` is the module (`system/resolver.py`) and
@@ -843,6 +844,123 @@ refused as `anchor_without_a_human_label` and five subjects re-keyed. On a
 separate copy of the already-swept vault the three readings take open cards
 76 → 65, `missing_anchor` 13 → 3, cards carrying an id 10 → 0, and the
 *"Mom babysat"* nodes 4 → 3 with the date carried onto the surviving one.
+
+## Amendment (v352, 2026-09-25): answering a card places its moment
+
+The owner hit this three times in two days, and each time the card stayed open as
+if he had never answered.
+
+1. `sources/conversations/msg-a2a65da9bda477a98f67f20c.md` — *"This was mostly
+   last month and he's stopped mostly now"*, captured 2026-09-24T01:09:30Z,
+   `session_ref: conversation:cand:work_item:work:577ecc4639edf0f8ead752ca`,
+   answering **"When did Harvey's love of cussing happen?"**
+   (`node:3380558928426602253447c7`, subject `person/harvey`). Its classification
+   holds `time_periods: [{era: "last month", approximate_dates: "2026-08"}]` and
+   `events: []` — the TIME was read and no event was — so `classifier_claims` had
+   nothing to hang it on, the listener heard nothing, and nothing at all was
+   filed.
+2. `msg-fc9845c47f8dc2b5099724a5.md` — *"19-21 years old"*, answering the card
+   about his father's mission. The general listener filed
+   `claim:65573521952535272873944a`: `claim_type: age`, 19–21, `subject_mention:
+   "they"`, `event_kind: span`, **no `event_mention`**, `confidence: 0.0`. That
+   minted a node labelled *they* and a card *"When was they?"*. v343 suppresses
+   the bogus node; the ANSWER still never reached the moment it was about.
+3. `msg-57c728860e184aaf2146b021.md` — *"He only really started talking when he
+   was 4"*. `claim:bf9f8a7a0faeb8bbb1ab77f1`: `claim_type: age`, 4,
+   `subject_mention: "he"`, `event_mention: null`. The same shape — a time with
+   no event.
+
+**One cause, and it is not a careless model. The reply carries the WHEN and the
+card carries the WHAT, and nothing joined them.** Every extractor that reads a
+promoted answer is shown the MESSAGE ALONE: the classify prompt
+(`classifier_context`, `contextual-timeline:3`) names no work item and
+`general_listener.build_listener_prompt` takes an answer and a reply and no
+question. Asked to find an event in *"19-21 years old"* there is none, so an
+honest extractor either files nothing or files the time against whatever pronoun
+the sentence happens to carry. And the join was already on the wire:
+`session_ref: conversation:cand:work_item:<id>` is on the frontmatter of every
+promoted message, the platform writes it on the listener road, and the published
+`state/temporal_claims/work-items.json` carries that work item's `node_ref`,
+`subject_ref` and its own question. Nobody read it.
+
+**THE RULE** (`answer_placement.ANSWERING_A_CARD_PLACES_ITS_MOMENT`). A reply
+promoted with a `session_ref` naming a work item is read as an answer to THAT
+work item:
+
+- the TIME it carries — a date, a range, an age, or a recency expression
+  resolved against the message's own capture date — becomes a claim on the node
+  the card is about, with the reply as its source and the record's basis
+  `stated`, because the person is the one saying it;
+- the SUBJECT comes from the NODE, never from a pronoun in the reply. This is the
+  other half of v343's suppression: suppressing the bogus `they` node was right,
+  and the answer must still land somewhere;
+- a reply that carries NO time at all still files as a TELLING of that node — an
+  `occurrence`, which asserts that it happened and says nothing about when — so
+  the card stays open with the owner's words visible on it and never silently
+  nothing.
+
+**Nothing here is a second parser.** The rungs are `chronology`'s own
+(`parse_stated_date`, `parse_age`, `from_recency` and its `RECENCY_RUNGS`), in
+the same order `classifier_claims.temporal_reading` reads them, and the
+confidences are that module's own constants. The one addition is
+`AGE_PHRASE_RES`, a CLOSED vocabulary of age phrasings, because
+`chronology.parse_age` is a FIELD parser and over prose it reads *"March 1998"*
+as age 8 — `classifier_claims._age_band_text`'s own year trap, reused rather
+than re-decided. A bare number behind *"at"* is refused outright: ADR 0026 ranks
+a miss above a wrong join, and *"at 19 Elm Street"* is already a named negative
+of the listener's own prescreen.
+
+**Five named refusals**, so a report says WHY rather than showing a smaller
+number: a card nobody published, a card that is not `open` (something else
+already settled it), a `node_ref` the projection does not draw, a card whose
+subject is `unresolved:` (Timeline Fix 01 P0b — when nobody knows WHICH James the
+row is about, no sentence can settle it), and a reply with no words. A
+day-scoped session (`…:work:<hex>:<YYYY-MM-DD>`, which the platform opens when a
+card's plain session has closed) names the SAME card: a second conversation about
+one question is not a second question.
+
+**Two seats, one derivation.** `landmark_recorder.file_claims`, which already
+received the `session_ref` for idempotency, now AIMS every draft at the card
+before binding it (`event_ref` becomes the card's node, a bare pronoun subject
+becomes the node's own, an absent `event_mention` becomes the node's label) and,
+when the drafts assert no time at all — including the message that produced no
+drafts — files the deterministic reading of the reply itself. And
+`classifier_claims.migrate_classifier_moments`, the vault's one deterministic
+claim-filing sweep, gains a second rung that walks every promoted answer with a
+card whether or not any extractor heard anything in it; `place-answers` is the
+same rung on its own verb. A name the person actually used is never overwritten,
+and `event_kind` is left exactly as it was heard: the card tells a draft what it
+could not know, and nothing more.
+
+`CALCULATION_RULE_VERSION` does **not** move. This release adds CLAIMS and
+changes no derivation, so a vault nobody answered draws exactly what it drew.
+
+MEASURED on a scratch clone of the owner's vault (`/private/tmp/lifehug-rig-answer`,
+reset to the generation whose cards he was answering — `1daaeba3`, generation 118,
+where all three cards were open and all three nodes unplaced — with the three real
+promoted answers restored from the head and the v352 framework overlaid; the
+original was never written to). `place-answers` read 19 promoted answers carrying a
+card, placed 3 and filed 3 as tellings, and refused 13 as `card_not_published`.
+Open cards went 48 → 43 (`precision_gap` 43 → 37, `contradiction` 5 → 6), placed
+nodes 1188 → 1193, node count unchanged at 1233. *Harvey's love of cussing* is
+2026-07-24/2026-09-24, basis `stated`, rendering *"24 July 2026–24 September 2026
+— you said last month, told 2026-09-24"*. *Harvey's late talking start* is `2026~`
+basis `age`, measured from Harvey's own birth as the vault holds it. The v340/v342
+lost-placement audit is EMPTY — nothing lost, nothing moved to an incompatible
+date, nothing drawn at a redirected id.
+
+**One thing the rule cannot finish, and it reports it by name.** *"19-21 years
+old"* now lands on `node:b69a5be503b14977a6ba0077` *"Father's mission to New
+Zealand"* as an `age` claim with the node's own subject — the answer reaches its
+moment, which it never did before — and the fold cannot do the arithmetic,
+because that node's subject is the raw mention `James Edwin Taylor` and the
+owner's roster holds four people bearing the token *James* (`James Taylor` the
+father, born 1954-06-04; `James Edwin Taylor Sr.` the grandfather; `James` the
+brother; and the owner's own). v335's shared-name rule refuses an ambiguous key
+and is right to: the fold reports `age_without_birth_anchor` on the claim and the
+projection raises *"Which James or James Edwin Taylor Sr. or James Taylor is
+'James' here?"* as an `identity_uncertain` card. Placing that span is an IDENTITY
+question, not a dating one, and it is the next defect rather than this one.
 
 ## Consequences
 

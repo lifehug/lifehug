@@ -152,7 +152,12 @@ ESTIMATE_BASIS_KINDS = ("residence", "tenure", "life_stage", "related_moment", "
 MAX_ESTIMATE_BASIS = 4
 MAX_ESTIMATE_TEXT = 200
 #: v325. The conversation a promoted message came from names the work item the
-#: person was answering: ``conversation:cand:work_item:work:<hex>``.
+#: person was answering: ``conversation:cand:work_item:work:<hex>``. v352 moved
+#: the READING of it to `answer_placement.work_item_of_session` — the module
+#: whose whole subject is what an answer to a card means — and re-exports the
+#: name here so nothing that imported it from the resolver breaks. ONE parse,
+#: and it is the one that also knows about the platform's day-scoped sibling
+#: session.
 SESSION_WORK_ITEM_MARKER = "work_item:"
 BASES = ("stated", "derived", "inferred")
 _TOKEN_RE = re.compile(r"[a-z0-9]{2,}")
@@ -1641,11 +1646,15 @@ def _session_siblings(root: Path, source_path: str) -> list[str]:
 
 
 def _work_item_of_session(session_ref: object) -> str:
-    """``conversation:cand:work_item:work:<hex>`` → ``work:<hex>``, else ``""``."""
-    text = collapsed_text(session_ref)
-    if SESSION_WORK_ITEM_MARKER not in text:
-        return ""
-    return text.split(SESSION_WORK_ITEM_MARKER, 1)[1].strip()
+    """``conversation:cand:work_item:work:<hex>`` → ``work:<hex>``, else ``""``.
+
+    v352: `answer_placement.work_item_of_session`'s, not a second copy. The
+    revisit rung and the answer-placement rule must agree about which card a
+    session names or one of them re-opens a question the other just answered.
+    """
+    import answer_placement as ap  # noqa: PLC0415
+
+    return ap.work_item_of_session(session_ref)
 
 
 def revisit_targets(read: "_Read") -> dict[str, dict]:

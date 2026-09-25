@@ -133,6 +133,7 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
+import answer_placement as ap  # noqa: E402
 import chronology as chrono  # noqa: E402
 import classify_story  # noqa: E402
 import cross_dating  # noqa: E402
@@ -1042,6 +1043,13 @@ def _empty_report(dry_run: bool) -> dict:
         "skipped_empty_description": 0,
         "nodes_before": 0,
         "nodes_after": 0,
+        # v352. The SECOND rung of this sweep, reported apart from the first
+        # because it reads a different thing: not a classification's events but
+        # a promoted ANSWER and the card its `session_ref` names
+        # (`answer_placement.ANSWERING_A_CARD_PLACES_ITS_MOMENT`). Its own
+        # report, whole, so a reader never has to guess which rung a number
+        # came from.
+        "answers": ap.empty_report(),
     }
 
 
@@ -1213,6 +1221,7 @@ def migrate_classifier_moments(
 
     carried_corrections = _equivalent_correction_carries(root, index, receipts, provenance)
     if dry_run:
+        report["answers"] = ap.place_answers(root, dry_run=True, now=now)
         report["nodes_after"] = report["nodes_before"] + len(new_nodes)
         return report
 
@@ -1245,6 +1254,16 @@ def migrate_classifier_moments(
             title="Preserved correction on equivalent classifier reading",
         )
 
+    # v352, ANSWERING A CARD PLACES ITS MOMENT. The second rung, and it runs
+    # HERE — after the classifier's own receipts and before the one rebuild and
+    # the one publish — for two reasons. It reads the PUBLISHED work items and
+    # projection, which is the generation whose card the person was answering,
+    # so running it before the republish is what makes "the card the person saw"
+    # the card the answer lands on. And it files receipts exactly as the rung
+    # above does, so one rebuild and one publish carry both: a claim filed here
+    # is not visible until the projection moves, which is v231's rule and not
+    # this rung's to re-decide.
+    report["answers"] = ap.place_answers(root, now=now)
     store.rebuild_active_index(root)
     ei.rebuild_telling_manifest(root)
     if publish:
@@ -1297,6 +1316,12 @@ def describe_migration(report: object) -> list[str]:
             f"  wrote {row.get('receipts_written')} new receipt(s), "
             f"kept {row.get('receipts_kept')} already filed"
         )
+    # v352's rung, printed under its own heading and through its own describer,
+    # so the two rungs of this sweep are never read as one number.
+    answers = row.get("answers")
+    if isinstance(answers, dict) and answers.get("answers"):
+        lines.append("Answers to cards -> a claim on the card's own moment")
+        lines.extend(f"  {line}" for line in ap.describe(answers))
     return lines
 
 
