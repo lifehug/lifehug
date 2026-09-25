@@ -57,6 +57,29 @@ host's surface collapses on its own instead of announcing that everything is
 filled in. The `status`/`complete_at` ladder below is unchanged and still
 drives the collect mode; what changed is who may say a domain is *done*.
 
+**A ladder that opens on a mention** (v356, owner ruling 2026-09-25): *"a
+mission is a span like military service look up lds or mormon mission for
+context; a baptism is a discreet event on a date; both should not get default
+landmark questions but if mentioned should enable landmark questions"*. Two
+domains joined the set, `missions` (a stretch, dated like `military`: departure,
+MTC, assigned areas, return — ladder `happened → where → span`, participation
+episode kind `mission`, drawn in the `worked` lane) and `baptism` (one dated
+ordinance — a singleton point whose subject is the owner, ladder `happened →
+year → month → day`, date semantic `baptism`). Both declare `offered:
+on_mention`: neither adds a single question to a vault that has never mentioned
+one. The ladder is live once the person has raised the subject — an entry filed
+in the domain, one of the domain's `mentioned_by` phrases in their own record
+(event titles, claim mentions and quotes, node labels), or a node of the
+domain's own kind already on the graph — and from then on it is offered exactly
+as if they had asked for it. `landmarks_interaction.py` owns "which ladders are
+live for this vault": `A_LADDER_OPENS_ON_A_MENTION` is the rule, `domain_is_live`
+the predicate, `live_domains`/`landmark_rows` its readers, and
+`landmark_opportunities.sufficiency` reports an unmentioned domain as
+`not_mentioned`. The phrases are deliberately phrases: "mission" alone is also a
+company's mission statement. Because both are now seeded event kinds, they join
+`temporal_work_items.LIFE_EVENT_KINDS`, so a loosely placed mission or baptism
+keeps its date card.
+
 **"That never happened" is a finished answer.** Four of the nine domains —
 `partnerships`, `children`, `military`, `losses` — open with a yes/no, and
 *no* completes them outright. A person with no military service is DONE with
@@ -184,7 +207,8 @@ with it `None` the turn's output contract is byte-identical to v196.
 
 | Noun | What it is |
 |---|---|
-| **Domain** | one landmark family — `birth`, `family`, `residences`, `schools`, `partnerships`, `children`, `work`, `military`, `losses` |
+| **Domain** | one landmark family — `birth`, `family`, `residences`, `schools`, `partnerships`, `children`, `work`, `military`, `losses`, and (v356, offered only once mentioned) `missions`, `baptism` |
+| **Offered on a mention** (v356) | `offered: on_mention` + `mentioned_by` in `questions.yaml`: the domain has no row, no question and no opportunity until the vault mentions it (`landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION`). `missions` and `baptism` are the two |
 | **Ladder** | the specificity rungs inside a domain, coarse to fine (residence: city → address → span → household) |
 | **Rung** | one step on a ladder, and the one question that asks for it |
 | **Status** | `open` (nothing filed) · `partial` (filed, below target) · `complete` (at target, and — where `closure` is `user_completable` — the person said the list is finished) |

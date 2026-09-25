@@ -1775,6 +1775,25 @@ KIND_SENTENCES = {
         "contradiction": "Two dates are claimed for {what} — {readings}. "
                          "Which is right?",
     },
+    # v356 (owner ruling 2026-09-25): "a mission is a span like military
+    # service" — asked as the stretch it is, leaving and coming home.
+    "mission": {
+        "title": "{what}",
+        "missing_anchor": "When did you leave for {what}?",
+        "precision_undated": "When were you on {what}?",
+        "precision_coarse": "Do you know the {target} for {what}?",
+        "contradiction": "Two dates are claimed for {what} — {readings}. "
+                         "Which is right?",
+    },
+    # "a baptism is a discreet event on a date" — asked as one day.
+    "baptism": {
+        "title": "{whose} baptism",
+        "missing_anchor": "When {who_was} baptized?",
+        "precision_undated": "When {who_was} baptized?",
+        "precision_coarse": "Do you know the {target} of {whose} baptism?",
+        "contradiction": "Two dates are claimed for {whose} baptism — "
+                         "{readings}. Which is right?",
+    },
     "named_era": {
         "title": "{what}",
         "missing_anchor": "When did {what} begin?",
@@ -4271,6 +4290,39 @@ def _relevance_life_view(relevance: dict, *, best: object, birth: object,
 # --------------------------------------------------------------------------
 
 
+#: v356: the claim fields that are the person's own record of an event — what
+#: they called it, who it was about, and the quote it was read out of.
+#: :func:`mentioned_landmark_domains` reads these and each node's label.
+MENTION_CLAIM_FIELDS = ("event_mention", "subject_mention")
+
+
+def mentioned_landmark_domains(claims: object, nodes: object = ()) -> frozenset:
+    """The ``on_mention`` landmark domains this fold's own inputs name.
+
+    `landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION`, fed from the claims
+    the fold was handed and the nodes it drew: every claim's
+    :data:`MENTION_CLAIM_FIELDS` and evidence quotes, and every node's label.
+    A pure function of the fold's inputs, so the publication fingerprint
+    already covers it. The phrase match is `landmarks_interaction`'s.
+    """
+    texts: list[str] = []
+    for claim in claims or ():
+        row = claim if isinstance(claim, dict) else {}
+        for key in MENTION_CLAIM_FIELDS:
+            value = row.get(key)
+            if isinstance(value, str) and value.strip():
+                texts.append(value)
+        for evidence in row.get("evidence") or ():
+            quote = evidence.get("quote") if isinstance(evidence, dict) else None
+            if isinstance(quote, str) and quote.strip():
+                texts.append(quote)
+    for node in nodes or ():
+        label = node.get("label") if isinstance(node, dict) else None
+        if isinstance(label, str) and label.strip():
+            texts.append(label)
+    return li.mentioned_domains(texts)
+
+
 def _membership_row(*, member: str, era: str, relation: str, evidence,
                     basis: str, confidence: float, fingerprint: object = None) -> dict:
     payload = {
@@ -5899,6 +5951,9 @@ def derive_calculated_timeline(
             ladder_state,
             roster_snapshot,
             owner=owner,
+            # v356, `landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION`: which
+            # on-mention ladders this vault's own words have opened.
+            mentioned=mentioned_landmark_domains(claims, nodes),
         )
     except Exception:  # noqa: BLE001
         opportunities, sufficiency = [], {}

@@ -3515,6 +3515,42 @@ def timeline_data(evidence: list[dict] | None = None,
     return data
 
 
+#: v356: the fields of a timeline event that are the person's own record of
+#: it — what it is called, what was said about it, and what it was placed
+#: against. :func:`mentioned_landmark_domains` reads these and nothing else.
+MENTION_EVENT_FIELDS = ("title", "description", "when_hint", "anchor")
+
+
+def mentioned_landmark_domains(data: object) -> frozenset[str]:
+    """The ``on_mention`` landmark domains this vault's own record names.
+
+    `landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION`, fed from the
+    timeline read model: every placed and unplaced event's
+    :data:`MENTION_EVENT_FIELDS` and every entity's title. The rule and the
+    phrase match are `landmarks_interaction.mentioned_domains`'; this only
+    says which words are the record.
+    """
+    row = data if isinstance(data, dict) else {}
+    texts: list[str] = []
+    events = [event for rows in (row.get("event_lineup") or {}).values()
+              for event in rows or ()]
+    events.extend(row.get("unplaced_events") or ())
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        for field in MENTION_EVENT_FIELDS:
+            value = event.get(field)
+            if isinstance(value, str) and value.strip():
+                texts.append(value)
+    entities = [entity for rows in (row.get("entity_lineup") or {}).values()
+                for entity in rows or ()]
+    entities.extend(row.get("unplaced_entities") or ())
+    for entity in entities:
+        if isinstance(entity, dict) and isinstance(entity.get("title"), str):
+            texts.append(entity["title"])
+    return landmarks_interaction.mentioned_domains(texts)
+
+
 def landmark_rows_for(data: dict, *, landmarks: object = None) -> tuple[dict, ...]:
     """`landmarks_interaction.landmark_rows` with the keystone star applied.
 
@@ -3533,9 +3569,13 @@ def landmark_rows_for(data: dict, *, landmarks: object = None) -> tuple[dict, ..
     * Otherwise no star. The set is never starred for the sake of it.
     """
     filed = landmarks if isinstance(landmarks, dict) else load_landmarks()
+    # v356: which ladders are LIVE is `landmarks_interaction`'s decision
+    # (`A_LADDER_OPENS_ON_A_MENTION`); this supplies the words it reads.
+    mentioned = mentioned_landmark_domains(data)
     if landmark_birth_date(filed) is None:
         return landmarks_interaction.landmark_rows(filed,
-                                                   keystone_domains=("birth",))
+                                                   keystone_domains=("birth",),
+                                                   mentioned=mentioned)
     place_slugs = {
         str(row.get("slug"))
         for rows in (data.get("entity_lineup") or {}).values()
@@ -3551,7 +3591,8 @@ def landmark_rows_for(data: dict, *, landmarks: object = None) -> tuple[dict, ..
             starred.add("residences")
         elif anchor.startswith("entity:") and anchor.split(":", 1)[1] in place_slugs:
             starred.add("residences")
-    return landmarks_interaction.landmark_rows(filed, keystone_domains=starred)
+    return landmarks_interaction.landmark_rows(filed, keystone_domains=starred,
+                                               mentioned=mentioned)
 
 
 def _event_place_labels(data: dict) -> tuple[str, ...]:

@@ -249,10 +249,12 @@ class EntrySubjectMentionTests(unittest.TestCase):
         for domain, row in sorted(self.rows.items()):
             with self.subTest(domain=domain, entry="names nobody"):
                 minted = lp.entry_subject_mention({"date": "1981"}, row, domain)
-                self.assertEqual(minted, "self" if domain == "birth" else domain)
+                # v356: every SINGLETON is the owner's (`baptism` beside `birth`).
+                owner = row["collection"] == "singleton"
+                self.assertEqual(minted, "self" if owner else domain)
             with self.subTest(domain=domain, entry="names somebody"):
                 named = lp.entry_subject_mention({"label": "Nana"}, row, domain)
-                self.assertEqual(named, "self" if domain == "birth" else "Nana")
+                self.assertEqual(named, "self" if owner else "Nana")
 
     def test_e0_05b_a_birth_entry_projects_claims_about_self(self):
         claims = lp.entry_claims(

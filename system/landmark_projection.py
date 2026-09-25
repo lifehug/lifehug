@@ -178,12 +178,15 @@ PARTICIPATION_EPISODE_KINDS = {
     "work": "job",
     "schools": "school",
     "military": "military",
+    # v356: "a mission is a span like military service" (owner, 2026-09-25).
+    "missions": "mission",
 }
 
 PARTICIPATION_EPISODE_RULE_TEXT = (
     "A landmark entry of a span domain IS a participation episode: its "
     "promoted telling's own domain names the episode's kind (residences -> "
-    "residence, work -> job, schools -> school, military -> military), its "
+    "residence, work -> job, schools -> school, military -> military, "
+    "missions -> mission), its "
     "identity mention names the subject, and its stated start is the "
     "discriminator that keeps a second stay at one place from merging into "
     "the first. An entry with no stated start is discriminated by its "
@@ -1354,6 +1357,12 @@ def entry_subject_mention(entry: object, row: object, domain: object) -> str:
     the two spellings group as one node.
     """
     if collapsed_text(domain) == "birth":
+        return OWNER_BIRTH_MENTION
+    # v356: every OTHER singleton is the owner's too, for the reason `birth`
+    # is — `collection: singleton` is "one entry and no subject of its own"
+    # (questions.yaml), so the domain word would read as a person named
+    # "baptism". The owner's baptism is the owner's.
+    if isinstance(row, dict) and row.get("collection") == "singleton":
         return OWNER_BIRTH_MENTION
     named = landmarks_interaction.identity_named(entry, row) if isinstance(row, dict) else None
     if not named and isinstance(entry, dict):

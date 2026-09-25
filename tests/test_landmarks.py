@@ -1253,7 +1253,8 @@ class NoneTerminalTests(unittest.TestCase):
         """Derived from the set, not declared beside it: `happened` opens
         exactly the domains a person can close by saying it never happened."""
         self.assertEqual(li.none_domains(),
-                         ("partnerships", "children", "military", "losses"))
+                         ("partnerships", "children", "military", "losses",
+                          "missions", "baptism"))
         for domain in ("birth", "family", "residences", "schools", "work"):
             self.assertFalse(li.domain_accepts_none(li.domain_row(domain)),
                              f"{domain} opens at a THING, not a yes/no")
@@ -1717,7 +1718,7 @@ class CardinalityMetadataTests(unittest.TestCase):
         multi = {row["domain"] for row in self.rows if li.is_multi_entry(row)}
         self.assertEqual(multi, {"family", "residences", "schools",
                                  "partnerships", "children", "work",
-                                 "military", "losses"})
+                                 "military", "losses", "missions"})
         self.assertFalse(li.is_multi_entry(li.domain_row("birth")))
 
     def test_closure_is_a_different_question_from_multiplicity(self):
@@ -2293,7 +2294,9 @@ class LadderConsistencyTests(unittest.TestCase):
     #: shape the founder's own entry carried, filed and invisible.
     UNREAD = {("birth", "label"), ("birth", "span"), ("family", "span"),
               ("partnerships", "span"), ("children", "span"),
-              ("losses", "span")}
+              ("losses", "span"),
+              # v356: a singleton point, exactly like `birth`.
+              ("baptism", "label"), ("baptism", "span")}
 
     def _stored_fields(self, row: dict) -> set[str]:
         """Every field `validate_landmark` will keep for this domain."""
@@ -2415,6 +2418,8 @@ class LeafShapedAnswerMatrixTests(unittest.TestCase):
         "work": {"domain": "work", "label": "Line cook"},
         "military": {"domain": "military", "none": True},
         "losses": {"domain": "losses", "label": "Grandpa Ray"},
+        "missions": {"domain": "missions", "label": "Switzerland Zurich Mission"},
+        "baptism": {"domain": "baptism", "date": _date("1989-06")},
     }
 
     #: domain -> (rung reached, status, the next question — None when complete)
@@ -2429,6 +2434,10 @@ class LeafShapedAnswerMatrixTests(unittest.TestCase):
         "work": ("what", "partial", "Where were you doing Line cook?"),
         "military": ("span", "complete", None),
         "losses": ("who", "partial", "Roughly when did you lose Grandpa Ray?"),
+        "missions": ("where", "partial",
+                     ("When did you leave for Switzerland Zurich Mission, "
+                      "and when did you come home?")),
+        "baptism": ("month", "complete", None),
     }
 
     def test_the_matrix_covers_every_domain_in_the_set(self):

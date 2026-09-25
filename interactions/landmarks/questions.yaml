@@ -21,6 +21,19 @@
 #                false precision (landmarks.md §2.4)
 #   unlocks      the arithmetic this landmark makes possible
 #   sensitive    true when the domain is offered, never asked
+#   offered      always | on_mention (v356, owner ruling 2026-09-25). WHEN the
+#                ladder is live at all. `always` (the default when absent) is
+#                every domain before v356. `on_mention` domains add NO
+#                question to a vault that has never mentioned them: the ladder
+#                becomes eligible only once the person has raised the subject
+#                — a filed entry in the domain, or one of `mentioned_by`'s
+#                phrases in their own record — exactly as if they had asked
+#                for it. `landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION`
+#                is the rule and `landmarks_interaction.live_domains` its one
+#                reader.
+#   mentioned_by the phrases (pipe-separated, matched as whole words,
+#                case-insensitive) that count as a mention. Required exactly
+#                when `offered: on_mention`; the loader checks both ways.
 #   why          the one-line sourced reason this domain is here
 #
 # CARDINALITY IS DATA, NOT A FLAG (lifehug-platform#664 wave A, audited plan
@@ -80,7 +93,7 @@
 # `chain_complete`.
 
 version: 2
-domains: birth|family|residences|schools|partnerships|children|work|military|losses
+domains: birth|family|residences|schools|partnerships|children|work|military|losses|missions|baptism
 
 birth.order: 1
 birth.onboarding: true
@@ -225,3 +238,58 @@ losses.date_semantics: death
 losses.per_entry_ladder: true
 losses.sensitive: true
 losses.why: A common terminus ante quem — offered, never asked, never at onboarding.
+
+# v356 (owner ruling, 2026-09-25): "a mission is a span like military service
+# look up lds or mormon mission for context; a baptism is a discreet event on a
+# date; both should not get default landmark questions but if mentioned should
+# enable landmark questions".
+#
+# A MISSION is full-time proselytising service in the Latter-day Saint
+# tradition — conventionally about two years for young men and eighteen months
+# for young women, begun between 18 and 25 — with a departure, training at a
+# Missionary Training Center, one or more assigned areas with transfers
+# between them, and a return. It is a STRETCH, dated like `military`: one
+# `span` per mission, and the MTC and every assigned area are stays that fall
+# inside it through the containment machinery every span already has.
+# `mentioned_by` is deliberately phrases, not the bare word: "mission" alone is
+# also a company's mission statement, and a founder's vault says that often —
+# the owner's own holds "Joy Labs had the wrong mission statement" and "the
+# wrong mission to get the correct outcome", which is why "mission to" is not
+# a phrase here either.
+missions.order: 10
+missions.onboarding: false
+missions.offered: on_mention
+missions.mentioned_by: missionary|missionaries|missionary training center|mtc|mission president|mission call|mission field|mission companion|mission assignment|mission preparation|mission home|lds mission|mormon mission|church mission|full time mission|two year mission|served a mission|serve a mission|serving a mission|serves a mission|on mission|on his mission|on her mission|on my mission|on their mission|from mission|from his mission|from her mission|from my mission|from the mission|for the mission|leave on a mission|left on a mission|before his mission|after his mission|during his mission|before my mission|after my mission|during my mission|before mission|after mission|during mission|pre mission|go on a mission|went on a mission|going on a mission|on your mission|his mission in|my mission in
+missions.ask: Did you serve a mission?
+missions.ladder: happened|where|span
+missions.complete_at: span
+missions.precision: month
+missions.unlocks: span_containment
+missions.collection: set
+missions.closure: open
+missions.identity_kind: episode
+missions.date_semantics: span
+missions.per_entry_ladder: true
+missions.sensitive: false
+missions.why: A sharply bounded stretch with a departure, assigned areas and a return; offered only once mentioned.
+
+# A BAPTISM, in that tradition, is ONE dated ordinance — conventionally at age
+# eight, or at conversion. A POINT, dated like a birth: a singleton whose
+# subject is the person themselves, with the none terminal (`happened`) so
+# "no" finishes it.
+baptism.order: 11
+baptism.onboarding: false
+baptism.offered: on_mention
+baptism.mentioned_by: baptism|baptisms|baptized|baptised|baptize|baptise|baptizing|baptising|christening|christened
+baptism.ask: Were you baptized?
+baptism.ladder: happened|year|month|day
+baptism.complete_at: year
+baptism.precision: day
+baptism.unlocks: age_arithmetic
+baptism.collection: singleton
+baptism.closure: open
+baptism.identity_kind:
+baptism.date_semantics: baptism
+baptism.per_entry_ladder: false
+baptism.sensitive: false
+baptism.why: One dated ordinance, conventionally at eight — a point, not a stretch; offered only once mentioned.

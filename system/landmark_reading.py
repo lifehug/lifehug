@@ -175,6 +175,7 @@ SPAN_NOUN_BY_DOMAIN = {
     "work": "tenure",
     "schools": "schooling",
     "military": "service",
+    "missions": "mission",
 }
 
 
