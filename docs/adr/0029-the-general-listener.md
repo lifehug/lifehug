@@ -237,3 +237,38 @@ written because we lost.
   `listener-prescreen-01.json` pins the measurement itself — every required
   shape, and the negative cases (`marry`, `marching`, the modal `may`,
   `at 19%`, `at 19:30`, `at 19 Elm Street`) that are the load-bearing half.
+
+## Amendment (v352, 2026-09-25): a draft is aimed at the card it answers
+
+The listener hears TIME and it hears it out of one message. That is the whole
+design and it is right — until the message is an ANSWER TO A CARD, when the
+sentence carries the *when* and the card carries the *what*. Twice on the owner's
+own vault in two days the listener did its job perfectly and the result was
+wrong: *"19-21 years old"* filed `claim_type: age`, 19–21, `subject_mention:
+"they"`, `event_kind: span`, **no `event_mention`**, which minted a node labelled
+*they*; and *"He only really started talking when he was 4"* filed the same shape
+under `"he"`. Both replies were promoted with `session_ref:
+conversation:cand:work_item:work:<hex>` — the id of the very card they answered —
+and nothing read it.
+
+The leaf is unchanged and the prompt is unchanged: this is not a prose fix, for
+ADR 0028's own reason. `landmark_recorder.file_claims` already received the
+`session_ref` (for the idempotency key), so it now resolves the card and AIMS
+every draft at it before `bind_claims` sees it
+(`answer_placement.aim_at_card`): the draft's `event_ref` becomes the card's node,
+a bare PRONOUN subject becomes the node's own subject, and an absent
+`event_mention` becomes the node's label. A name the person actually used is never
+overwritten, the owner's own first person (`I`, `me`, `we`, `self`, `narrator`) is
+never rewritten — *"I was 19"* answering a card about somebody else's mission is
+the owner talking about himself — and `event_kind` is left exactly as it was
+heard, because the listener heard the kind from the sentence and a claim whose
+kind disagreed with its own evidence would be this layer editing what somebody
+said.
+
+Two more things follow, and both are stated in ADR 0037's v352 amendment: a
+message whose drafts assert NO time — including the message the listener heard
+nothing in, which used to file NOTHING — files the deterministic reading of the
+reply itself against that card, or an `occurrence` telling of its node when the
+reply carries no time at all; and the amendment's own rule is unchanged where no
+card is named, so a message that produced nothing and answers nothing still files
+nothing.

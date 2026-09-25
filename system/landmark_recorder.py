@@ -542,17 +542,41 @@ def file_claims(vault_root, outcome: object, *, message_text: str,
     whole call off the turn. It does not get a second publisher, and it does
     not get a flag that skips this one.
 
+    **ANSWERING A CARD PLACES ITS MOMENT (v352,
+    `answer_placement.ANSWERING_A_CARD_PLACES_ITS_MOMENT`).** ``session_ref``
+    already travelled here for idempotency; when it names a WORK ITEM
+    (``conversation:cand:work_item:work:<hex>``) it also says what the message
+    is an answer TO, and that changes two things about this filing:
+
+    * every draft is AIMED at the card before it is bound
+      (`answer_placement.aim_drafts`) — its ``event_ref`` becomes the card's
+      node and a bare pronoun subject becomes the node's own subject. The
+      owner's *"19-21 years old"* and *"He only really started talking when he
+      was 4"* filed ``subject_mention: "they"`` and ``"he"`` with no event at
+      all, and minted nodes labelled *they* and *he* beside the cards they were
+      answering;
+    * a message whose drafts assert NO time — including the message that
+      produced no drafts at all, which is *"This was mostly last month and he's
+      stopped mostly now"* — files the deterministic reading of the reply
+      itself, or an ``occurrence`` telling of that node when the reply carries
+      no time. So an answer to a card is never nothing.
+
     Returns ``(source_ref, receipt_path)``, or ``None`` when the outcome
-    carries no claims — a message that produced nothing files NOTHING, which
-    is the amendment's own rule and not an optimization. Nothing filed means
-    nothing derived, so a message with no claims publishes no generation
-    either.
+    carries no claims AND the message answers no card — a message that produced
+    nothing files NOTHING, which is the amendment's own rule and not an
+    optimization. Nothing filed means nothing derived, so a message with no
+    claims publishes no generation either.
     """
+    import answer_placement as ap  # noqa: PLC0415 — avoids an import cycle
+
     drafts = tuple(getattr(outcome, "claims", None) or
                    (outcome if isinstance(outcome, (list, tuple)) else ()))
     drafts = tuple(draft for draft in drafts
                    if isinstance(draft, dict) and draft)
-    if not drafts:
+    card, _refusal = ap.card_for_answer(vault_root, session_ref)
+    if card is not None:
+        drafts = ap.aim_drafts(drafts, card)
+    if not drafts and card is None:
         return None
     from temporal_publication import publish  # noqa: PLC0415
     from temporal_store import file_message_extraction  # noqa: PLC0415
@@ -561,20 +585,60 @@ def file_claims(vault_root, outcome: object, *, message_text: str,
                 "speaker": speaker, "channel": channel,
                 "occurred_at": occurred_at}
     metadata = {key: value for key, value in metadata.items() if value}
-    filed = file_message_extraction(
-        vault_root,
-        message_text=message_text,
-        extractor_version=extractor_version,
-        claims_for=lambda source_ref: gl.bind_claims(
-            drafts, source_ref=source_ref,
-            extractor_version=extractor_version, now=now),
-        metadata=metadata,
-        extractor=extractor,
-        recorder=str(recorder) if recorder else None,
-        now=now,
-    )
+    filed = None
+    if drafts:
+        filed = file_message_extraction(
+            vault_root,
+            message_text=message_text,
+            extractor_version=extractor_version,
+            claims_for=lambda source_ref: gl.bind_claims(
+                drafts, source_ref=source_ref,
+                extractor_version=extractor_version, now=now),
+            metadata=metadata,
+            extractor=extractor,
+            recorder=str(recorder) if recorder else None,
+            now=now,
+        )
+    if card is not None and not ap.drafts_carry_time(drafts):
+        # The card's own reading, under its OWN extractor version and beside
+        # whatever the listener heard — never instead of it. It needs the
+        # message to be a vault source first (amendment 2 / option B), which is
+        # what `promote_conversational_source` is for and what
+        # `file_message_extraction` did above when there were drafts; the same
+        # utterance promotes to the same path either way, so this is one source
+        # and two readings of it and never two sources.
+        promoted = _promote_for_answer(vault_root, message_text, metadata)
+        if promoted is not None:
+            reading = ap.answer_reading(
+                message_text, captured=occurred_at or now,
+                question=card.get("question")) or ap.telling_reading()
+            placed = ap.file_answer(vault_root, source_path=promoted.source_path,
+                                    card=card, reading=reading,
+                                    text=message_text, now=now)
+            filed = filed or (promoted, Path(placed["receipt_path"]))
+    if filed is None:
+        return None
     publish(vault_root, now=now)
     return filed
+
+
+def _promote_for_answer(vault_root, message_text: str, metadata: dict):
+    """The reply as a vault source, promoted once. ``None`` when it cannot be.
+
+    `temporal_store.promote_conversational_source` is the ONE promoter and it
+    re-reads rather than rewrites an occupied path, so calling it for the
+    answer-placement reading after `file_message_extraction` already promoted
+    the same utterance finds the file that is there and changes nothing. A
+    refusal is swallowed to ``None`` rather than raised: a card's reading is an
+    ADDITION to this filing, and losing it must never cost the claims the
+    listener did hear.
+    """
+    from temporal_store import promote_conversational_source  # noqa: PLC0415
+
+    try:
+        return promote_conversational_source(vault_root, message_text, metadata)
+    except Exception:  # noqa: BLE001 — a reply that cannot be promoted places nothing
+        return None
 
 
 def record_answer(*, answer: str, call, domain: str | None = None,

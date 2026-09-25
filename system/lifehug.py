@@ -189,6 +189,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # classified by name (the focus-autopilot/era-migrate convention).
     "migrate-classifier-moments",
     "mirror-compile", "perennial-add", "perennials",
+    # v352: `place-answers` writes one extraction receipt per answered card and
+    # then rebuilds the index and republishes — the same single-transaction
+    # family as `migrate-classifier-moments`, whose sweep also runs this rung.
+    "place-answers",
     "planner-clear", "planner-objective-add", "planner-objective-clear", "planner-queue",
     "planner-state", "quality-update", "rebuild", "recommend-focuses", "reflect-source",
     "research-expand", "retract-source", "roadmap-rebuild", "second-voice-ack",
@@ -1486,6 +1490,41 @@ def cmd_migrate_classifier_moments(args: argparse.Namespace) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         print("\n".join(classifier_claims.describe_migration(report)))
+    return 0
+
+
+def cmd_place_answers(args: argparse.Namespace) -> int:
+    """`place-answers` — every answer to a card lands on the card's own moment.
+
+    v352, `answer_placement.ANSWERING_A_CARD_PLACES_ITS_MOMENT`. The same rung
+    `migrate-classifier-moments` runs as the second half of its sweep, exposed
+    on its own so an operator can place the answers already in a vault without
+    re-reading every classification. A thin seat, exactly like the migration's:
+    the rule, the counts and the idempotency are `answer_placement`'s.
+    """
+    import answer_placement  # noqa: PLC0415
+    import event_identity  # noqa: PLC0415
+    import temporal_store  # noqa: PLC0415
+
+    dry_run = bool(getattr(args, "dry_run", False))
+    report = answer_placement.place_answers(
+        REPO_DIR,
+        sources=getattr(args, "source", None),
+        dry_run=dry_run,
+    )
+    if report["filed"] and not dry_run:
+        # A claim nobody derived from is a fact the person cannot see (v231):
+        # the filing is not done until the projection moves, and it moves
+        # through the SAME one publisher every other filing seat uses.
+        import timeline  # noqa: PLC0415
+
+        temporal_store.rebuild_active_index(REPO_DIR)
+        event_identity.rebuild_telling_manifest(REPO_DIR)
+        timeline.publish_calculated_timeline(REPO_DIR)
+    if getattr(args, "json", False):
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print("\n".join(answer_placement.describe(report)))
     return 0
 
 
@@ -3841,6 +3880,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source", action="append", default=[], metavar="PATH",
                    help="Restrict migration to this source_path (repeatable)")
     p.set_defaults(func=cmd_migrate_classifier_moments)
+
+    p = sub.add_parser(
+        "place-answers",
+        help="Place every promoted answer to a card on the moment that card is about",
+    )
+    p.add_argument("--dry-run", action="store_true",
+                   help="Print the counts and write nothing")
+    p.add_argument("--json", action="store_true", help="Print the report as JSON")
+    p.add_argument("--source", action="append", default=[], metavar="PATH",
+                   help="Restrict the run to this promoted answer's source_path (repeatable)")
+    p.set_defaults(func=cmd_place_answers)
 
     p = sub.add_parser("mirror-compile",
                        help="Synthesize wiki/self/mirror.md from classifier contradictions/insights/positions")
