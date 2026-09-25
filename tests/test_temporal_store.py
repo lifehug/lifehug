@@ -35,10 +35,22 @@ import temporal_store as ts  # noqa: E402
 LISTENER = tc.extractor_version_string(
     "listener", schema_version=1, prompt_version="c0ffee", model="test-model"
 )
+#: A DIFFERENT reader of the same words, which since v354 coexists with the
+#: listener's reading instead of retiring it.
 RECORDER = tc.extractor_version_string(
     "recorder", schema_version=1, prompt_version="beaded", model="test-model"
 )
-PRESCREEN = tc.extractor_version_string("prescreen", rule_version="3")
+#: The SAME reader after a prompt edit — a later version of one extractor, which
+#: is what re-extraction is in this vault: a new leaf digest lands on a new
+#: receipt path beside yesterday's reading (`general_listener.PROMPT_VERSION_LENGTH`).
+#: v354 (lifehug#409): the fold elects a winner WITHIN one reader
+#: (`temporal_store.A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER`), so a
+#: fixture that wants a supersession must re-read with the same NAME. Two
+#: different names are two readings that coexist, which is what
+#: `tests/test_v354_a_reading_is_only_superseded_by_the_same_reader.py` pins.
+LISTENER_REREAD = tc.extractor_version_string(
+    "listener", schema_version=1, prompt_version="decaf0", model="test-model"
+)
 
 
 def date_value(best: str, *, granularity: str = "day") -> dict:
@@ -279,7 +291,7 @@ class ReceiptStoreTests(StoreTestCase):
         old = self.file_receipt(
             ref,
             [claim("Ada", "birth", "1978", granularity="year")],
-            extractor_version=PRESCREEN,
+            extractor_version=LISTENER_REREAD,
             created_at="2026-08-20T10:00:00Z",
         )
         new = self.file_receipt(
@@ -454,7 +466,7 @@ class ReextractionTests(StoreTestCase):
         self.file_receipt(
             ref,
             [claim("Ada", "birth", "1978", granularity="year")],
-            extractor_version=PRESCREEN,
+            extractor_version=LISTENER_REREAD,
             created_at="2026-08-20T10:00:00Z",
         )
         self.file_receipt(
@@ -474,10 +486,50 @@ class ReextractionTests(StoreTestCase):
         self.assertEqual(
             [mark["reason"] for mark in stale["status_marks"]], ["reextracted"]
         )
-        # One source revision, one selected receipt, both receipts on disk.
+        # One source revision, ONE reader, one selected receipt, both receipts
+        # on disk. The two receipts are the same reader at two prompt versions,
+        # which is the only thing an election may retire (v354,
+        # `temporal_store.A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER`).
         self.assertEqual(index["counts"]["sources"], 1)
+        self.assertEqual(index["counts"]["readings"], 1)
         self.assertEqual(index["counts"]["selected_receipts"], 1)
         self.assertEqual(index["counts"]["receipts"], 2)
+
+    def test_two_readers_of_one_message_both_keep_their_reading(self) -> None:
+        """v354, lifehug#409. The election is held WITHIN one reader.
+
+        Before v354 the group was ``(source_id, revision)``, so the later
+        receipt won it whoever wrote it and the earlier READER's whole reading
+        of the message was marked ``superseded / reextracted``. On the owner's
+        vault that cost a 2006 graduation its dated node the first time
+        `place-answers` filed beside the listener.
+        """
+        ref = self.promote("Katie graduated in 2006.", session_ref="s1", turn_ref="t1")
+        self.file_receipt(
+            ref,
+            [claim("Katie", "graduation", "2006", granularity="year")],
+            extractor_version=LISTENER,
+            created_at="2026-08-20T10:00:00Z",
+        )
+        self.file_receipt(
+            ref,
+            [claim("Katie", "birth", "1984", granularity="year")],
+            extractor_version=RECORDER,
+            created_at="2026-08-26T10:00:00Z",
+        )
+        index = ts.fold_active_index(self.vault)
+        self.assertEqual(index["counts"]["claims"], 2)
+        self.assertEqual(index["counts"]["active"], 2)
+        self.assertEqual(index["counts"]["superseded"], 0)
+        self.assertEqual([row["status_marks"] for row in index["claims"]], [[], []])
+        # One revision of one document, read twice, and BOTH readings selected.
+        self.assertEqual(index["counts"]["sources"], 1)
+        self.assertEqual(index["counts"]["readings"], 2)
+        self.assertEqual(index["counts"]["selected_receipts"], 2)
+        self.assertEqual(
+            sorted(row["extractor_identity"] for row in index["sources"]),
+            ["listener", "recorder"],
+        )
 
     def test_a_different_source_revision_is_its_own_group(self) -> None:
         first = self.promote("Ada was born in 1978.", session_ref="s1", turn_ref="t1")
@@ -526,19 +578,22 @@ class RebuildInvariantTests(StoreTestCase):
             }
             ts.write_receipt(vault, payload)
 
-        # A second interpretation of one source, so the fold has a group to
-        # resolve rather than four singletons.
+        # A second interpretation of one source by the SAME reader, so the fold
+        # has a group to resolve rather than four singletons. It must be the
+        # same reader: since v354 an election is held within one extractor, and
+        # a different reader's receipt stands beside this one rather than over
+        # it (`temporal_store.A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER`).
         ts.write_receipt(
             vault,
             {
                 "source_ref": refs["t2"].to_dict(),
-                "extractor_version": RECORDER,
+                "extractor_version": LISTENER_REREAD,
                 "created_at": "2026-08-26T10:00:00Z",
                 "claims": [
                     dict(
                         claim("Rosa", "married", "1978-06-03"),
                         source_ref=refs["t2"].to_dict(),
-                        extractor_version=RECORDER,
+                        extractor_version=LISTENER_REREAD,
                     )
                 ],
             },

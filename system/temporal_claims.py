@@ -753,6 +753,48 @@ def extractor_version_string(
     return "/".join(parts)
 
 
+#: The rule the fold's election rests on (v354, lifehug#409). WHO read a
+#: document is its extractor's NAME; WHICH version of that reader did the
+#: reading is everything after it. `extractor_version_string` renders the two
+#: as ``name`` then ``/schema:…/prompt:…/model:…/rule:…``, and a prompt edit or
+#: a model change is a new VERSION of one reader, never a new reader
+#: (`general_listener.PROMPT_VERSION_LENGTH`).
+AN_EXTRACTORS_NAME_IS_WHO_READ_IT = (
+    "the name at the head of an extractor version says WHO read the document; "
+    "everything after it says which version of that reader did the reading. "
+    "A later version of one reader is a later interpretation of the same words; "
+    "another reader is a different reading of them, and neither supersedes the "
+    "other"
+)
+
+
+def extractor_identity(extractor_version: object) -> str:
+    """WHO read it — an extractor version with its VERSION stripped off.
+
+    ``"general_listener/schema:1/prompt:9f2a/model:haiku"`` -> ``"general_listener"``,
+    ``"answer-placement/rule:1"`` -> ``"answer-placement"``,
+    ``"story-classifier:2"`` -> ``"story-classifier"``, ``"era_record"`` ->
+    ``"era_record"``. One derivation, because
+    :data:`AN_EXTRACTORS_NAME_IS_WHO_READ_IT` is what
+    `temporal_store._fold` elects a winning receipt WITHIN, and a second
+    spelling of "which reader is this" would let one reader's reading retire
+    another's (lifehug#409).
+
+    Both spellings of a version are handled deliberately. Every version built
+    through :func:`extractor_version_string` separates the name with ``/`` and
+    that function's own label pass strips ``:`` out of a name, so a ``:`` in
+    the first segment is always the older ``name:rule`` spelling
+    (`classifier_context.EXTRACTOR_VERSION`) and never part of a name.
+    """
+    text = _text(extractor_version)
+    if not text:
+        raise ExtractionReceiptError(
+            "extractor_version_required", "a receipt names the extractor that wrote it"
+        )
+    name = text.split("/", 1)[0].split(":", 1)[0].strip()
+    return name or text
+
+
 # Shared with the landmark converter: these are producer identities, not a
 # free-text claim's permission to invent its subject type.
 LANDMARK_LEGACY_EXTRACTOR = extractor_version_string("legacy-entry-import", rule_version="1")
@@ -1940,6 +1982,7 @@ def receipt_from_dict(value: object) -> ExtractionReceipt | None:
 
 
 __all__ = [
+    "AN_EXTRACTORS_NAME_IS_WHO_READ_IT",
     "ATOMIC_LANDMARK_IDENTITY_KINDS",
     "ACTIVE_INDEX_FILE",
     "CLAIM_BASES",
@@ -1997,6 +2040,7 @@ __all__ = [
     "derive_receipt_id",
     "digest_id",
     "evidence_from_dict",
+    "extractor_identity",
     "extractor_version_string",
     "is_safe_id",
     "is_seed_event_kind",
