@@ -453,6 +453,15 @@ class TemporalWorkItemError(TemporalContractError):
     """A work item cannot be answered once and closed everywhere."""
 
 
+#: v353. The one refusal in :data:`ERROR_CODES` a LEGITIMATELY filed claim can
+#: provoke, named so the fold can repair exactly that class at the draw instead
+#: of matching a string literal. It is repairable, and the repair is not a
+#: guess, for the reason the raise below gives: ``node_kind`` is INSIDE the node
+#: id's own digest (:data:`NODE_IDENTITY_KEYS`), so an episode's node id drawn
+#: as an ``event`` is a fabrication about the id and the id says which of the
+#: two is the fabrication.
+EPISODE_BLOCK_ON_NON_EPISODE_NODE = "episode_block_on_non_episode_node"
+
 #: Every finding id this module can raise (plan §12 counts rejections by
 #: reason). ``temporal_claims.ERROR_CODES`` holds the evidence side's.
 ERROR_CODES = (
@@ -499,7 +508,7 @@ ERROR_CODES = (
     "contradiction_needs_two_claims",
     "score_out_of_range",
     "timestamp_unusable",
-    "episode_block_on_non_episode_node",
+    EPISODE_BLOCK_ON_NON_EPISODE_NODE,
     "telling_count_disagrees",
     "identity_link_malformed",
 )
@@ -1032,7 +1041,7 @@ def validate_calculated_timeline_node(value: object) -> dict:
         # disagree without one of them being a fabrication.
         if node_kind != "episode":
             raise TimelineNodeError(
-                "episode_block_on_non_episode_node",
+                EPISODE_BLOCK_ON_NON_EPISODE_NODE,
                 f"{node_id} carries an episode_id but its node_kind is {node_kind!r}",
             )
         tellings = _ref_tuple(value.get("tellings"))
@@ -1782,6 +1791,7 @@ __all__ = [
     "PARTICIPATION_EVENT_KINDS",
     "VALUE_SHAPES",
     "TEMPORAL_STATES",
+    "EPISODE_BLOCK_ON_NON_EPISODE_NODE",
     "ERROR_CODES",
     "NODE_IDENTITY_KEYS",
     "NODE_KINDS",

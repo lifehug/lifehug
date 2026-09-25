@@ -173,6 +173,40 @@ whichever act moved that node. The invariant is the same single line, and it
 now has four sources of aliases to hold: no key of `node_aliases` is the id of
 a node the drawing publishes.
 
+**Amendment (v353): the node id is what says a node is an episode, and the draw
+never refuses the whole projection over one node's shape.** §3.5's minter puts
+`node_kind: episode` INSIDE the id's digest, and until v353 the fold did not read
+it back. `temporal_timeline._group_claims` created a group from the first claim
+it read and asked `EpisodeIdentity.episode_node_for` — a question about that
+CLAIM, *did a bind put this telling in an episode?* — while
+`EpisodeIdentity.node_block` stamped its episode block from the published
+`episode_of_node` map. Two readings of one fact, and on the owner's vault they
+disagreed: v352's `place-answers` filed a `telling_only` `occurrence` on
+`node:22784323839a0481b081ceab` (`episode:59ae397ae9edf8b6719355f7`, canonical
+kind `moment`), that claim's telling was bound to nothing, its claim id happened
+to sort first — the active index is in claim-id order — so the group was made an
+`event` and `publish` raised `episode_block_on_non_episode_node` and drew
+nothing at all.
+
+There is now ONE reading (`EpisodeIdentity.episode_of`,
+`AN_EPISODE_NODES_KIND_IS_THE_NODES_AND_NOT_ITS_FIRST_CLAIMS`), it is asked of
+the NODE ID, and the grouping and the episode block both go through it — so a
+group drawn at an episode's id is that episode, with that episode's canonical
+kind, whatever its claims say and whichever of them was read first. It is gated
+on the same `active` flag `node_block` is, so CERT-11's *"delete the layer and
+the drawing returns"* is unchanged. A telling of an episode is ordinary and files
+unchanged; whether it is the SAME event remains the binder's decision under Law
+6, so the episode's `tellings` and `telling_count` are untouched by it and the
+new claim is simply another published input. And the draw fails SOFT for this one
+class: `temporal_timeline._node_dict_or_finding` repairs
+`temporal_projection.EPISODE_BLOCK_ON_NON_EPISODE_NODE` and reports
+`episode_node_kind_redrawn` — `landmark_projection`'s refusals and v340's
+`owner_birth_anchor_ambiguous` are the precedent — while every other member of
+`ERROR_CODES` still stops the drawing, because those mean the fold computed
+something it cannot explain. The reason the belt exists although grouping now
+agrees: `publish` raising is not one bad node; it parks the hosted compile job
+and the whole vault stops updating.
+
 ### Entailment (§2.2)
 
 `entailed_not_same()` computes `same(A,E) ∧ not_same(B,E) ⇒ not_same(A,B)` and

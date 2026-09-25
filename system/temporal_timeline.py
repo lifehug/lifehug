@@ -2163,7 +2163,14 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
     An episode group's ``event_kind`` is the episode's CANONICAL kind when its
     creation recorded one (§3.2) and the first member claim's kind otherwise;
     its ``node_kind`` is ``episode``, which is what the id was minted with, so
-    the group and the digest cannot disagree about what the node is.
+    the group and the digest cannot disagree about what the node is. v353:
+    "is this group an episode?" is asked of the NODE ID
+    (`episode_fold.EpisodeIdentity.episode_of`,
+    :data:`~episode_fold.AN_EPISODE_NODES_KIND_IS_THE_NODES_AND_NOT_ITS_FIRST_CLAIMS`)
+    rather than of whichever claim created the group, because a claim filed onto
+    an episode's node id by a verb that binds nothing — a telling of the card
+    that episode carries — is not the identity layer standing aside from the
+    NODE, only from that claim.
 
     ``era_views`` seeds the era groups first (:func:`_era_groups`), so a
     `period_started` claim bound to an era lands IN that era's node instead of
@@ -2253,25 +2260,34 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
                 node_id = episode_node = carried
         group = groups.get(node_id)
         if group is None:
+            # v353, `AN_EPISODE_NODES_KIND_IS_THE_NODES_AND_NOT_ITS_FIRST_CLAIMS`.
+            # The episode is asked of the NODE ID rather than of the claim that
+            # happened to arrive first (`episode_fold.EpisodeIdentity.episode_of`),
+            # because an episode's node id is minted WITH `node_kind: episode`
+            # inside its digest and because `node_block` stamps its episode
+            # block on exactly that reading. Until v353 this asked `episode_node`
+            # — the BIND's answer about this claim — so an unbound claim whose
+            # own `event_ref` names an episode node (a telling filed onto the
+            # card that episode carries) created the group as an `event` and the
+            # projection then refused the node it drew.
             episode_id = (
-                identity.episode_of_node.get(node_id) if episode_node else None
-            )
+                identity.episode_of(node_id) if identity is not None else ""
+            ) or None
             canonical = (
-                (identity.episodes.get(episode_id).canonical_event_kind
-                 if episode_id and identity.episodes.get(episode_id) else None)
-                if episode_node else None
+                identity.episodes.get(episode_id).canonical_event_kind
+                if episode_id and identity.episodes.get(episode_id) else None
             )
             group = {
                 "node_id": node_id,
                 "event_kind": canonical or event_kind,
-                "node_kind": (efc.EPISODE_NODE_KIND if episode_node
+                "node_kind": (efc.EPISODE_NODE_KIND if episode_id
                               else _node_kind_for(canonical or event_kind)),
                 "subject": subject,
                 "subjects": [],
                 "resolved": False,
                 "claims": [],
             }
-            if episode_node:
+            if episode_id:
                 group["episode_id"] = episode_id
             groups[node_id] = group
         elif event_kind == "moment" and group.get("event_kind") in (None, "", "started", "ended"):
@@ -4649,6 +4665,52 @@ def _node_dict(
     )
 
 
+#: v353. Reported instead of raised: the drawing found an episode block on a
+#: group grouping had made some other kind, drew the node as the episode its id
+#: says it is, and said so. `landmark_projection`'s
+#: :data:`~landmark_projection.NOT_A_LANDMARK_REASONS` and v340's
+#: `owner_birth_anchor_ambiguous` are the precedent — an invalid shape from a
+#: legitimate filing is a FINDING about one node, never an exception that stops
+#: the drawing of every other one.
+DIAGNOSTIC_EPISODE_NODE_REDRAWN = "episode_node_kind_redrawn"
+
+
+def _node_dict_or_finding(group: dict, *args: object, diagnostics: list,
+                          **kwargs) -> dict:
+    """:func:`_node_dict`, and never a refusal for the one class a legitimately
+    filed claim can provoke.
+
+    ONE class, by name (`temporal_projection.EPISODE_BLOCK_ON_NON_EPISODE_NODE`)
+    and no other: every remaining member of `temporal_projection.ERROR_CODES`
+    means the fold computed something it cannot explain, and swallowing those
+    would publish a drawing nobody can trust. This one is different in kind,
+    because the node id ITSELF carries ``node_kind: episode`` inside its digest
+    — so the shape is repairable without a guess, and the repair is the same
+    reading :data:`~episode_fold.AN_EPISODE_NODES_KIND_IS_THE_NODES_AND_NOT_ITS_FIRST_CLAIMS`
+    made at grouping.
+
+    WHY IT IS WORTH A BELT AT ALL, given grouping now agrees: `publish` raising
+    is not one bad node. On the hosted platform it parks the whole compile job,
+    so the owner's vault stops updating for EVERYTHING — which is exactly what
+    v353's incident did — and no claim any verb is allowed to file should be
+    able to buy that.
+    """
+    try:
+        return _node_dict(group, *args, **kwargs)
+    except tp.TimelineNodeError as exc:
+        if exc.code != tp.EPISODE_BLOCK_ON_NON_EPISODE_NODE:
+            raise
+        block = kwargs.get("identity") or {}
+        diagnostics.append({
+            "finding": DIAGNOSTIC_EPISODE_NODE_REDRAWN,
+            "node_id": collapsed_text(group.get("node_id")),
+            "episode_id": collapsed_text(block.get("episode_id")),
+            "drawn_as": collapsed_text(group.get("node_kind")),
+        })
+        return _node_dict({**group, "node_kind": efc.EPISODE_NODE_KIND},
+                          *args, **kwargs)
+
+
 #: Design §4.2. A `within` says an era sits inside a frame; it does NOT say
 #: when the era began or ended. So a named era with no dating claims of its
 #: own keeps `best_temporal_value` EMPTY and publishes the containment here,
@@ -5621,9 +5683,10 @@ def derive_calculated_timeline(
         for node_id in sorted(groups)
     }
     nodes = [
-        _node_dict(
+        _node_dict_or_finding(
             groups[node_id],
             calculated[node_id],
+            diagnostics=diagnostics,
             best=None if possibilities.get(node_id) is not None else placed.get(node_id),
             possible=possibilities.get(node_id),
             extra_alternates=rejected.get(node_id, ()),

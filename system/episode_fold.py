@@ -130,6 +130,43 @@ AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES = (
     "node is ever drawn at an id node_aliases has already redirected"
 )
 
+#: v353, and the second half of the same lesson: a node's KIND is the node's,
+#: not its first claim's.
+#:
+#: THE INCIDENT (owner's vault, staging, 2026-09-25 07:24 UTC, framework v352).
+#: `place-answers` filed the owner's reply *"This happened in the middle of
+#: sixth grade for James."* as a `telling_only` `occurrence` on
+#: `node:22784323839a0481b081ceab` — *"James Everett moved between baseball
+#: teams"*, the node the card he answered is about, and an EPISODE
+#: (`episode:59ae397ae9edf8b6719355f7`, one bound telling, canonical kind
+#: `moment`). The next `temporal_publication.publish` RAISED
+#: `episode_block_on_non_episode_node` and drew nothing at all: the vault
+#: stopped updating for every node, not just that one.
+#:
+#: Why: the answer's telling is not bound to the episode — no rung has looked
+#: at it yet, and `answer_placement` is a claim filer and not an identity
+#: decider — so `episode_node_for` stood aside for it, and because its claim id
+#: happened to sort first (`claim:cb8c3d…` before `claim:d7232e…`; the active
+#: index is in claim-id order) it CREATED the group and the group was made an
+#: `event` from its own `event_kind`. :meth:`EpisodeIdentity.node_block` then
+#: read the published episode↔node map — which knows nothing about claim order
+#: — and stamped the episode block on it. Two readings of "is this node an
+#: episode?", one per claim and one per node, disagreeing about a node whose id
+#: was MINTED with `node_kind: episode` inside its digest.
+#:
+#: So there is one reading (:meth:`EpisodeIdentity.episode_of`), it is asked of
+#: the node id, and both the grouping and the episode block go through it. A
+#: telling of an episode is an ordinary, honest thing for a person to file —
+#: their reply really is another telling of that episode — and it must not be
+#: able to change what the node IS.
+AN_EPISODE_NODES_KIND_IS_THE_NODES_AND_NOT_ITS_FIRST_CLAIMS = (
+    "an episode's node id is minted with node_kind: episode inside its digest, "
+    "so a group drawn at that id is that episode whatever its claims say and "
+    "whichever of them was read first — one reading of it, asked of the node "
+    "and shared by the grouping and the episode block, so the fold can never "
+    "draw a node the projection must refuse"
+)
+
 #: The relation a person files about an episode their telling is NOT
 #: (§6.1). Named here because :meth:`EpisodeIdentity._refuses` is the second
 #: reader of it and `episode_fold_contract` spells the positive one only.
@@ -479,6 +516,30 @@ class EpisodeIdentity:
             return ""
         return decision.key
 
+    def episode_of(self, node_id: object) -> str:
+        """The episode a NODE ID *is*, or ``""`` — v353's one reading of it.
+
+        :meth:`episode_node_for` answers a question about a CLAIM: did a bind
+        put this telling in an episode? This answers a question about a NODE:
+        is this id an episode's own id? They are not the same question, and
+        v353's incident is what happens when the second one is answered by
+        asking the first. An episode's node id is minted with
+        ``node_kind: episode`` INSIDE its digest
+        (:func:`episode_fold_contract.episode_node_id`,
+        `temporal_projection.NODE_IDENTITY_KEYS`), so the id itself already
+        says what the node is — whoever filed the claim that happened to be
+        read first does not.
+
+        Every reader of "is this node an episode?" goes through here — the
+        fold's grouping and :meth:`node_block`'s own episode block — so the
+        two cannot disagree and produce a node the projection refuses. Gated on
+        :attr:`active` for CERT-11's reason: a vault with no active binding
+        does no identity work at all.
+        """
+        if not self.active:
+            return ""
+        return collapsed_text(self.episode_of_node.get(collapsed_text(node_id)))
+
     def decision_for(self, claim: object) -> efc.GroupingKey | None:
         return self._decisions.get(collapsed_text((claim or {}).get("claim_id")))
 
@@ -759,7 +820,7 @@ class EpisodeIdentity:
             self.telling_for(claim) for claim in (group_claims or ())
         } - {""})
         block: dict = {}
-        episode_id = self.episode_of_node.get(key)
+        episode_id = self.episode_of(key)
         if episode_id:
             bound = self._members_by_episode.get(episode_id) or {}
             # Intersected with the tellings whose claims actually landed in

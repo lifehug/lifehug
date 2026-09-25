@@ -432,6 +432,64 @@ promise over a synthetic batch mixing containment-absorbing confirmations,
 a plain pair and a merge, across every one of 120 filing orders: the fold
 never refuses, and the final partition is the same regardless of order.
 
+## I1 amendment (v353) — an episode node's kind is the NODE's, not its first claim's
+
+The incident: the owner's vault, on staging, framework v352 already pinned and
+live. v352's `place-answers` filed his reply *"This happened in the middle of
+sixth grade for James."* as a `telling_only` `occurrence` on
+`node:22784323839a0481b081ceab` — the node the card he answered is about, and an
+EPISODE (`episode:59ae397ae9edf8b6719355f7`, deterministic create over two
+classification tellings, canonical kind `moment`). The next
+`temporal_publication.publish` raised `episode_block_on_non_episode_node` and
+drew **nothing at all**.
+
+I1 had two readings of *"is this node an episode?"* and they were asked of
+different things. `temporal_timeline._group_claims` created the group for a node
+id from the first claim it read and asked `EpisodeIdentity.episode_node_for` —
+a question about that CLAIM, *did a bind put this telling in an episode?* The
+answer's telling is bound to nothing (no rung has looked at it, and
+`answer_placement` is a claim filer, not an identity decider), and it created
+the group only because its claim id sorts first — `temporal_store.active_claims`
+is in claim-id order, and `claim:cb8c3d…` precedes `claim:d7232e…`. So the group
+was made an `event`. `EpisodeIdentity.node_block` then read the published
+`episode_of_node` map, which knows nothing about claim order, and stamped the
+episode block on it.
+
+The decision: there is ONE reading, it is asked of the NODE ID, and both the
+grouping and the episode block go through it
+(`episode_fold.EpisodeIdentity.episode_of`,
+`episode_fold.AN_EPISODE_NODES_KIND_IS_THE_NODES_AND_NOT_ITS_FIRST_CLAIMS`). It
+is sound because §3.5's minter puts `node_kind: episode` INSIDE the id's own
+digest: a group drawn at an episode's node id **is** that episode whatever its
+claims say, so the id is the authority and the repair is arithmetic rather than a
+guess. The reading is gated on the same `active` flag `node_block` is, so
+CERT-11 holds unchanged — a vault with no active binding does no identity work.
+
+Two corollaries, both deliberate:
+
+* **A telling of an episode is not refused, and nothing binds it.** The reply
+  really is another telling of that episode — exactly the unit
+  `answer_placement.answer_telling_ref` mints (v337) — and the repeat kinds are
+  where *"when did X happen?"* cards cluster, so refusing an episode target
+  would drop the owner's answers for the commonest card class there is. Whether
+  it is the SAME event stays `episode_binder`'s decision under Law 6 (*a miss is
+  cheap, a wrong link is not*); the claim is a published input on the node, and
+  the episode's member list, `tellings` and `telling_count` are untouched.
+* **The draw fails soft for this one class.**
+  `temporal_timeline._node_dict_or_finding` repairs exactly
+  `temporal_projection.EPISODE_BLOCK_ON_NON_EPISODE_NODE` and reports
+  `episode_node_kind_redrawn`, the precedent being `landmark_projection`'s
+  refusals and v340's `owner_birth_anchor_ambiguous`. Every other member of
+  `ERROR_CODES` still stops the drawing, because those mean the fold computed
+  something it cannot explain. The reason a belt exists at all even though
+  grouping now agrees: `publish` raising is not one bad node — on the hosted
+  platform it parks the whole compile job and the vault stops updating for
+  everything, which is what this incident did.
+
+`CALCULATION_RULE_VERSION` does not move. Every input the new reading touches
+previously produced no drawing at all, so no vault whose head has not moved
+draws anything different.
+
 ## Consequences
 
 * Two new record families and two new directories; two modules after I2b

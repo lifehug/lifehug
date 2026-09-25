@@ -26,9 +26,31 @@ import temporal_projection as tp  # noqa: E402
 RULES = "timeline-rules:1"
 
 
+def module_string_constants(tree: ast.Module) -> dict[str, str]:
+    """``{name: value}`` for the module's top-level string constants.
+
+    v353. A finding id another module has to compare against is NAMED
+    (`EPISODE_BLOCK_ON_NON_EPISODE_NODE`, which `temporal_timeline` reads to
+    repair exactly that class at the draw), so a raise may carry the constant
+    rather than the literal. Resolving the binding keeps ONE definition of the
+    id instead of a literal and a constant that have to be kept equal.
+    """
+    named: dict[str, str] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
+            continue
+        if not isinstance(node.value.value, str):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                named[target.id] = node.value.value
+    return named
+
+
 def raised_finding_codes(path: Path) -> set[str]:
     """Every finding id the module actually raises, read out of its own AST."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
+    named = module_string_constants(tree)
     codes: set[str] = set()
     for node in ast.walk(tree):
         # Every construction of an error class counts, not only `raise` — a
@@ -39,10 +61,13 @@ def raised_finding_codes(path: Path) -> set[str]:
         name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
         if not (name.endswith("Error") or name == "error"):
             continue
-        if node.args and isinstance(node.args[0], ast.Constant):
-            value = node.args[0].value
-            if isinstance(value, str):
-                codes.add(value)
+        if not node.args:
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            codes.add(first.value)
+        elif isinstance(first, ast.Name) and first.id in named:
+            codes.add(named[first.id])
     return codes
 
 
