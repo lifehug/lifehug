@@ -1,5 +1,5 @@
 {
-  "calculation_rule_version": "timeline-rules:17",
+  "calculation_rule_version": "timeline-rules:18",
   "cases": {
     "no_episode": {
       "expected": {

@@ -364,6 +364,7 @@ notes beside the constant; `:1`–`:7` are narrated in the prose below.
 | `:15` | v346 | **A birthday is a birth, and an age is measured from its own subject's birth.** A dated `<Name>'s birthday` is read as that person's `birth` at fold time; a merged birth group naming one child is labelled and anchored for the child; `BIRTH_ANCHOR_TIERS` reads a birth node, then the roster's `born`, then a `family`/`children` landmark entry; and a node wholly before the owner's birth is `pre_birth` whoever it is about. A different node set, placement set and work-item set. (The branch was numbered 344; v344 and v345 were taken by other releases while it was open, so it shipped as v346.) |
 | `:16` | v347 | **An introduction names one person in one clause.** The arithmetic in the fold did not change; the **roster** it reads did, and this release is what changes it. `:15` read *"my grandpa James Edwin Taylor Sr., my dad's dad"* as introducing a second father, so two people claimed "dad" and the shared-alias rule bound the word to neither. A different subject set, axis membership and age-anchor set once the roster this release writes is in place. |
 | `:17` | v350 | **One couple, one alias, one label.** A couple key is read from a telling's own subjects and a compound relationship word is never the simple word inside it (a different **node** set); a subject that newly resolves publishes the id it used to be drawn at as a redirect and carries the claims still holding it (a different **alias** table, one fewer fact drawn twice); and an anchor handle that is an internal id mints no card at all, while no composer's sentence may carry one (a different **work-item** set). |
+| `:18` | v357 | **A full name outranks a shared first name.** The arithmetic did not change; the **subject** a claim resolves to did. A mention carrying one roster person's own full spelling — given name through surname, in order, at the same generation, optionally with a middle name the roster does not spell — binds that person however many others share its first word, so *"James Edwin Taylor"* is the owner's father `person/james-taylor` instead of `no_candidate`; a generational suffix is a different person, never a tie (`James Edwin Taylor Sr.` is his grandfather); and a roster alias row (`maps_to_focus` set) is out of the fold's person-key, birth and family-tier indexes as v343 already took it out of the card path — with v335's census now what keeps a bare shared given name out of the birth index. A different subject set, age-anchor set and work-item set. |
 
 Releases in that range that deliberately did **not** move it, each for a reason
 it states: v336 (work items and display only), v339/v340/v341 (the drawing
@@ -385,7 +386,26 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:17 -->
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:18 -->
+`timeline-rules:18` (v357) — a full name outranks a shared first name. The
+fold's arithmetic is unchanged; what moved is WHO a claim is about. The owner's
+*"Father's mission to New Zealand"* carries the subject mention *"James Edwin
+Taylor"*, his father's full name, on a roster that spells his father `James
+Taylor` and holds four other rows bearing *James* — and the mention bound
+nobody, because the only rung that read inside a name was v335's census, which
+is about one bare word. So every age said about his father's moments had no
+birth to count from. A mention whose name words carry one roster person's own
+full spelling, given name through surname, in order, at the same generation
+(`identity_resolution.A_FULL_NAME_OUTRANKS_A_SHARED_FIRST_NAME`), now binds
+that person; a generational suffix names a different person, so *"James Edwin
+Taylor"* is never his grandfather *James Edwin Taylor Sr.*
+(`A_GENERATIONAL_SUFFIX_IS_ONE_GENERATION`, read off the ONE suffix table v347
+wrote, moved to `identity_resolution` and re-exported by `roster_relations`);
+and a roster alias row is a pointer, never a person, in the fold's binding
+indexes exactly as in the card path (`AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE`). A
+bare *James* still binds nobody: once the pointer row stopped standing beside
+the brother who answers to that word, v335's census is what keeps it out of the
+birth index. A different subject set, age-anchor set and work-item set.
 `timeline-rules:17` (v350) — one couple, one alias, one label. A couple key is
 read from a telling's own SUBJECTS rather than from any person token anywhere in
 it, and a compound relationship word is never the simple word inside it, so the

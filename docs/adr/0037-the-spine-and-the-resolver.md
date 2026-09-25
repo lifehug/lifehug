@@ -1112,3 +1112,66 @@ synthetic whole-act audit fails with HIS node id in `lost`.
 - Complexity budget: the intended shape is *spine + model + verification +
   ledger*. New placement rules should improve the spine or the verifier, not
   add joins in front of the model.
+
+## Amendment (v357, 2026-09-25): a full name outranks a shared first name
+
+*"Father's mission to New Zealand"* (`node:80f419115b858c37a7b051f3`) was
+published with the raw subject `James Edwin Taylor` — the owner's father's full
+name — and so were four more of his father's moments. The roster spells his
+father `James Taylor` (`person/james-taylor`, born 1954-06-04) and holds four
+other rows bearing *James*: `james-edwin-taylor-sr` (his grandfather, differing
+only by the suffix), `james-everett-taylor` (his son), `anthon-james-taylor`
+(his brother, alias `James`) and `james` — an alias row, `maps_to_focus:
+anthon-james-taylor`. No exact key matched and the only rung that read inside a
+name was v335's census, which is about ONE bare word, so the full name fell to
+`no_candidate` and no birth could reach the moment.
+
+Three rules, one seat each, all in `identity_resolution` (pure, and so the one
+module every reader can import):
+
+1. **A full name outranks a shared first name**
+   (`A_FULL_NAME_OUTRANKS_A_SHARED_FIRST_NAME`, `full_name_candidates`, reason
+   `full_name`). A mention binds the one roster person whose own spelling it
+   carries: given name and surname both anchored, every word of the roster's
+   spelling present in order, optionally with a middle name the roster does not
+   spell. The spellings are the roster's own (`RosterIndex.full_names`); a
+   mention never reaches INTO a longer roster name, a relationship word is only
+   a veto, and two people carrying the same spelling are a standoff. It is
+   consulted before the relationship rung, because that rung needs every name
+   word borne by the candidate — and *Edwin* is borne only by the grandfather.
+2. **A generational suffix is one generation, not a tie**
+   (`A_GENERATIONAL_SUFFIX_IS_ONE_GENERATION`). A spelling's generation is part
+   of it, so `James Edwin Taylor` is never `James Edwin Taylor Sr.`. The table is
+   v347's `GENERATIONAL_SUFFIX_STEPS`, moved here from `roster_relations` (which
+   re-exports the same object — the v350 `IN_LAW_RE` precedent) and grown by
+   `snr`, `jnr`, `ii` and `iii` for both readers at once.
+3. **An alias row is never a candidate anywhere**
+   (`AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE`, `is_alias_row`). v343 took it out of
+   `roster_index`; the fold's binding indexes read the raw rows through
+   `axis_membership.roster_person_rows`, which now drops it too.
+
+v335's protection is kept, and needed one repair to stay kept: the alias row
+disagreeing with the brother about the key `james` was the only thing keeping
+that bare word out of `_person_key_index`, so a key several people answer to as
+a given name is now ambiguous there by the census itself
+(`shared_name_token_refs`).
+
+**Should alias rows exist?** They carry real information — curation's
+statement that a spelling IS an existing Focus, which the wiki routes by — so
+the roster writer may keep minting them. What they must never be is a person,
+and after this release no identity reader treats them as one. Folding such a
+spelling into its target's `aliases` instead of minting a row would be the
+cleaner store, but it is a writer migration with its own blast radius
+(`focus_merge`, `entity_verdict`, wiki routing), and the reader-side predicate is
+the smaller fix.
+
+Measured on a scratch clone of the owner's vault, one deterministic publish per
+framework: 5 nodes changed subject (all to `person/james-taylor`, none
+re-keyed), `age_without_birth_anchor` 13 → 12, the one `identity_uncertain`
+card unchanged, `lost` and `drawn_at_an_alias` empty. The `moved` leg names one
+node, *"Father's four years bedridden"*, whose `age` claim `22, 23` is the
+NARRATOR's age (`when_hint: when I was just off my mission`) filed against his
+father against the classifier's own contract; the resolver's 2003-07/2009-07
+is kept as the alternate and a contradiction card asks. That is an extraction
+defect this release unmasks (lifehug#415).
+`CALCULATION_RULE_VERSION` → `timeline-rules:18`.

@@ -504,7 +504,7 @@ class RuleVersionAndFingerprintTests(VaultTestCase):
         layer; the slot this test guards is that the version MOVES with the
         rules, so it tracks the current one rather than pinning a retired
         number."""
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:17")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
 
     def test_a_fingerprint_without_an_epoch_is_byte_identical_to_v1s(self) -> None:
         self.assertEqual(

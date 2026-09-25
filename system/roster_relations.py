@@ -989,16 +989,15 @@ _NOT_A_POSSESSOR = r"(?!['’]s(?!\w)|s['’](?!\w))"
 #: A generational suffix is a GENERATION, not a nickname. ``<Name> Sr.`` is one
 #: generation ABOVE the ``<Name>`` the vault has already placed and ``<Name>
 #: Jr.`` one below, unless a source says otherwise — which
-#: :func:`recorded_relation` is, and it is asked first. Compared on the last
-#: token with its full stop removed, so ``Sr``, ``Sr.`` and ``Senior`` are one
-#: suffix.
-GENERATIONAL_SUFFIX_STEPS = {
-    "sr": 1,
-    "senior": 1,
-    "i": 1,
-    "jr": -1,
-    "junior": -1,
-}
+#: :func:`recorded_relation` is, and it is asked first.
+#:
+#: v357: this is `identity_resolution.GENERATIONAL_SUFFIX_STEPS` under its
+#: historical name — the same OBJECT, not a copy — because the resolver now
+#: reads the same suffix as a different PERSON
+#: (`identity_resolution.A_GENERATIONAL_SUFFIX_IS_ONE_GENERATION`), and a pure
+#: module cannot import this one. ``Snr``, ``Jnr``, ``II`` and ``III`` joined
+#: the table there, for both readers at once.
+GENERATIONAL_SUFFIX_STEPS = ir.GENERATIONAL_SUFFIX_STEPS
 
 #: The roster seats one generation apart, youngest first. ``sibling`` is the
 #: seat for a person of the owner's OWN generation, because the owner himself
@@ -1239,20 +1238,10 @@ def recorded_relation(name: object, *, roster: object = (),
     return None
 
 
-def generational_suffix(name: object) -> tuple[str, int]:
-    """``(base name, generation step)`` — ``("James Edwin Taylor", 1)`` for
-    ``"James Edwin Taylor Sr."`` — or ``("", 0)``.
-
-    :data:`GENERATIONAL_SUFFIX_STEPS` on the LAST token with its full stop
-    removed. A one-token name has no suffix: ``"Sr"`` alone is not a person.
-    """
-    tokens = collapsed_text_of(name).split()
-    if len(tokens) < 2:
-        return "", 0
-    step = GENERATIONAL_SUFFIX_STEPS.get(tokens[-1].rstrip(".").casefold(), 0)
-    if not step:
-        return "", 0
-    return " ".join(tokens[:-1]), step
+#: ``(base name, generation step)`` — ``("James Edwin Taylor", 1)`` for
+#: ``"James Edwin Taylor Sr."`` — or ``("", 0)``. v357: the resolver's own
+#: reading (`identity_resolution.generational_suffix`), re-exported.
+generational_suffix = ir.generational_suffix
 
 
 def generation_shifted(relationship: object, step: int) -> str:

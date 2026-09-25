@@ -75,6 +75,15 @@ ambiguous, though its own exact spelling still resolves a mention that uses
 it. Neither exclusion touches `page_eligible` or `qualifies`; both are read
 fresh, from the roster snapshot, at fold time.
 
+**v357 (`timeline-rules:18`) took the mapped row out of the BINDING path too.**
+v343's exclusion lived in `roster_index`, the card path's reader; the fold's
+birth, person-key and family-tier indexes read the raw rows through
+`axis_membership.roster_person_rows`, where a pointer row still held a ref and a
+birthday of its own. `identity_resolution.is_alias_row` is now the one predicate
+both seats ask. A mapped row stays on the roster — it is how curation says
+"this spelling is that Focus", and the wiki still routes by it — but no reader
+of identity treats it as a person.
+
 **Candidate research** is a separate immutable source about one still-pending
 roster entry (ADR 0020), never a roster verdict. Exact raw user-turn spans must
 cover the entity usefulness rubric and include concrete material; the author

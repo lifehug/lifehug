@@ -233,18 +233,27 @@ def roster_person_rows(roster_snapshot: object) -> list[dict]:
     ``{"type": "person", "entities": [...]}``, a bare list of rows, or a
     sequence of such snapshots), because `temporal_publication.publish` passes
     the first and `lifehug.py`'s frame-display command passes the third.
+
+    v357: an ALIAS row — ``maps_to_focus`` set — is not a person and is not
+    returned (`identity_resolution.AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE`). Every
+    reader of this function is a BINDING reader — the family-tier index here,
+    the fold's person-key and birth indexes — and v343 had already taken the
+    same rows out of the card path's `identity_resolution.roster_index`, so
+    the owner's ``james`` pointer row stopped being offered on a card and yet
+    went on holding a ref and a birthday of its own in the fold.
     """
     if isinstance(roster_snapshot, dict):
         if collapsed_text(roster_snapshot.get("type")) not in ("", "person"):
             return []
         rows = roster_snapshot.get("entities")
-        return [row for row in rows or () if isinstance(row, dict)]
+        return [row for row in rows or ()
+                if isinstance(row, dict) and not ir.is_alias_row(row)]
     rows: list[dict] = []
     for item in roster_snapshot or ():
         if isinstance(item, dict) and (item.get("entities") is not None
                                        or collapsed_text(item.get("type"))):
             rows.extend(roster_person_rows(item))
-        elif isinstance(item, dict):
+        elif isinstance(item, dict) and not ir.is_alias_row(item):
             rows.append(item)
     return rows
 

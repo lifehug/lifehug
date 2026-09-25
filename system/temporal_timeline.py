@@ -273,7 +273,21 @@ from temporal_claims import (  # noqa: E402
 #: internal id mints no card at all, while no composer may emit one
 #: (:data:`A_CARD_NEVER_SHOWS_A_NODE_ID_AS_ITS_LABEL`) — a different WORK-ITEM
 #: set, with a grammar pass on the anchor sentence beside it.
-CALCULATION_RULE_VERSION = "timeline-rules:17"
+#: ``timeline-rules:18`` (v357): A FULL NAME OUTRANKS A SHARED FIRST NAME. The
+#: fold's arithmetic did not change; the SUBJECT a claim resolves to did. A
+#: mention carrying one roster person's own full spelling — given name through
+#: surname, in order, at the same generation — now binds that person however
+#: many others share its first word
+#: (`identity_resolution.A_FULL_NAME_OUTRANKS_A_SHARED_FIRST_NAME`), so the
+#: owner's *"James Edwin Taylor"* is his father `person/james-taylor` and not
+#: `no_candidate`; a generational suffix is a different person, never a tie
+#: (`A_GENERATIONAL_SUFFIX_IS_ONE_GENERATION`); and an alias row is out of the
+#: fold's person-key, birth and family-tier indexes as it already was out of
+#: the card path (`AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE`). The same claims
+#: calculate to a different subject set, and so to different node ids (each
+#: published as a v350 redirect), different age anchors and a different
+#: work-item set for claims nobody edited.
+CALCULATION_RULE_VERSION = "timeline-rules:18"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -1173,10 +1187,24 @@ def _person_key_index(roster_snapshot: object) -> tuple[dict, frozenset]:
     under the bare word "James" would hand an unresolved mention the BROTHER's
     birthday and date somebody else's story with it. That is the v335 shared-name
     ambiguity, and a birth index is not the place to re-introduce it.
+
+    v357: "two rows disagree" is not the whole of that rule, and the owner's own
+    roster is where the difference showed. His brother's row carries the alias
+    ``James``; so did the ``james`` ALIAS row pointing at that brother, and the
+    two rows disagreeing is the only thing that kept the bare word out of this
+    index. Once alias rows stopped being people
+    (`identity_resolution.AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE`) the brother alone
+    held the key — and "James's duck-chasing rowboat antics", a story the
+    identity card is still asking about, took HIS birthday. So a key is also
+    ambiguous when it is a bare given name several people answer to
+    (`identity_resolution.shared_name_token_refs`, v335's own census), however
+    few of them spell it as a whole key.
     """
+    rows = axm.roster_person_rows(roster_snapshot)
+    census = ident.roster_index({"type": "person", "entities": rows})
     owners: dict[str, int] = {}
     sets: dict[int, set[str]] = {}
-    for position, row in enumerate(axm.roster_person_rows(roster_snapshot)):
+    for position, row in enumerate(rows):
         slug = (normalized_mention_key(row.get("slug"))
                 or normalized_mention_key(row.get("name"))).replace(" ", "-")
         keys = set()
@@ -1196,6 +1224,9 @@ def _person_key_index(roster_snapshot: object) -> tuple[dict, frozenset]:
             elif standing != position:
                 owners[key] = -1
     index: dict[str, frozenset] = {}
+    for key in owners:
+        if ident.shared_name_token_refs(key, census):
+            owners[key] = -1
     ambiguous = frozenset(key for key, position in owners.items() if position < 0)
     for key, position in owners.items():
         if position >= 0:
