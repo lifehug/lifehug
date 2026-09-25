@@ -2606,6 +2606,135 @@ def retire_entry(
     )
 
 
+#: v349. The scope every landmark supersession this module files already
+#: carries — ``landmarks/<domain>`` — read back by :func:`domain_supersessions`
+#: so the repair verb selects exactly what :func:`retire_entry` wrote and
+#: nothing else.
+LANDMARK_CORRECTION_SCOPE_PREFIX = "landmarks/"
+
+
+def landmark_correction_scope(domain: object) -> str:
+    """``landmarks/<domain>`` — ONE spelling, written and read here."""
+    return f"{LANDMARK_CORRECTION_SCOPE_PREFIX}{collapsed_text(domain)}"
+
+
+def domain_supersessions(
+    vault_root: str | Path,
+    *,
+    domain: object,
+    since: object = None,
+    until: object = None,
+) -> list[dict]:
+    """The supersessions standing against one landmark domain, sorted. v349.
+
+    ``[{"correction_id", "relative_path", "created_at", "claim_ids",
+    "reason"}, ...]`` in ``correction_id`` order — a total order that does not
+    consult a clock, so the same vault yields the same list on every machine.
+
+    Only ``supersede`` rows scoped to :func:`landmark_correction_scope`, only
+    ones no reinstatement has already voided
+    (`temporal_store.reinstated_correction_ids`), and — when ``since`` /
+    ``until`` are given — only ones whose ``captured_at`` falls in that window.
+    The window is what makes the repair surgical: a domain may hold perfectly
+    good supersessions from other days, and a verb that reinstated those would
+    be the same class of defect it exists to undo.
+    """
+    scope = landmark_correction_scope(domain)
+    lower = store.normalized_timestamp(since, error=LandmarkProjectionError) if since else None
+    upper = store.normalized_timestamp(until, error=LandmarkProjectionError) if until else None
+    voided = set(store.reinstated_correction_ids(vault_root))
+    rows = []
+    for correction in store.load_temporal_corrections(vault_root):
+        if correction.scope != scope or correction.kind != "supersede":
+            continue
+        if correction.correction_id in voided:
+            continue
+        if lower is not None and correction.created_at < lower:
+            continue
+        if upper is not None and correction.created_at > upper:
+            continue
+        rows.append({
+            "correction_id": correction.correction_id,
+            "relative_path": correction.relative_path,
+            "created_at": correction.created_at,
+            "claim_ids": list(correction.claim_ids),
+            "reason": correction.reason,
+        })
+    rows.sort(key=lambda row: (row["correction_id"], row["relative_path"]))
+    return rows
+
+
+def reinstate_domain(
+    vault_root: str | Path,
+    *,
+    domain: object,
+    since: object = None,
+    until: object = None,
+    reason: object = None,
+    apply: bool = False,
+    occurred_at: object = None,
+) -> dict:
+    """Put one landmark domain's superseded entries back. v349.
+
+    The repair half of `landmarks_interaction.A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE`:
+    the rule stops the next wipe, and this undoes the one that already
+    happened. On 2026-09-24 a single bare residences answer retired thirty
+    entries the owner had stated and filed 29 supersessions doing it, taking
+    the claims behind those stays out of the projection and dropping every
+    moment they had placed — a marriage, a graduation, a fall on a nail — back
+    to unplaced.
+
+    ONE act, three properties:
+
+    * **deterministic** — the corrections are selected and sorted by content
+      (:func:`domain_supersessions`), never by mtime, and one reinstatement
+      record names them all;
+    * **idempotent** — the record's id is a digest of what it says, and
+      :func:`domain_supersessions` already excludes what a previous run
+      reinstated, so a second run proposes nothing and writes nothing;
+    * **narrow** — it writes ``sources/corrections/`` (one file) and nothing
+      else. The ENTRIES come back because `state/landmarks.json` is a drawing:
+      the claims behind them go active again on the next fold and
+      `timeline.redraw_landmarks` draws them from the
+      ``sources/landmarks/entry-*.md`` that were never touched. Nothing here
+      writes an entry, which is the invariant the flip (v225) established.
+
+    Returns the summary either way; ``apply=False`` (the default — a repair
+    verb shows its work first) fills ``corrections`` and ``claim_ids`` and
+    leaves ``filed`` at ``None``.
+    """
+    name = collapsed_text(domain)
+    rows = domain_supersessions(vault_root, domain=name, since=since, until=until)
+    claim_ids = sorted({claim for row in rows for claim in row["claim_ids"]})
+    summary: dict = {
+        "domain": name,
+        "since": store.normalized_timestamp(since, error=LandmarkProjectionError) if since else None,
+        "until": store.normalized_timestamp(until, error=LandmarkProjectionError) if until else None,
+        "corrections": [row["correction_id"] for row in rows],
+        "correction_paths": [row["relative_path"] for row in rows],
+        "claim_ids": claim_ids,
+        "applied": False,
+        "filed": None,
+    }
+    if not rows or not apply:
+        return summary
+    prose = collapsed_text(reason) or (
+        f"reinstated: these {name} entries were retired by shape, not by "
+        f"anything the person said "
+        f"({landmarks_interaction.A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE})"
+    )
+    correction = store.reinstate_corrections(
+        vault_root,
+        [row["correction_id"] for row in rows],
+        reason=prose,
+        title=f"Reinstate {len(rows)} {name} supersession(s)",
+        occurred_at=occurred_at,
+    )
+    summary["applied"] = True
+    summary["filed"] = correction.relative_path
+    return summary
+
+
 def redraw(vault_root: str | Path) -> dict:
     """Fold the receipts, read the sources, draw the file's content. No I/O out.
 

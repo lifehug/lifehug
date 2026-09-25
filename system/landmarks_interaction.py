@@ -657,6 +657,38 @@ DATE_ALTERNATES_KEY = "date_alternates"
 #: The same, per span bound — ``{"start": [...], "end": [...]}``.
 SPAN_ALTERNATES_KEY = "span_alternates"
 
+#: Free-text fields a landmark record may carry, and their length caps. A
+#: label is a name, not a story.
+#: v202 (family-landmark): ``birth_order`` ("two years older", "the middle
+#: of five") is a free-text FIELD, not a ladder rung, so an unstated birth
+#: order can never block the family ladder from reaching ``birth``.
+#: v349 moved this declaration up from the writer's own section so that
+#: :data:`NON_RUNG_FIELDS` can be DERIVED from it instead of repeating three
+#: of its four keys by hand. :func:`validate_landmark` reads it where it
+#: always did.
+_TEXT_CAPS = {"label": 120, "place": 120, "subject": 120, "birth_order": 60}
+
+#: v349. The five DESCRIPTORS :func:`validate_landmark` keeps that are not a
+#: rung of any domain and never will be — E-L2c's additive fields (v278).
+#: ONE declaration: :func:`validate_landmark` writes exactly these and
+#: :func:`writer_stored_fields` reads them back, so neither side can grow a
+#: field the other has not heard of.
+#:
+#: They are named here because not naming them cost the owner his whole
+#: residence history. The staging incident of 2026-09-24 19:18 UTC: thirty
+#: residence entries the owner had stated, every one of them carrying
+#: ``link``, ``nickname``, ``ongoing`` and ``place_ref`` because that is what
+#: the writer emits, were read by `entry_superseded_by`'s rule 3 as thirty
+#: machine-collapsed aggregates and retired by a single bare answer
+#: (``{"address": "701 North Williams", "label": "701 North Williams"}``).
+#: The fields had been unreadable since the moment E-L2c began writing them —
+#: v214's rule 3 predates v278 by sixty-four releases — and the
+#: ladder-consistency guard never saw it because its probe value was a hand
+#: list that E-L2c did not join.
+WRITER_DESCRIPTOR_FIELDS = frozenset({
+    "ongoing", "place_ref", "nickname", "note", "link",
+})
+
 #: Fields a landmark record carries that are NOT ladder rungs and never will
 #: be: the bookkeeping keys plus the free-text descriptors. Named so the
 #: ladder-consistency guard can tell "not a rung" from "a rung the writer
@@ -666,9 +698,18 @@ SPAN_ALTERNATES_KEY = "span_alternates"
 #: a question they already answered — and naming them here is load-bearing:
 #: `unreadable_fields` feeds `entry_superseded_by`'s rule 3, so an unnamed
 #: field on a stored entry would start RETIRING entries the person named.
-NON_RUNG_FIELDS = _NON_ANSWER_KEYS | frozenset({
-    "place", "subject", "birth_order", DATE_ALTERNATES_KEY, SPAN_ALTERNATES_KEY,
-})
+#:
+#: v349 DERIVES the middle three from :data:`_TEXT_CAPS` rather than repeating
+#: them — they are exactly the text fields that are not the identity
+#: (:data:`IDENTITY_FIELDS`) — and adds
+#: :data:`WRITER_DESCRIPTOR_FIELDS`, the set whose absence caused the incident
+#: that release is named for.
+NON_RUNG_FIELDS = (
+    _NON_ANSWER_KEYS
+    | (frozenset(_TEXT_CAPS) - frozenset(IDENTITY_FIELDS))
+    | WRITER_DESCRIPTOR_FIELDS
+    | frozenset({DATE_ALTERNATES_KEY, SPAN_ALTERNATES_KEY})
+)
 
 #: Fields :func:`validate_landmark` stores on EVERY domain, because the record
 #: shape is domain-agnostic — so a domain with no matching rung files them and
@@ -730,6 +771,152 @@ def unreadable_fields(entry: object, row: object) -> tuple[str, ...]:
     return tuple(field for field in entry
                  if field not in ladder and field not in satisfiers
                  and field not in NON_RUNG_FIELDS)
+
+
+def _writer_probe_value(row: dict) -> dict:
+    """A record carrying EVERY field :func:`validate_landmark` can keep.
+
+    Built from this module's own declarations — :data:`_TEXT_CAPS`,
+    :data:`WRITER_DESCRIPTOR_FIELDS`, :data:`DOMAIN_AGNOSTIC_FIELDS` and the
+    row's own ladder — and from no hand list at all. That is the whole point:
+    the probe the ladder-consistency guard used to build WAS a hand list, it
+    did not grow when E-L2c added five fields to the writer in v278, and sixty
+    releases later a bare answer retired thirty entries the owner had stated.
+    """
+    value: dict = {"domain": row["domain"], "chain_complete": True,
+                   "date": {"best": "1976-04-12", "granularity": "day"},
+                   "span": {"start": {"best": "1984", "granularity": "year"},
+                            "end": {"best": "1990", "granularity": "year"}}}
+    for field in _TEXT_CAPS:
+        value[field] = "Jackie"
+    for field in WRITER_DESCRIPTOR_FIELDS:
+        # ``ongoing`` is the one descriptor the writer keeps CONDITIONALLY: a
+        # `True` survives only an open span and a `False` only a closed one, so
+        # the probe's span (closed, above) fixes which value asks the question.
+        # Getting this backwards is how the probe would quietly stop covering
+        # the field, which is the whole failure mode this release is undoing.
+        value[field] = (False if field == "ongoing"
+                        else "https://example.invalid/x" if field == "link"
+                        else "Jackie")
+    for rung in row["ladder"]:
+        if rung in ("span", "date"):
+            continue
+        value[rung] = True if rung in _BOOL_RUNGS or rung == NONE_OPENER else rung
+    return value
+
+
+#: Memo for :func:`writer_stored_fields`, keyed on what the answer depends on
+#: — the domain and its ladder. The store asks this question once per EXISTING
+#: entry while filing one record (thirty times, on the vault that made this
+#: release necessary), and each miss loads `questions.yaml` and runs the
+#: writer. Keyed on the row rather than cached on the module so a test that
+#: swaps the question set gets its own answer.
+_WRITER_STORED_FIELDS: dict[tuple, frozenset[str]] = {}
+
+
+def writer_stored_fields(row: object) -> frozenset[str]:
+    """Every field :func:`validate_landmark` will keep for this domain.
+
+    v349, and the recurring-defect doctrine applied one level further out than
+    v214 managed: the ladder-consistency guard held this sentence as a private
+    test helper, so the STORE could not ask it, and
+    :func:`entry_superseded_by` was left reading :func:`unreadable_fields`
+    as though "no rung reads it" and "no writer writes it" were the same
+    statement. They are not, and the difference is the owner's residence
+    history.
+
+    Derived by running the writer over :func:`_writer_probe_value`, so it is
+    the writer's OWN answer rather than a description of it. A field the
+    writer stops emitting leaves this set the same day.
+    """
+    if not isinstance(row, dict) or not row.get("ladder"):
+        return frozenset()
+    key = (str(row.get("domain") or ""), tuple(row.get("ladder") or ()))
+    cached = _WRITER_STORED_FIELDS.get(key)
+    if cached is None:
+        stored = validate_landmark(_writer_probe_value(row))
+        cached = frozenset(stored or ())
+        _WRITER_STORED_FIELDS[key] = cached
+    return cached
+
+
+def span_straddles_a_stretch(entry: object) -> bool:
+    """True when this entry's ``span`` covers a STRETCH, not one moment.
+
+    Both bounds stated and not the same date. The founder's four children were
+    filed as ONE entry whose span ran from the first birthday to the last; one
+    child's own entry, filed with a single date, never straddles anything.
+    """
+    span = entry.get("span") if isinstance(entry, dict) else None
+    if not isinstance(span, dict):
+        return False
+    start, end = span.get("start"), span.get("end")
+    if not isinstance(start, dict) or not isinstance(end, dict):
+        return False
+    return str(start.get("best") or "") != str(end.get("best") or "")
+
+
+def collapsed_aggregate_fields(entry: object, row: object) -> tuple[str, ...]:
+    """The fields that are EVIDENCE this entry is a machine-collapsed aggregate.
+
+    v349, and the narrowing that `entry_superseded_by`'s rule 3 should have
+    had from the start. :func:`unreadable_fields` answers *"which fields does
+    no rung of this domain read?"*, and rule 3 took that as proof of a machine
+    that had many entries and filed one. It is not proof of anything of the
+    kind: the writer itself emits five descriptors no ladder asks for
+    (:data:`WRITER_DESCRIPTOR_FIELDS`), so on 2026-09-24 every one of thirty
+    stated residence entries looked like an aggregate and a single bare answer
+    retired all thirty.
+
+    A field is evidence of a collapse only when it is one of:
+
+    * a field :func:`writer_stored_fields` says this domain's writer NEVER
+      emits — a shape that reached the store from outside the writer; or
+    * a ``span`` the domain has no rung for whose bounds straddle a stretch
+      (:func:`span_straddles_a_stretch`) — v214's live instance exactly, the four
+      children as one row with a span across all four birthdays.
+
+    Anything else the person stated stands. An entry whose every field its own
+    WRITER emits is an entry somebody stated, and it is never touched by shape.
+    """
+    if not isinstance(entry, dict) or not isinstance(row, dict):
+        return ()
+    stored = writer_stored_fields(row)
+    if not stored:
+        # The writer could not be asked — a question set this process cannot
+        # resolve. Fail toward NOT retiring: this release exists because the
+        # other direction cost thirty stated entries.
+        return ()
+    return tuple(
+        field for field in unreadable_fields(entry, row)
+        # (a) a shape that reached the store from outside the writer, or
+        # (b) v214's own instance: a stretch on a domain with no span rung.
+        if field not in stored
+        or (field == "span" and span_straddles_a_stretch(entry))
+    )
+
+
+def collapsed_by_a_straddling_span(entry: object, row: object) -> bool:
+    """True when the collapse evidence is a span across SEVERAL entries' dates.
+
+    v349, and the one leg of :func:`collapsed_aggregate_fields` that provenance
+    does NOT override. A stretch on a domain whose ladder has no span rung is
+    self-evidently many entries filed as one, whoever filed it — v214's founder
+    vault had four children and one row, and that row had a promoted source of
+    its own like every other entry after the flip.
+
+    Which is exactly why the write seat's provenance guard has to be this
+    narrow. *"An entry with a source of its own is never retired by shape"*,
+    read bluntly, retires RULE 3 ITSELF: since v225 every entry in a drawn
+    store came from a `sources/landmarks/entry-*.md`, so every entry would be
+    protected and the collapsed aggregate v214 exists to clear could never be
+    cleared again. The honest reading is the one the rule's own wording puts
+    first — a span covering several distinct entries' dates is DEMONSTRABLE,
+    and a field the writer never emits is only suggestive — so provenance
+    settles the second and never the first.
+    """
+    return ("span" in collapsed_aggregate_fields(entry, row)
+            and span_straddles_a_stretch(entry))
 
 
 def rung_reached(entry: object, row: object) -> str | None:
@@ -1011,13 +1198,6 @@ def _user_turns(session: object) -> int:
 # The one additive turn-output field
 # --------------------------------------------------------------------------
 
-#: Free-text fields a landmark record may carry, and their length caps. A
-#: label is a name, not a story.
-#: v202 (family-landmark): ``birth_order`` ("two years older", "the middle
-#: of five") is a free-text FIELD, not a ladder rung, so an unstated birth
-#: order can never block the family ladder from reaching ``birth``.
-_TEXT_CAPS = {"label": 120, "place": 120, "subject": 120, "birth_order": 60}
-
 #: Ladder rungs whose value is a real bool rather than a string. ``living``
 #: is TRI-STATE: absent means unknown, and ``False`` is a fact the person
 #: stated — it must survive validation, so the string branch is not enough.
@@ -1185,6 +1365,19 @@ def validate_landmark(value: object, *,
             record[rung] = True
     if value.get("chain_complete"):
         record["chain_complete"] = True
+    # v349. The writer is held to its own declaration: every descriptor it
+    # emits is named in `WRITER_DESCRIPTOR_FIELDS`, which `NON_RUNG_FIELDS`
+    # and `writer_stored_fields` both read. E-L2c added five fields here in
+    # v278 and told nothing else about them, and sixty-four releases later
+    # `entry_superseded_by`'s rule 3 read all five as the signature of a
+    # machine-collapsed aggregate and retired thirty stated residence entries.
+    # An undeclared descriptor is dropped here rather than allowed to reach a
+    # store that has no sentence for it.
+    for field in tuple(record):
+        if (field not in row["ladder"] and field not in _NON_ANSWER_KEYS
+                and field not in _TEXT_CAPS and field not in ("date", "span")
+                and field not in WRITER_DESCRIPTOR_FIELDS):
+            del record[field]
     # A record that carries nothing but its domain is not a landmark.
     if len(record) == 1:
         return None
@@ -2189,50 +2382,154 @@ def same_landmark_stay(existing: object, record: object, row: object = None) -> 
     return gap is None or gap <= SEQUENCE_ENTRY_ABUT_MONTHS
 
 
+#: v349, and the rule this release is named for.
+#: `A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE`. An entry the person stated is
+#: retired only by something the person SAID — a `none` that ends the domain,
+#: or a substantive answer standing where a terminal stood. It is never
+#: retired because of the fields it happens to carry, unless those fields are
+#: demonstrable evidence of a machine-collapsed aggregate
+#: (:func:`collapsed_aggregate_fields`), and never in bulk: one answer is one
+#: entry, so a single substantive record may retire at most ONE prior entry
+#: (:func:`supersession_findings`).
+A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE = "a stated entry is never retired by shape"
+
+#: The three reasons a prior entry stops standing, as a closed vocabulary.
+#: Returned by :func:`supersession_reason` so a caller can tell the rule that
+#: fired — the shape rule has guards the two spoken rules must not get.
+SUPERSEDED_BY_NONE = "none_retires_the_domain"
+SUPERSEDED_AS_TERMINAL = "substantive_clears_a_standing_terminal"
+SUPERSEDED_AS_COLLAPSED = "clean_record_retires_the_collapsed_aggregate"
+SUPERSESSION_REASONS = (SUPERSEDED_BY_NONE, SUPERSEDED_AS_TERMINAL,
+                        SUPERSEDED_AS_COLLAPSED)
+
+#: v349. The refusal `timeline.save_landmark` speaks when ONE substantive
+#: record would retire MORE THAN ONE existing entry. One answer is one entry;
+#: a fan-out is a bug in the rule that produced it, not a correction the
+#: person made. Shares `lint_landmark_reply`'s finding shape (`lint` /
+#: `detail`) so a host merges it with every other finding it already renders.
+SUPERSESSION_FAN_OUT_LINT = "landmarks.supersession_fan_out"
+
+#: The same, for the stated-entry guard: a shape-rule retirement declined
+#: because the entry has promoted sources of its own.
+SUPERSESSION_STATED_LINT = "landmarks.supersession_refused_stated_entry"
+
+
+def supersession_reason(existing: object, record: object,
+                        row: object) -> str | None:
+    """WHICH rule retires ``existing`` when ``record`` is filed, or None.
+
+    v214 (lifehug#227), renamed and narrowed in v349.
+    :func:`merge_landmark_entry` says how two records of the SAME entry
+    combine; this says the one thing that has to happen ACROSS entries, and it
+    says it in three narrow rules. Everything else survives untouched — a
+    machine that rewrites entries the person stated is a worse defect than the
+    one being fixed here, which is exactly what v349 is repairing.
+
+    1. **A none retires the whole domain** (:data:`SUPERSEDED_BY_NONE`).
+       "Actually I never served" is a correction of everything filed under
+       `military`, however many entries that was — :func:`merge_landmark_entry`
+       has always said a none *replaces whatever was there*, and per-domain is
+       what that sentence means once a domain can hold many entries.
+    2. **A substantive answer clears a standing terminal**
+       (:data:`SUPERSEDED_AS_TERMINAL`). "Actually we did have children"
+       retires the none, and a skip is not an answer to keep beside one — the
+       same rule read the other way.
+    3. **A clean record retires the collapsed aggregate**
+       (:data:`SUPERSEDED_AS_COLLAPSED`). An entry that is demonstrably a
+       machine-collapsed aggregate (:func:`collapsed_aggregate_fields`) — the
+       founder's four children as a single row with a `span` across all four
+       birthdays — is superseded the moment a record with no such shape is
+       filed for the domain.
+
+       Until v349 this rule read :func:`unreadable_fields` directly, which is
+       a far wider set than *collapsed*: the writer itself emits five
+       descriptors no ladder asks for, so on 2026-09-24 a bare
+       ``{"address": "701 North Williams"}`` retired THIRTY residence entries
+       the owner had stated, took 20 temporal claims out of the projection
+       with them, and dropped every moment those stays had placed —
+       a marriage, a graduation, a childhood fall — back to unplaced. The test
+       is still the SHAPE and never the content; v349 only made "shape" mean
+       what it says. See :data:`A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE`.
+
+    The two SPOKEN rules (1 and 2) are things the person said and carry no
+    further guard. The SHAPE rule is the one that needs them, and its two
+    guards live where the evidence does: `timeline.save_landmark` declines it
+    for an entry with promoted sources of its own, and
+    :func:`supersession_findings` refuses a whole write whose fan-out is
+    greater than one.
+    """
+    if not (isinstance(existing, dict) and isinstance(record, dict)
+            and isinstance(row, dict)):
+        return None
+    if record.get("skipped") or not str(record.get("domain") or "").strip():
+        return None
+    if record.get("none"):
+        # Rule 1: a none is the domain's whole answer, so nothing else in the
+        # domain survives it.
+        return SUPERSEDED_BY_NONE
+    terminal = is_none_entry(existing, row) or (
+        bool(existing.get("skipped")) and not asserts_happened(existing))
+    if terminal:
+        return SUPERSEDED_AS_TERMINAL
+    if (collapsed_aggregate_fields(existing, row)
+            and not collapsed_aggregate_fields(record, row)):
+        return SUPERSEDED_AS_COLLAPSED
+    return None
+
+
 def entry_superseded_by(existing: object, record: object,
                         row: object) -> bool:
     """Whether filing ``record`` retires a DIFFERENT prior entry outright.
 
-    v214 (lifehug#227). :func:`merge_landmark_entry` says how two records of
-    the SAME entry combine; this says the one thing that has to happen
-    ACROSS entries, and it says it in two narrow rules. Everything else
-    survives untouched — a machine that rewrites entries the person stated is
-    a worse defect than the one being fixed here.
-
-    1. **A none retires the whole domain.** "Actually I never served" is a
-       correction of everything filed under `military`, however many entries
-       that was — :func:`merge_landmark_entry` has always said a none
-       *replaces whatever was there*, and per-domain is what that sentence
-       means once a domain can hold many entries.
-    2. **A substantive answer clears a standing terminal.** "Actually we did
-       have children" retires the none, and a skip is not an answer to keep
-       beside one — the same rule read the other way.
-    3. **A clean record retires the collapsed aggregate.** An entry carrying
-       a field no rung of its domain can read (:func:`unreadable_fields`) was
-       written by a machine that had many entries and filed one — the
-       founder's four children as a single row with a `span` across all four
-       birthdays, which `children`'s ladder has no rung for. That shape is
-       superseded the moment a record with no such field is filed for the
-       domain. The test is the SHAPE, never the content: an entry whose every
-       field its own ladder can read is an entry somebody stated, and it is
-       never touched by this.
+    :func:`supersession_reason` read as a yes/no, for every caller that only
+    needs the answer. One definition, two spellings — never two rules.
     """
-    if not (isinstance(existing, dict) and isinstance(record, dict)
-            and isinstance(row, dict)):
-        return False
-    if record.get("skipped") or not str(record.get("domain") or "").strip():
-        return False
-    substantive = not record.get("none")
-    if not substantive:
-        # Rule 1: a none is the domain's whole answer, so nothing else in the
-        # domain survives it.
-        return True
-    terminal = is_none_entry(existing, row) or (
-        bool(existing.get("skipped")) and not asserts_happened(existing))
-    if terminal:
-        return True
-    return bool(unreadable_fields(existing, row)
-                and not unreadable_fields(record, row))
+    return supersession_reason(existing, record, row) is not None
+
+
+def supersession_findings(existing_entries: object, record: object,
+                          row: object) -> list[dict]:
+    """The refusals a proposed supersession earns, out loud. Pure — no I/O.
+
+    v349 rule 2: **one answer is one entry.** A single substantive record that
+    would retire more than one existing entry by SHAPE is not a correction the
+    person made; it is a rule misfiring, and on 2026-09-24 it misfired thirty
+    times in one commit. So it is refused rather than applied, and the refusal
+    names the count, because a number is the only part of that incident anyone
+    could have noticed in a log.
+
+    A `none` is exempt and always will be: retiring the whole domain is
+    precisely what "I never served" means, so its fan-out is the point rather
+    than a symptom. A terminal cleared by a substantive answer is exempt for
+    the same reason — there is at most one standing terminal to clear, and it
+    is an answer that clears it.
+
+    Returns findings in `lint_landmark_reply`'s shape. A non-empty list means
+    the caller files the record and retires NOTHING.
+    """
+    entries = [entry for entry in (existing_entries or ())
+               if isinstance(entry, dict)]
+    if not isinstance(record, dict) or record.get("none"):
+        return []
+    by_shape = [entry for entry in entries
+                if supersession_reason(entry, record, row)
+                == SUPERSEDED_AS_COLLAPSED]
+    if len(by_shape) < 2:
+        return []
+    domain = str((row or {}).get("domain") or record.get("domain") or "")
+    return [{
+        "lint": SUPERSESSION_FAN_OUT_LINT,
+        "detail": (
+            f"one {domain} answer would retire {len(by_shape)} existing "
+            f"{domain} entries by shape — one answer is one entry, so this "
+            f"record files and nothing is retired "
+            f"({A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE})"
+        ),
+        "domain": domain,
+        "count": len(by_shape),
+        "entry_keys": sorted(landmark_entry_key(entry, row)
+                             for entry in by_shape),
+    }]
 
 
 def landmark_invocation(record: object) -> list[str] | None:

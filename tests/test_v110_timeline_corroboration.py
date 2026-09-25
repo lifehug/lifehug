@@ -43,6 +43,31 @@ def load(name):
 
 core = load("lifehug_core")
 tl = load("timeline")
+
+
+def _bind_private_timeline(test_case):
+    """Point `sys.modules["timeline"]` at this file's private copy, and PUT IT
+    BACK afterwards.
+
+    v349, the same fix as `tests/test_v79_timeline.py`'s (this file copied that
+    file's pattern, including the part that leaked). `load()` above goes to real
+    trouble not to clobber the shared entry, and the render tests below then did
+    exactly that and never restored it — so every LATER test in the process that
+    imported `timeline` lazily (every `cmd_*` in `lifehug.py` does, inside the
+    function) got this private module rather than the canonical one, a
+    `mock.patch` on the canonical `LANDMARKS_STORE` did not apply, and
+    `redraw_landmarks()` redrew the CHECKOUT.
+    """
+    previous = sys.modules.get("timeline")
+
+    def _restore():
+        if previous is None:
+            sys.modules.pop("timeline", None)
+        else:
+            sys.modules["timeline"] = previous
+
+    test_case.addCleanup(_restore)
+    sys.modules["timeline"] = tl
 tcorr = load("timeline_corroboration")
 
 
@@ -302,7 +327,7 @@ class ContradictionTests(CorroborationFixture):
 class RenderTests(CorroborationFixture):
     def _view(self):
         sw = load("serve_wiki")
-        sys.modules["timeline"] = tl  # view imports by name; use our patched module
+        _bind_private_timeline(self)  # view imports by name; use our copy
         return sw.view_timeline()
 
     def test_view_renders_period_and_event_badges(self):
@@ -314,7 +339,7 @@ class RenderTests(CorroborationFixture):
 
     def test_export_carries_the_same_badges(self):
         wc = load("wiki_compile")
-        sys.modules["timeline"] = tl
+        _bind_private_timeline(self)
         with wiki_compile_vault(wc, self.root):
             self.assertTrue(wc.compile_timeline())
         text = (self.root / "wiki" / "timeline.md").read_text(encoding="utf-8")
@@ -340,7 +365,7 @@ class NoEvidenceNoopTests(CorroborationFixture):
         """Snapshot: the view + export with no evidence file are byte-identical
         to a run whose evidence matches nothing — connectors are optional."""
         sw = load("serve_wiki")
-        sys.modules["timeline"] = tl
+        _bind_private_timeline(self)
         self.remove_evidence()
         body_without = sw.view_timeline()[1]
         self.assertNotIn("✉", body_without)
