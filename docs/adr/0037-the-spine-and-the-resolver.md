@@ -13,7 +13,8 @@ measures every age from its own subject's birth; v347 narrows an introduction to
 one person in one clause; v349 stops a stated entry being retired by shape and
 adds `landmark-reinstate`; v350 fixes the couple key, the identity re-key's
 alias and the card that showed a node id; v352 makes an answer to a card place
-the moment that card is about.
+the moment that card is about; v354 stops that answer's receipt retiring the
+listener's reading of the same message.
 
 Every amendment below carries the version that shipped it in its own heading.
 The CLI verb is `resolve`; `resolver` is the module (`system/resolver.py`) and
@@ -961,6 +962,118 @@ and is right to: the fold reports `age_without_birth_anchor` on the claim and th
 projection raises *"Which James or James Edwin Taylor Sr. or James Taylor is
 'James' here?"* as an `identity_uncertain` card. Placing that span is an IDENTITY
 question, not a dating one, and it is the next defect rather than this one.
+
+## Amendment (v354, 2026-09-25): a reading is only superseded by the same reader
+
+v352 finished its own verification with a gap it named rather than swallowed
+(lifehug#409, filed by v353's fresh-clone run): the v340/v342 placement audit over
+`place-answers` + `publish` on the owner's vault was **not** empty.
+
+```
+{"drawn_at_an_alias": [], "lost": ["node:091ec8a898daa8548afaf104"], "moved": []}
+```
+
+**THE CAUSE is in the fold, not in the writer.** `temporal_store._fold` step 1
+grouped receipts by `(source_id, revision)`, elected the latest by
+`receipt_sort_key` as the group's winner, and marked every other receipt's claims
+`superseded / reextracted` — *"a previous interpretation of the same words"*. That
+rule was written for one extractor re-running over one document and is right for
+that. But `answer_placement.file_answer` writes its receipt on the promoted reply
+ITSELF, at that reply's own revision, so on a message the `general_listener` had
+already read the answer's receipt was simply newer and won. Two of the owner's
+answered messages were in that state, and the loss is one-sided in the worst way:
+`place-answers` files at most ONE claim per message, so a listener reading that
+found a date was replaced by one `occurrence`.
+
+- `conversation:msg-99efe6688bbd9e4f752438e0` — *"She graduated in 2006"*.
+  `receipt:537be58a3848123630f24b32` (`general_listener`) retired by
+  `receipt:d9a21bab13bbd169561adc7e` (`answer-placement`), taking
+  `claim:36bae1eb0bbfd2120274471d` — a `date`/`graduation`, 2006, subject mention
+  `Katie Ann Merrill` — and with it `node:091ec8a898daa8548afaf104`, **placed at
+  2006**, and the card that named it.
+- `conversation:msg-c9d84f13e02d1c9547bafaa6` — `claim:257f9e5681424bdd8539c76a`,
+  a `relative_order` after *"left Kristen"*, and the undated
+  `node:3d1065f366b17440103c9a25`.
+
+**THE RULE** (`temporal_store.A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER`).
+The election unit is `(source_id, revision, extractor identity)`: a receipt
+supersedes another only when the SAME READER re-read the same revision of the same
+document. Two extractors reading one message are two readings of it, both
+legitimate, and neither retires the other — which `answer_placement`'s own receipt
+has said in prose since v352 and which `temporal_claims.CLAIM_IDENTITY_KEYS`
+already made true of their CLAIMS. Only the group key was missing it.
+
+WHO a reader is, is the **name** at the head of its extractor version
+(`temporal_claims.extractor_identity`,
+`temporal_claims.AN_EXTRACTORS_NAME_IS_WHO_READ_IT`); everything after the name
+says which VERSION of that reader did the reading. Both spellings this vault files
+are handled: `name/schema:…/prompt:…/model:…` and the older `name:N`
+(`classifier_context.EXTRACTOR_VERSION`).
+
+**Why not the whole `extractor_version`, which the issue suggested first.**
+`temporal_claims.receipt_relative_path` already writes one receipt file per
+`(source, revision, extractor_version)`, so two receipts in one group ALWAYS
+differ in that string — keying on it would make every group a singleton and
+supersession-by-re-extraction dead code. And re-extraction in this vault IS a
+version bump: a prompt edit is a new `prompt_version`
+(`general_listener.PROMPT_VERSION_LENGTH`), a better reading of the same bytes is
+a new rule version (`timeline_evidence.CLASSIFIER_CLAIMS_RULE_VERSION`'s own
+`"4" -> "5"`). The version therefore stays out of the key and the name goes in.
+
+**It is general, not a special case for `answer_placement`.** Every pair of
+readers that can meet on one source revision now coexists: `general_listener` and
+`landmark_recorder` on one message (`landmark_recorder.file_claims` files both
+roads in one call and its own docstring already called that *corroboration, not
+duplication*), `classifier-claims` and `resolver`, `landmark-record` and
+`legacy-entry-import` on one landmark entry — that pair being the SAME rule under
+two names, whose flip is gated on `landmark_projection.already_substrate_backed`
+rather than on one retiring the other. The resolver never depended on the election
+at all: it retires an earlier reading with an explicit `supersede` correction,
+*"the new receipt stands beside it, never over it"*, which is the behaviour the
+whole fold now has.
+
+`CALCULATION_RULE_VERSION` does **not** move. It describes what the same claims
+CALCULATE to; v354 changes which claims are ACTIVE, and only on a source revision
+two readers have both read. The arithmetic over an active set is untouched, and
+the fold is re-run in full on every publish, so no vault carries a stale index
+across this change. PROVED rather than argued: two fresh clones of the owner's
+vault at one head, one per framework, publish byte-identical
+`calculated-timeline.json` and `work-items.json`. The index's own shape gains two
+fields (`extractor_identity` on a source row, `readings` in the counts) and moves
+nothing an older reader looked at, so `INDEX_VERSION` stays 1.
+
+MEASURED on two fresh scratch clones of the owner's vault at one head
+(generation 188, 1265 nodes, 69 work items), one with v353's bytes and one with
+v354's; the original was never written to. `place-answers` reads the same 28
+answers on both and files the same 8 receipts (1 placed from the recency reading,
+7 `telling_only`, 20 refused `card_not_published`, no errors). Then they diverge,
+and only here:
+
+| after `place-answers` + `publish` | v353 | v354 |
+|---|---|---|
+| placement audit | `lost: [node:091ec8a898daa8548afaf104]` | **empty** |
+| claims retired `reextracted` | 2 | **0** |
+| nodes | 1265 → 1263 | 1265 → **1265** |
+| placed nodes | 1215 → 1215 | 1215 → **1216** |
+| open cards | 69 → 66 | 69 → **68** |
+
+The two nodes v353 loses and v354 keeps are `node:091ec8a898daa8548afaf104`
+*"Katie Ann Merrill"* at **2006** and the episode `node:3d1065f366b17440103c9a25`
+*"moving in with dad"*. Re-measured on a clone taken at a LATER head
+(generation 190 → 191), so the result is not head-specific: the audit is empty
+again, no claim's status changes over the act, and the same two source revisions
+are the only ones read by two readers each.
+
+**The cards that come back with them** are `work:89892041c9cdd3d80b0675ef` and
+`work:ba396d81db81f8c59a630129` — a node retired out of the drawing takes its
+question with it, which is the second half of why this was worth its own release:
+the vault stops asking about a moment it has lost.
+
+GUARD: `tests/test_v354_a_reading_is_only_superseded_by_the_same_reader.py` — 32
+tests whose part-1 ids are the owner's own, minted rather than copied, because his
+reply's bytes promote to the same source revision and therefore to the same claim
+and receipt ids. Run against v353's bytes the file fails 21 tests, and the
+synthetic whole-act audit fails with HIS node id in `lost`.
 
 ## Consequences
 

@@ -101,6 +101,7 @@ from temporal_claims import (  # noqa: E402
     collapsed_text,
     derive_extraction_idempotency_key,
     digest_id,
+    extractor_identity,
     normalized_timestamp,
     receipt_from_dict,
     receipt_relative_path,
@@ -121,6 +122,21 @@ from vault_paths import (  # noqa: E402
 # --------------------------------------------------------------------------
 # Layout and vocabulary
 # --------------------------------------------------------------------------
+
+#: v354 (lifehug#409). The unit the fold elects a winning receipt WITHIN.
+#: Receipts are grouped by ``(source_id, revision, extractor identity)`` — WHO
+#: read the document as well as WHICH bytes they read
+#: (`temporal_claims.AN_EXTRACTORS_NAME_IS_WHO_READ_IT`) — because a later
+#: version of ONE reader is a later interpretation of the same words and
+#: another reader is not. Grouping by ``(source_id, revision)`` alone made
+#: `answer_placement`'s receipt on a promoted reply retire the
+#: `general_listener` reading of that same reply wholesale, and the owner's
+#: 2006 graduation lost its dated node to it.
+A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER = (
+    "a receipt supersedes another only when the same reader re-read the same "
+    "revision of the same document. Two extractors reading one message are two "
+    "readings of it, both legitimate, and neither retires the other"
+)
 
 #: Promoted conversational sources (owner amendment 2 / option B). A message
 #: that produced a claim is an evidence document like any other, so it lives
@@ -635,7 +651,10 @@ def write_receipt(
     the path is already occupied and nothing is written. Re-running a
     *different* extractor writes a new receipt beside the old one, because a
     later model reading the same prose is a new interpretation and not a cache
-    rebuild (plan §1.3). An attempt to change what an existing receipt ASSERTS
+    rebuild (plan §1.3). Whether the fold then treats that new receipt as
+    SUPERSEDING the old one is a separate question and it is answered by
+    :data:`A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER`: a later version of
+    one reader supersedes; a different reader stands beside. An attempt to change what an existing receipt ASSERTS
     is refused by name — that is the only thing this store treats as corruption
     rather than as history, and :data:`RECEIPT_ANNOTATION_KEYS` says exactly
     what "asserts" excludes.
@@ -2209,11 +2228,19 @@ def _fold(inputs: _FoldInputs) -> dict:
     )
     unreadable = sorted(inputs.unreadable)
 
-    groups: dict[tuple[str, str], list[_Contribution]] = {}
+    # :data:`A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER`. The third
+    # member of the key is the EXTRACTOR, and it is what makes the election an
+    # election between re-readings rather than between readers.
+    groups: dict[tuple[str, str, str], list[_Contribution]] = {}
     for contribution in contributions:
-        groups.setdefault((contribution.source_id, contribution.revision), []).append(
-            contribution
-        )
+        groups.setdefault(
+            (
+                contribution.source_id,
+                contribution.revision,
+                extractor_identity(contribution.extractor_version),
+            ),
+            [],
+        ).append(contribution)
 
     entries: dict[str, dict] = {}
     marks: dict[str, list[dict]] = {}
@@ -2229,6 +2256,7 @@ def _fold(inputs: _FoldInputs) -> dict:
             {
                 "source_id": key[0],
                 "revision": key[1],
+                "extractor_identity": key[2],
                 "selected_receipt_id": winner.receipt_id,
                 "selected_receipt_path": winner.relative_path,
                 "receipt_ids": sorted(item.receipt_id for item in ordered),
@@ -2314,7 +2342,12 @@ def _fold(inputs: _FoldInputs) -> dict:
             "claims": len(claims),
             "receipts": len(receipt_rows),
             "selected_receipts": len(selected_ids),
-            "sources": len(source_rows),
+            # One row per READING (v354), so the count of source revisions is
+            # taken over the rows rather than from their number: a reader that
+            # arrives beside another must not make a vault look as though it
+            # grew a source.
+            "readings": len(source_rows),
+            "sources": len({(row["source_id"], row["revision"]) for row in source_rows}),
             "corrections": len(correction_rows),
         }
     )
@@ -2341,11 +2374,17 @@ def fold_active_index(vault_root: str | Path, *, full: bool = False) -> dict:
     The whole algorithm, in the order it runs — and none of it depends on the
     order anything was discovered in:
 
-    1. **Group receipts by (source_id, revision).** Within a group the winner is
-       the latest by :func:`receipt_sort_key`; every other receipt in the group
-       is a *previous interpretation* of the same words, and its claims are kept
-       with status ``superseded``. That is what "re-extraction is a new
-       interpretation, never a cache rebuild" costs and buys.
+    1. **Group receipts by (source_id, revision, extractor identity).** Within
+       a group the winner is the latest by :func:`receipt_sort_key`; every other
+       receipt in the group is a *previous interpretation* of the same words by
+       the same reader, and its claims are kept with status ``superseded``. That
+       is what "re-extraction is a new interpretation, never a cache rebuild"
+       costs and buys. The extractor is in the key
+       (:data:`A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER`, v354) because
+       a prompt edit, a new model or a bumped rule version is a later version
+       of ONE reader — which is exactly what supersession is for — while
+       `general_listener` and `answer_placement` reading one promoted reply are
+       two readings of it and neither retires the other.
     2. **Apply ``supersedes_claim_ids``** carried by claims from *winning*
        receipts only. A stale interpretation does not get to retire anything.
     3. **Apply corrections.** Each cited claim collects a mark; supersede,
@@ -2572,6 +2611,7 @@ def file_message_extraction(
 
 
 __all__ = [
+    "A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER",
     "CONSTRAINT_CORRECTION_SCOPE",
     "CORRECTION_CORRECTION_SCOPE",
     "CONVERSATION_SOURCES_DIR",

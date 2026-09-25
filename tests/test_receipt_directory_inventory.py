@@ -101,7 +101,11 @@ class ReceiptInventoryTests(OfferVaultCase):
         value = json.loads(path.read_bytes())
         with ts.receipt_read_batch(self.root):
             before = self.assert_current()
-            value["extractor_version"] = "synthetic:2"
+            # The SAME reader at a new rule version — which is what
+            # re-extraction is, and since v354 the only thing whose earlier
+            # reading an election retires
+            # (`temporal_store.A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER`).
+            value["extractor_version"] = "classifier:2"
             value["created_at"] = "2026-09-16T00:00:00Z"
             value["claims"] = [{**row, "extractor_version": value["extractor_version"],
                                 "created_at": value["created_at"]} for row in value["claims"]]

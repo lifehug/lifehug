@@ -616,7 +616,15 @@ class OwnerRelevanceTests(VaultTestCase):
         lived_effect citing the `children` entry, and no Childhood membership
         anywhere — not from an assertion, not from arithmetic, not from the
         legacy pass."""
-        child = _birth_and_child(self)
+        # The ENTRY states the letter's date, and the imported reading of the
+        # same entry agrees with it. v354: two readers of one document both keep
+        # their reading (`temporal_store
+        # .A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER`), so the imported
+        # claim no longer retires the recorder's reading of the entry it cites —
+        # the two agree and strengthen ONE placement, which is the shape the
+        # fold was built for. Before v354 this fixture read 2022 only because
+        # the second receipt won the group and retired the entry's own date.
+        child = _birth_and_child(self, child_best="2022-05-01")
         source_ref = child["source_ref"].to_dict()
         self.file_claims([claim(
             claim_type="date", subject_mention="Cricket", event_kind="birth",
