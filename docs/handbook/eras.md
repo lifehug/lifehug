@@ -332,6 +332,46 @@ second, conflicting one.
 arithmetic (`cross_dating.frames_touching`) for age frames, the union of
 active `era_membership` receipts for named eras, and one `display_role`
 decided over both.
+### The fold's contract version
+
+`CALCULATION_RULE_VERSION` is stamped on every node as
+`calculation_rule_version` and folded into every input fingerprint. It reads
+`timeline-rules:N`, and it lives in exactly one place,
+`temporal_timeline.CALCULATION_RULE_VERSION`.
+
+`N` is neither a release number nor a schema version. It is **the fold's own
+contract**: the promise that the same receipts, folded by these rules, produce
+the same drawing. It is bumped whenever a rule in the fold changes *what the
+same claims calculate to* — a different node set, placement set, alternates set
+or work-item set for claims nobody edited — and that is what makes a stale
+projection **detectable** rather than merely wrong. It deliberately does not
+move for a better question, a nicer sentence, a faster path or a display
+decision, and each release that leaves it alone says so and proves it.
+
+Every slot from `:8` forward, with the release that took it. Derived from
+`system/version.json`'s changelog entries and from `temporal_timeline`'s own
+notes beside the constant; `:1`–`:7` are narrated in the prose below.
+
+| Version | Release | What the same claims now calculate to |
+|---|---|---|
+| `:8` | v314 | **The owner's own name is the owner.** A roster entity bearing the owner's own name or full name resolves to him instead of reading as a roster stranger. (Shipped with the resolver itself.) |
+| `:9` | v324 | **An unknown name is not the owner.** A subject mention identity resolution cannot place used to fall to the owner, so every relative the roster did not know became him. The fold now reads the words: a relation word that is the mention's own head or the possessor of its head means somebody else. A relative's own milestone leaves the axis; a scene the owner told about them stays on it as `lived_effect`. The subject-less anchor handle moves with it — minted under `anchor:` rather than `unresolved:`, and asking whose event it was. |
+| `:10` | v334 | **Whose moments ride the owner's axis.** Every node gains the fold-derived `axis_membership` / `axis_membership_reason` pair (`system/axis_membership.py`), and the memberships are gated on that pair rather than on `AXIS_RELATIONS` alone — so an immediate family member's own event during his lifetime sits in his age frames as a moment about them, where `contextual_only` had left it with no membership at all. A larger axis, and the "About someone else" group retired. |
+| `:11` | v338 | **An unknown relationship is undecided, not "not family".** `:10` read every subject whose family tier could not be read as rule 3's `not_family`, and `not_family` is what suppresses the date question and drops the node from the unplaced cohort — so a loss whose person carried no relationship minted no *"when did they die?"* card at all. A sixth reason, `relationship_unknown`, and `not_family` now requires an affirmatively distant tier. A different published reason and a different work-item set. |
+| `:12` | v342 | **An alias is followed.** `:11` published a re-keyed node's redirect and then drew a node at the redirected id anyway, and a bound telling whose claims carry no `event_ref` left no redirect at all. Those claims now fold into the episode, those ids are in `node_aliases` instead of in `nodes`, and the date cards minted against the ghosts are gone. |
+| `:13` | v343 | **A card is asked only when a person could answer it.** A claim whose only label is a pronoun or placeholder *and* whose confidence is exactly `0.0` mints no node and no work item; an `identity_uncertain` candidate set drops alias rows, collective/role rows and the owner's own row before it is offered; a bare gerund `{what}` reads *"When was …?"* rather than the ungrammatical *"When did … happen?"*. Fewer nodes, a smaller `identity_uncertain` set, different prompt text. |
+| `:14` | v345 | **A telling of a landmark folds onto it, and a landmark is drawn as what it is.** A `family` entry's date is read as the event the *entry* dates rather than the one its domain declares (a couple is never born, and the id it used to be drawn at is redirected); the milestone rung reads the kind the *evidence* names and keys a marriage on the couple; and an age claim whose window contains a node's placement joins that placement's provenance as agreeing evidence instead of as a rival. A different node set, alternates set and work-item set. |
+| `:15` | v346 | **A birthday is a birth, and an age is measured from its own subject's birth.** A dated `<Name>'s birthday` is read as that person's `birth` at fold time; a merged birth group naming one child is labelled and anchored for the child; `BIRTH_ANCHOR_TIERS` reads a birth node, then the roster's `born`, then a `family`/`children` landmark entry; and a node wholly before the owner's birth is `pre_birth` whoever it is about. A different node set, placement set and work-item set. (The branch was numbered 344; v344 and v345 were taken by other releases while it was open, so it shipped as v346.) |
+| `:16` | v347 | **An introduction names one person in one clause.** The arithmetic in the fold did not change; the **roster** it reads did, and this release is what changes it. `:15` read *"my grandpa James Edwin Taylor Sr., my dad's dad"* as introducing a second father, so two people claimed "dad" and the shared-alias rule bound the word to neither. A different subject set, axis membership and age-anchor set once the roster this release writes is in place. |
+| `:17` | v350 | **One couple, one alias, one label.** A couple key is read from a telling's own subjects and a compound relationship word is never the simple word inside it (a different **node** set); a subject that newly resolves publishes the id it used to be drawn at as a redirect and carries the claims still holding it (a different **alias** table, one fewer fact drawn twice); and an anchor handle that is an internal id mints no card at all, while no composer's sentence may carry one (a different **work-item** set). |
+
+Releases in that range that deliberately did **not** move it, each for a reason
+it states: v336 (work items and display only), v339/v340/v341 (the drawing
+heals on redraw; no node's placement arithmetic changed), v348 (the fast binder
+path never decides anything the full pass would have decided differently —
+proved by a byte-identical publish), v349 (measured byte-identical on a vault
+with no reinstatement to resolve).
+
 O-E2 moved the calculation rule version to `timeline-rules:3` so a reader can
 tell, from the payload alone, whether it is looking at the pre-Eras,
 age-frames-only, or membership-and-relevance shape. Timeline Fix 05 §8.3 then

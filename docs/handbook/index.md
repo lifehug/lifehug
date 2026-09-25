@@ -19,7 +19,7 @@ planned:
 | [Focuses & the Autopilot](focuses.md) | ideas, scoring, keep-N-in-development, dedupe, merge |
 | [The Mission & the Convergence Principle](mission.md) | the three purposes; floor and accelerator |
 | [The Loop](the-loop.md) | the canonical cycle, the three clocks, In/adjacent/Out taxonomy |
-| [The Interaction Pattern](interactions/) | the pattern; [Conversation](interactions/conversation.md), [Question Judgment](interactions/question-judgment.md), [Focus Curation](interactions/focus-curation.md), [Timeline](interactions/timeline.md) |
+| [The Interaction Pattern](interactions/) | the pattern, and the nine registered Interactions: [Conversation](interactions/conversation.md), [Question Judgment](interactions/question-judgment.md), [Focus Curation](interactions/focus-curation.md), and its six children — [Question Candidate](interactions/question-candidate.md), [Focus Candidate](interactions/focus-candidate.md), [Entity Candidate](interactions/entity-candidate.md), [Arc Walk](interactions/arc-walk.md), [Timeline](interactions/timeline.md), [Landmarks](interactions/landmarks.md) |
 | [Quality & Engagement Profile](quality-profile.md) | answer richness, multipliers, rumination |
 | [Neighborhoods](neighborhoods.md) | the question-supply unit and its arcs |
 | [Entities & Graduation](entities.md) | rosters, thresholds, wiki pages |

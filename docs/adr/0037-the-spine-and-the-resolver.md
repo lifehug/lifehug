@@ -7,7 +7,16 @@ ADR 0028 (the landmark recorder), ADR 0031 (event identity)
 Shipped: v314 (`system/resolver.py`, lifehug#362); v315 amends the shape rule;
 v316 adds the two legs for hosts; v317 adds the not-a-landmark and
 not-an-event rules (lifehug#365); v325 revisits, aims and estimates; v326
-salvages a failed resolution and the CLI path
+salvages a failed resolution and the CLI path; v339 (amended v341) makes the
+`birth` landmark the owner's own; v346 makes a dated birthday a birth and
+measures every age from its own subject's birth; v347 narrows an introduction to
+one person in one clause; v349 stops a stated entry being retired by shape and
+adds `landmark-reinstate`; v350 fixes the couple key, the identity re-key's
+alias and the card that showed a node id.
+
+Every amendment below carries the version that shipped it in its own heading.
+The CLI verb is `resolve`; `resolver` is the module (`system/resolver.py`) and
+the concept.
 
 ## Context
 
@@ -65,10 +74,13 @@ the user adds keystones and landmarks to improve it.*
    clock never does.
 5. **Where it runs.** After every accepted batch in
    `classification_refresh.run_batch` (`LIFEHUG_RESOLVER=0` skips it), and by
-   hand as `lifehug resolve --execute`; `--eval` answers known-answer
-   questions without filing. The resolver never dates a residence episode —
-   two stays that look alike are an identity problem for the roster, not a
-   dating problem.
+   hand as `lifehug.py resolve --execute`. The resolver never dates a residence
+   episode — two stays that look alike are an identity problem for the roster,
+   not a dating problem. Three operator flags live on the module's own
+   entrypoint and are deliberately not forwarded by the `lifehug.py` wrapper:
+   `python3 system/resolver.py --vault-root <root> --eval <file>` answers
+   known-answer questions without filing, and `--estimate-missing` and
+   `--bind-restatements` are the two one-time backfills named below.
 
 ## Amendment (v316): two legs, so a host can run the same loop
 
@@ -241,9 +253,10 @@ module, no new model call, no stored dependency graph.
   bears on it re-asks it once, and only a narrower verified answer replaces
   the standing one — a refine can never downgrade a placed moment to a
   question (`kept_resolved`). The person's own stated dates are never
-  re-asked. `resolve --estimate-missing` asks every settled unknown that has
-  no estimate yet for one, once — the one-time backfill that gives the page
-  its first windows.
+  re-asked. `python3 system/resolver.py --vault-root <root>
+  --estimate-missing` asks every settled unknown that has no estimate yet for
+  one, once — the one-time backfill that gives the page its first windows. It
+  is on the module's entrypoint, not on `lifehug.py resolve`.
 
 **What this deliberately is not.** Not an incremental recompute (the fold
 recomputes everything in seconds and is correct because it starts over), not
@@ -395,7 +408,11 @@ is the wrong direction: a standing claim is retracted by a correction, not by a
 reader. An affected vault therefore needs `temporal_store.supersede_claims`
 beside the redraw, which is what the owner's vault got.
 
-## Amendment (v344, 2026-09-24): a birthday is a birth, and an age is measured from its own subject's birth
+## Amendment (v346, 2026-09-24): a birthday is a birth, and an age is measured from its own subject's birth
+
+*Authored on a branch numbered 344 and referred to as "v344" in the text below
+and in `temporal_timeline`'s own notes. v344 and v345 were taken by other
+releases while it was open, so it shipped as **v346** on `timeline-rules:15`.*
 
 **What happened.** The two amendments above are both about which birth is the
 OWNER'S. The owner's review of staging on 2026-09-24 was about the other

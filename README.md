@@ -6,12 +6,26 @@ Lifehug is a lifelong AI oral-history system organized around **the Loop**: the 
 
 You usually do one thing: **answer the question.** When an occasion arrives, you do a second thing: **ask Lifehug to make a piece in the Studio.** Both become part of the same compounding memory system.
 
-## Two users, one Loop
+## The mental model, in one paragraph
 
-Add Landmark can retain a house nickname for future stories independently of
-its city and of separate stays at that address. Name evidence is occurrence-
-specific; unrelated prose and ambiguous aliases remain visible. See
-[ADR 0033](docs/adr/0033-add-landmark-offer-mode.md) for filing and compatibility.
+Everything you type is kept forever, exactly as you typed it, in a **source**
+file under `answers/` or `sources/`. Nothing above that layer is ever edited in
+place: it is **derived**. A model reads a source and writes one durable
+**claim** per assertion it can quote — *this happened*, *this was in 1996*, *I
+was 18* — into an append-only **receipt**. A pure function called **the fold**
+reads every receipt on every publish and groups the claims into **nodes**, the
+dated moments you see on the Timeline. Where the fold cannot date a node it
+publishes a **work item** — a card asking the one question that would settle
+it — and the **resolver** tries to answer that card from the rest of the vault
+before it ever reaches you. Because the fold is a pure function of the
+receipts, a correction is never a rewrite: you add a new source, and the whole
+drawing is recomputed from scratch on the next publish. That is the whole
+system: *immutable sources, derived everything, one fold, one drawing.*
+
+Follow one answer end to end in
+[How a memory becomes a dated moment](#how-a-memory-becomes-a-dated-moment).
+
+## Two users, one Loop
 
 **If you do the minimum, it still works.** Answer one quick question a day —
 that is the whole obligation — and over time you get a full life story:
@@ -75,8 +89,8 @@ The wiki is a **graph of your life**, and these are the standard terms used thro
 - **In the Loop** — code, state, or docs reached by the daily, weekly, monthly, or artifact flows without a human manually stitching it together, and whose output can affect future questions, wiki pages, relationship understanding, or artifacts.
 - **Loop-adjacent** — useful manual, dry-run, inspection, setup, or repair surfaces. They support the Loop but do not change future behavior until their output is promoted into a Loop surface.
 - **Out of the Loop** — code or data that exists but is not called by scheduled/manual Loop entrypoints and is not read by downstream Loop state. Mission-critical work should not stay here; wire it in or document it as experimental.
-- **Interaction** — a role definition for the AI in one situation: purpose, behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. The definition lives in the framework (`interactions/<name>/`); each runtime loads it; a model is "seated" in it only after passing its eval harness. Out-of-scope input is politely deflected. Six today: **conversation** (chats + longer sessions), **question judgment** (which follow-up candidates deserve to exist, and how urgently — ADR 0007), **focus curation** (judging first-encounter Focus/idea duplicate name variants the deterministic layers can't resolve — ADR 0010), and three *children* of conversation — **question candidate** (placement, ADR 0018), **focus candidate** (onboarding, ADR 0021), **entity candidate** (identity, ADR 0022).
-- **Child interaction** — an Interaction that `extends` Conversation by exact version and adds exactly ONE goal: a stage-keyed `prompt/turn-instructions.md` leaf the host substitutes into, ONE optional additive structured-output field gated on a `TurnShape` flag, its own lints/goldens/evals harness, and its own seat. Three exist (placement, onboarding, identity); arc walking is proposed. The paradigm is written once in `interactions/README.md`.
+- **Interaction** — a role definition for the AI in one situation: purpose, behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. The definition lives in the framework (`interactions/<name>/`); each runtime loads it; a model is "seated" in it only after passing its eval harness. Out-of-scope input is politely deflected. **Nine are registered** in `interactions/registry.json`: **conversation** (chats + longer sessions), **question judgment** (which follow-up candidates deserve to exist, and how urgently — ADR 0007), **focus curation** (judging first-encounter Focus/idea duplicate name variants the deterministic layers can't resolve — ADR 0010), and six *children* of conversation — **question candidate** (placement, ADR 0018), **focus candidate** (onboarding, ADR 0021), **entity candidate** (identity, ADR 0022), **arc walk** (working a Play target's open questions in resumable episodes, v193), **timeline** (placing a moment without ever opening on a calendar year, v195), and **landmarks** (the universal dating set, plus its own recorder and general-listener leaves, v199/v212/v218).
+- **Child interaction** — an Interaction that `extends` Conversation by exact version and adds exactly ONE goal: a stage-keyed `prompt/turn-instructions.md` leaf the host substitutes into, ONE optional additive structured-output field gated on a `TurnShape` flag, its own lints/goldens/evals harness, and its own seat. Six exist (placement, onboarding, identity, arc walking, placement-in-time, landmarks). The paradigm is written once in `interactions/README.md`.
 - **Play** — one verb: it **approves** the thing and **starts** its conversation. The approving write (promote the candidate, scaffold the focus, graduate the entity) runs in the host's background job; the conversation opens immediately and never waits on it, so the model states the act once as an aside and takes a correction as a *move*. "Play is read-only" is retired vocabulary (platform ADR 0020).
 - **Play target** *(proposed — platform issue #570)* — what a Play is pointed at: `{kind, ref, goal, question_ids[], context}` for a candidate, focus, entity, question, chapter, book, or the whole queue. One endpoint, one tab renderer; the daily loop becomes a *scheduled* Play.
 - **Whisper** — information woven into a conversation that fits naturally, drawn from an arc that has developed, and serving a **second agenda beyond the conversation's primary one**. A whisper is never a change of subject and never an interrogation: it is raised only where it fits, at most once per conversation, and it is not a cost the loop trades off — a whisper that lands is a gift, not a debt. Owner-set, 2026-08-23: *"a whisper is information woven into a conversation that fits naturally from an arc that's developed and solves some other agenda."* Whispers are a general mechanism; each kind names its own agenda.
@@ -110,9 +124,382 @@ together (owner-set, 2026-08-23).
 per-person gaps that skeleton leaves; whispers and keystone questions are the
 two ways the loop asks.
 
+Add Landmark (`landmark-offer`) can retain a house nickname for future stories
+independently of its city and of separate stays at that address — a **house** is
+a place below its city, and a **residence** is one stay there. Name evidence is
+occurrence-specific; unrelated prose and ambiguous aliases stay visible rather
+than being folded in. Identities and aliases survive a roster refresh; an
+existing city-alias conflict needs an explicit decision. See
+[ADR 0033](docs/adr/0033-add-landmark-offer-mode.md) for filing and
+compatibility.
+
+### The substrate — the nouns the timeline is actually made of
+
+These are the artifacts every timeline answer passes through, named once and
+used with these meanings everywhere in the code, the handbook and the ADRs.
+Reading down the table is reading the pipeline in order.
+
+| Noun | What it is | Where it lives |
+|---|---|---|
+| **Source** | A file of raw text: a prompted answer, an unprompted story, a pasted record, a correction, a reflection, a promoted piece. **Immutable** — never rewritten, only added to. Every derived thing cites one. | `answers/*.md`, `sources/**/*.md` |
+| **Telling** | One *account of one event inside one source*. A source can hold several; the same event told twice is two tellings. The telling is what the identity layer binds, and its identity plus its supersession history is the **telling manifest**. | `state/temporal_claims/` (manifest) |
+| **Claim** | One assertion a telling makes, with an EDTF interval, a basis, a confidence and a quote. Seven `claim_type`s: `date`, `range`, `age`, `duration`, `relative_order`, `identity`, `occurrence`. `identity` and `occurrence` carry no `temporal_value` at all — `occurrence` is *"it happened; when is not known"*, which is how an undated story is still on the page. A claim's status is `active`, `superseded`, `retracted` or `disputed`; a losing claim is **never deleted**. | `state/temporal_claims/receipts/` |
+| **Receipt** | The append-only file a filing writes: the claims, their quotes, the extractor and its rule version, the source revision it read. The receipts *are* the substrate; everything else is a function of them. | `state/temporal_claims/receipts/` |
+| **Node** | A group of claims the fold decided are about one event — *a dated moment on the Timeline*. Its id is derived (`node_kind`, event kind, subject keys, discriminator), never assigned, so the same facts always draw the same node. | `state/temporal_claims/calculated-timeline.json` |
+| **Episode** | The identity layer's answer to *"are these two tellings the same event?"* — a set of tellings decided to be one. An episode has its own id, and a node id is derived from it, so absorbing a telling moves the node. | `state/temporal_claims/identities/bindings/` (machine, rebuildable) and `sources/identity/bindings/` (a person's own decision — Law 7: human decisions are sources, not state) |
+| **Binding envelope** | The record of one identity act: which tellings it binds, under which relation (`same` / `not_same`), which prior bindings it **supersedes**, which ids it aliases. Written whole and validated against the store, so an apply is never half-applied. | `state/temporal_claims/identities/operations/`, or `sources/identity/operations/` for a human one |
+| **Alias** | A published redirect from an id that has moved to the id that now draws it: `node_aliases`, `episode_aliases`, `work_item_aliases`. An alias is **followed**, not merely published (v342). | the projection envelope |
+| **Landmark entry** | One answer in the universal dating set, under a **domain** (`birth`, `family`, `residences`, `schools`, `partnerships`, `children`, `work`, `military`, `losses`). Each domain has a **specificity ladder** — residences climb city → address → span → household — so a vague answer is still an answer and a row stays open only because more would unlock more. The entries in `state/landmarks.json` are a *drawing*; the filed `sources/landmarks/entry-*.md` records are the truth, which is why un-drawing an entry never loses it. | `sources/landmarks/`, `state/landmarks.json` |
+| **Work item** (a **card**) | The published question about one gap: its kind, the field it is missing, the claims involved, the sentence to ask, and a score. Ten kinds — `precision_gap` (*when did this happen?*), `contradiction` (*which of these two dates is right?*), `identity_uncertain` (*which James is this?*), `missing_anchor` (*you named something undated — when was it?*), `place_ambiguous`, plus `tenure_ambiguous`, `residence_overlap`, `chain_gap`, `same_event` and `possible_overmerge`. States: `open`, `offered`, `answered`, `resolved`, `dismissed`, `obsolete` — `obsolete` is how answering elsewhere closes a card without anybody answering it twice. | `state/temporal_claims/work-items.json` |
+| **Frame** | A **calculated** period: Childhood (0–13), Teen years (13–20), then every reached decade. Pure arithmetic over the birthday, regenerated every publish, with no maximum age to forget. Frames are the permanent coordinate system. | the projection, `node_kind: "period"` |
+| **Era** | A **person-created** period — College, the Mission. Immutable identity (`era_id`), dated only by what the person said, never by what happened to fall inside it. Its label and its kind are separate decision records — and, like every human decision, they are **sources**: `sources/eras/` (identity, label, kind), with membership and display filed beside them. | `sources/eras/`, the projection |
+| **Axis membership** | The fold's answer to *"does this moment belong on the owner's own timeline?"* — `owner` \| `family` \| `none`, with a reason: `lived`, `immediate_family_in_lifetime`, `pre_birth`, `not_family`, `relationship_unknown`, `subject_unresolved`. One pure function, `system/axis_membership.py`. | every node |
+| **The spine** | The dated facts every *"when?"* is read against: birth and the age table it implies, stays, tenures and schooling as intervals, dated points, and the people around the owner. **Generic first** — any lifetime has this shape and a birthday alone fills the age table — and the person's landmarks and keystone answers are what make it theirs. Built from the published projection on every run; nothing in it is invented. | `resolver.spine`, in memory |
+| **The resolver** | The model reading each undated node against the spine and a full-text index of the whole vault, answering *when* with citations that are then verified mechanically. A verified answer becomes an ordinary dated claim; an unanswerable one becomes the one question that would settle it, asked once. | `system/resolver.py`, `state/resolver/` |
+| **The fold** | The pure function from *every receipt* to *the drawing*: group claims into nodes, reconcile their dates, compute frames and memberships and axis membership, and mint the work items for what is still missing. It is recomputed from the receipts on every publish and stores no intermediate opinion, which is why a correction needs no migration. | `system/temporal_timeline.py`, `system/episode_fold.py` |
+
+Two artifacts hold the fold's output: the **projection**
+(`state/temporal_claims/calculated-timeline.json` — nodes, memberships,
+aliases, frames, keystones, diagnostics, stamped with a generation number) and
+the **work items** file beside it. Both are derived; deleting them costs one
+rebuild and changes no answer.
+
+## How a memory becomes a dated moment
+
+One answer, end to end, naming the artifact each step writes. You type:
+
+> *"I went bankrupt at 26. It was the worst year of my life."*
+
+| # | Step | Who does it | What it writes |
+|---|---|---|---|
+| 1 | **Capture** | `process-answer` (or `ingest-story`) | the **source** file, verbatim, under `answers/` or `sources/manual/`, plus a row in `state/source_manifest.json`. Nothing above this is authoritative. |
+| 2 | **Classify** | `classify-story` — a model, reading one source | a **classification** under `state/classifications/`: the events it found, each with a subject, an event mention, and any date, age or landmark relation it can quote. It records what the text *says*; it never converts and never guesses. |
+| 3 | **File claims** | `migrate-classifier-moments` (and the classify path itself) | a **receipt** under `state/temporal_claims/receipts/`: here one **telling** with an `age` claim (band 26–26, basis `age`, quote *"bankrupt at 26"*) and an `occurrence` claim. The classification stays on disk; the receipt is what the fold reads. |
+| 4 | **Bind** | `bind-episodes [--apply]` | a **binding envelope** under `state/temporal_claims/identities/`, if some other telling is the same event. Nothing to bind writes nothing at all. |
+| 5 | **Fold and publish** | `publish` (`system/temporal_publication.py`) | the **projection** and the **work items**. The age claim meets the owner's birth anchor — 1981-07-11 — and `chronology.from_age_band` returns 2007-07-11/2008-07-10, basis `age`. A **node** is drawn there, inside the *My 20s* **frame**, with `axis_membership: owner / lived`. |
+| 6 | **Resolve what is still open** | `resolve --execute` | a dated **claim** on the node, under extractor `resolver/rule:3`, for anything the vault could already answer — or a row in `state/resolver/resolutions.json` holding the one question that would settle it, plus a `probable_window` estimate the page can draw. |
+| 7 | **Ask, only if a person could answer** | the fold, at publish | a **work item** — here none, because the age placed it. Had the story said only *"I went bankrupt"*, a `precision_gap` card would carry the resolver's own sentence, and only if narrowing it would actually change something. |
+
+Then the ordinary loop takes over: the card can become an arc-card **whisper**
+or a bank question, your answer is a new source, and step 1 begins again. The
+drawing is never patched — it is recomputed.
+
+## How the timeline is computed
+
+### Where a placement comes from
+
+The fold reconciles every claim about one node into one interval. Each claim
+carries a **basis** — *how* the interval was arrived at — and the bases are
+ranked, so a stronger warrant wins a disagreement rather than the later filing
+winning it (`chronology.BASIS_WEIGHT`):
+
+| Basis | Weight | What it means |
+|---|---|---|
+| `document` | 7.0 | a date printed on paper, read off it |
+| `stated` | 6.0 | the person said it |
+| `relative` | 5.5 | somebody else's memory, relayed, witness named |
+| `age` | 5.0 | their age against a birthday — arithmetic |
+| `photo` | 4.5 | a contextual date, a *window* by construction |
+| `anchor` | 4.0 | a landmark plus a before/after, or containment in a stay |
+| `public_event` | 3.0 | the living-in-history route |
+| `connector` | 2.0 | institutional evidence from a connector |
+| `order` | 1.0 | relative sequence only |
+
+Confidence is a second, independent axis (`certain` → `approximate` →
+`inferred` → `conjectural`), and additional independent provenance for the same
+claim adds a capped consilience bonus. The four bases that carry most real
+vaults are `stated`, `anchor`, `age` and `document`.
+
+Four routes put a date on a node that never stated one:
+
+- **Containment inside a stay.** A moment whose place resolves to exactly one
+  dated residence or tenure episode inherits that episode's bounds — copied,
+  never narrowed — as basis `anchor`, reported `participation_span_applied`.
+  The episode's own provenance is dropped and one clause naming the episode
+  takes its place, so the page never attributes to the person a sentence they
+  did not say. The member's precision question survives: better anchored, not
+  suppressed. **One slot is one tenure** (v312) — a job recorded under several
+  back-to-back stays folds into a single episode spanning the whole run.
+- **Age arithmetic, from the subject's own birth.** `chronology.from_age_band`
+  takes a birth and a band and does arithmetic; it is subject-agnostic, and the
+  only question is *which* birth it is handed. `BIRTH_ANCHOR_TIERS` (v346)
+  answers that in order: (1) a `birth`-kinded node whose resolved subject is
+  that person, read at its best-supported value; (2) that person's roster row's
+  `born`; (3) a `family` or `children` landmark entry's own date — the two
+  domains whose ladder declares `date_semantics: ["birth"]`, pinned by a parity
+  test so a ladder that changes its semantics fails the build. The first tier
+  that answers for a person answers for **every key that person goes by**, so a
+  lower tier can add a birth nobody has drawn and can never contradict one
+  already on the page. A name several roster people bear is never one of those
+  keys. When none of the three exists the node reports
+  `age_without_birth_anchor`, which now means exactly what it says.
+- **Recency as a placement** (v336). *"Recent"* with a known capture date is a
+  placement, not an absence: the person is the one saying it was recent.
+  `chronology.RECENCY_RUNGS` is the one vocabulary, six rungs narrowest-first —
+  *yesterday* / *the other day* / *this week* → 2 weeks, *last week* → 1 month,
+  *last month* / *a few weeks ago* → 2 months, *recently* / *lately* / *a
+  recent …* → 6 months, *a few months ago* → 9 months, *this year* → 1 January
+  of the capture year. It files a **`stated`** range whose provenance reads
+  *"you said recent, told 2026-07-14"* — never `date_derived`, never
+  calculated. Two refusals keep it honest, both in the cheap direction: a text
+  naming a four-digit year dates itself and supplies no cue, and
+  `RECENCY_VETO_RES` refuses a recency word used to mean the opposite (*"I
+  remember it like it was yesterday"*, *"in recent decades"*). A cue wrongly
+  refused leaves a visible, still-asked `occurrence`; a cue wrongly fired would
+  file a wrong date that hides itself.
+- **The resolver**, for everything else — see
+  [ADR 0037](docs/adr/0037-the-spine-and-the-resolver.md).
+
+### The binder — deciding two tellings are one event
+
+`bind-episodes` is the identity layer. `R1` is a similarity rung with a floor;
+beside it sit the **R2 rungs**, swept in order of certainty, each keyed on an
+**exact** key two tellings either share or do not, binding on arithmetic rather
+than on a score:
+
+| Rung | Keys on | Example |
+|---|---|---|
+| **R2a** | a derived reading naming exactly one node — every claim `system_derived`, a bare `<name>:<24 hex>` ref | the resolver's own answer, bound to the node it answered |
+| **R2b** | one subject's one **once-per-life** milestone (`ONCE_PER_SUBJECT_EVENT_KINDS`: `birth`, `child_born`, `death`, `loss`, `married`) — and, since v345, one **couple's** one wedding (`ONCE_PER_COUPLE_EVENT_KINDS`: `married`, keyed by `couple_key`) | eleven tellings of one child's birth, folded into one node |
+| **R2c** | an identical normalized label about the same named people | *"Family moved to Yucaipa"* said twice |
+| **R2d** | one moment restated in other words — three shared significant label tokens, at least one not a name | the seven *"Isaac's first check"* nodes |
+
+`R2a` chains freely because its key is arithmetic. Every other rung must form a
+**clique**: non-transitivity at group scale, and the reason a 104-telling
+transitive closure was cut back to the births it was actually about. A rung is
+refused by an active or entailed `not_same`, so a person's own *Different*
+always wins, and no rung may move an adopted or human-authority episode. A
+**couple key is read from a telling's own subjects** (v350), not from any
+person token anywhere in it — the owner's own subject names the owner's couple,
+so *"our wedding"* can never reach his parents'; and a **compound relationship
+word is never the simple word inside it**, so *mother-in-law* does not resolve
+to *mother*.
+
+### The five laws that protect the drawing
+
+Each is one named constant with one seat, and each exists because a real vault
+lost something real:
+
+1. **`A_MERGE_NEVER_MOVES_A_DATED_MOMENT`** (v340, `episode_binder`). `R2c` and
+   `R2d` — the two rungs whose key is *words* — refuse a pair whose stated
+   dates contradict **and** a pair whose dates *the fold already has them at*
+   contradict. Two *"Family moved to Yucaipa"* 32 years apart are two moves.
+   `R2a`/`R2b` are deliberately **not** governed: their key is the identity of
+   one fact, and two readings of one fact that disagree about its date are
+   exactly the contradiction a fold exists to surface, as a `contradiction`
+   card naming both dates with the loser kept as an alternate.
+2. **`AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES`** (v342,
+   `episode_fold`). Checkable in one line: no key of `node_aliases` is the id
+   of a node the drawing publishes. A claim **follows** the node it folds under
+   — when a bind re-keys that node, every remaining claim goes along unless its
+   own date contradicts the merge; a key some claim still holds is not
+   redirected at all, because a redirect to one of the two things an id means
+   is worse than no redirect (`identity_node_alias_contested`).
+3. **`A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE`** (v349,
+   `landmarks_interaction`). An entry the person stated is retired only by
+   something the person **said** — a `none` that ends the domain, or a
+   substantive answer standing where a terminal stood — never because of the
+   fields it happens to carry, unless those fields are demonstrable evidence of
+   a machine-collapsed aggregate; an entry with a promoted source of its own is
+   never retired by shape at all; and **one answer is one entry**, so a single
+   record that would retire more than one prior entry retires *nothing* and
+   says so. The record itself always files: a rule that cannot decide what it
+   retires is no reason to drop what the person said.
+4. **`NOTHING_TO_BIND_COSTS_NOTHING`** (v348, `episode_binder`). A pass whose
+   cheap signature matches the last successful `--apply`'s receipt derives
+   nothing at all and returns that apply's summary with `reason: "nothing_new"`.
+   The signature is `BINDER_RECEIPT_SIGNATURE_FIELDS` — three content digests
+   (`telling_digest`, `bindings_digest`, `landmark_digest`) and three versions
+   (`rule_version`, `calculation_rule_version`, `framework_version`) — over a
+   receipt of the matching schema version. Any difference is the full pass. A
+   vault with no telling manifest yet has no cheap signature and always takes
+   the full pass: a missing manifest is *unknown*, never *nothing new*. Measured
+   on the owner's vault: 169s → 1.05s.
+5. **Whose moments ride the owner's axis** (`timeline-rules:10`, v334/v338,
+   `axis_membership.py`) — the one deterministic rule, at fold time, from the
+   roster's `relationship` field and the birth date. It is a law in the same
+   sense: it is what keeps the drawing from silently gaining or losing rows.
+   See [the owner's rulings](#the-owners-rulings-as-rules) below.
+
+### The five ways a node id moves
+
+A node id is **derived**, never assigned — from the episode, the event kind and
+the subject — so a reading that changes any of those moves the id while every
+work item, session and URL still names the old one. All five publish a redirect
+under law 2, and all five report it:
+
+| # | Cause | Reported | Release |
+|---|---|---|---|
+| 1 | a **bind** re-keys the node a telling folds under | `node_aliases` (Law 5) | v342 |
+| 2 | the fold **minted** an id for a telling the contract cannot see | `identity_node_alias_followed` | v342 |
+| 3 | an episode **absorbed** by a merge takes a new episode id, and a node id is derived from it | `episode_aliases` composed through `node_aliases` | v342 |
+| 4 | a **landmark redraw** changes what an entry's date dates — a couple's wedding is not a birth | `landmark_date_kind_redrawn` | v345 |
+| 5 | an **identity re-key** — a subject that newly resolves, so the derived key moves | `identity_subject_rekeyed` | v350 |
+
+Three refusals are shared by all of them: a claim carrying its own `event_ref`
+never moved (its id was never derived), a former id two claims disagree about
+the destination of is dropped whole, and a map that would be a chain drops both
+ends. The identity layer's own tables win a collision with a redraw, because a
+person's decision outranks arithmetic.
+
+## The owner's rulings, as rules
+
+These are rules with seats in the code, not anecdotes. Each was a reading of a
+real page on a real vault.
+
+- **A card is asked only when a person could answer it** (v343/v350,
+  `timeline-rules:13`/`:17`). A claim whose only label is a pronoun or a
+  placeholder **and** whose confidence is exactly `0.0` mints no node and no
+  card — both signals, never either alone, because `0.0` is also the default
+  for *"never stated"*. A bare gerund phrase reads *"When was Harvey
+  arriving?"*, not the ungrammatical *"When did Harvey arriving happen?"*. An
+  `identity_uncertain` candidate set drops roster alias rows and collective/role
+  rows before it is offered, and never offers the owner as a candidate for the
+  owner's own given name; fewer than two real candidates mints nothing. And **a
+  card never shows a node id as its label** — the rung mints nothing for a
+  handle that names an internal id (reporting
+  `anchor_without_a_human_label`, which loses nothing because each of those
+  nodes already carries a card of its own), while a lint refuses any composed
+  sentence carrying one, so no template can emit an id even by accident. The
+  shape is derived from the minter's own `ID_RE`, not from a hand list of
+  prefixes.
+- **Whose moments ride the owner's axis** (`timeline-rules:10`, v334, amended
+  v338). One deterministic rule at fold time: *he lived it* → his timeline,
+  whoever else it is about. An **immediate family** member's own event during
+  his lifetime (spouse/partner, parents, siblings, grandparents, children,
+  grandchildren) → his timeline, drawn as a moment about them. Anyone else's
+  own event — a friend's divorce, a colleague's move, and in-laws, aunts,
+  uncles and cousins with them → not on his axis; it stays in the substrate and
+  on that person's page. **Anything wholly before his birth is family history
+  and never lived**, whoever it turns out to be about. And an **unknown
+  relationship is undecided, not "not family"** (v338): `not_family` is a
+  decision about a relationship *known* to be outside the immediate set, so a
+  roster row with no relationship recorded, or a name the roster has never
+  heard of, keeps its `precision_gap` and its identity question exactly as it
+  had them. The suppressions read only the two *decided* off-axis reasons. The
+  one exception, kept deliberately: an occurrence whose subject **is** the
+  owner stays `owner`/`lived` even before his birth, because that is a
+  contradiction Mirror owns and hiding it would delete the question.
+- **A date card only when narrowing changes something** (v336,
+  `temporal_work_items.date_card_changes_something`). A card is minted only
+  when narrowing would change an ordering constraint or surface a
+  contradiction, cross a frame or decade boundary, unblock another placement,
+  or concern a real life event. A freestanding anecdote already placed inside
+  about a year gets **no** card: higher fidelity can happen later, ideally not
+  at all. The predicate reads the fold's own milestone vocabulary rather than a
+  seventh table, and runs twice — in the fold, and again at publication where
+  the resolver's own probable window is finally known.
+- **A dated birthday of a named person is that person's birth** (v346,
+  `A_DATED_BIRTHDAY_IS_A_BIRTH`). A claim extractor can say *when* and cannot
+  say what *kind* of event a birthday is, so a `date` claim whose event mention
+  names a person's birth, at day, month or year grain, with a named non-owner
+  subject, **is** that person's `birth`. It is a reading taken at fold time, so
+  a vault that already holds the claim heals on its next redraw and the receipt
+  still says exactly what the extractor said. Compared whole and never as a
+  substring, so *"Mary Born"* is still a name and *"Harvey's birthday party"* is
+  still a party. Its corollary: **a birth belongs to the person born** — a
+  birth group naming exactly one non-owner person is that person's birth
+  whatever else it mentions, so *"Two dates are claimed for your birth"* is
+  never asked about a child's birthday.
+- **An introduction names one person in one clause** (v347,
+  `AN_INTRODUCTION_NAMES_ONE_PERSON_IN_ONE_CLAUSE`). A relationship phrase the
+  owner used — *"Dave's mom"*, *"my mother"*, *"(wife)"* — introduces a person
+  the roster has never heard of, with that relationship, through
+  `entity-roster --ensure-introduced`. The phrase and the name must sit in the
+  **same clause**; a relationship word carrying a possessive `'s` is a
+  possessor and not the name's relation, so *"my dad's dad"* introduces nobody
+  as a father; a clause giving one name two relationships states neither; and a
+  name a pasted vital record merely *lists* is introduced by nothing. A
+  relation the vault already **records** for that spelling — a correction, a
+  `family` landmark entry's `relation`, a roster row's `relationship` —
+  outranks the one a phrase would file, and a contradiction refuses the whole
+  row out loud. A generational suffix is a generation: `Sr.` is one step up,
+  `Jr.` one step down.
+- **An age and a date corroborate** (v345, `AN_AGE_AND_A_DATE_CORROBORATE`).
+  An age is the age of the person the **claim** is about, not the node's
+  subject. An age window that *contains* the date a node is placed at joins
+  that placement's provenance as agreeing evidence and is never published as a
+  rival (`age_corroborates_placement`); one that *excludes* it stays a rival,
+  is scored, and the contradiction card names both dates
+  (`age_contradicts_placement`). The arithmetic is the package's own and there
+  is exactly one of it.
+- **A landmark is drawn as what it is** (v345,
+  `A_LANDMARK_IS_DRAWN_AS_WHAT_IT_IS`). `family` is the one domain whose
+  entries are not all the same shape — a sibling entry dates a birth, a couple
+  entry dates a wedding, and a couple is never born. A declared `birth` is
+  refined exactly three ways: an entry that *states* a birth stays one; an
+  entry whose own words name a marriage, or whose subject is exactly one
+  couple, is `married`; a collective that is not one couple is a `transition`,
+  *"a date whose event the record does not say"*. Read at three seats, so a
+  vault that already holds the record heals on redraw with no migration.
+- **The `birth` landmark is the owner's own** (v339, amended v341). `birth` is
+  the one domain with no identity rung, so a relative's pasted vital record
+  must never merge into it: a record naming somebody who is not the owner, or
+  carrying a year fifteen or more from the year the owner **stated**, is routed
+  to `family` at filing and skipped at draw. The year bound is disarmed when
+  no stated birth is on file. And a birth record whose subject field holds the
+  domain's own vocabulary — `Born`, `birthday`, `date of birth` — names
+  **nobody**: it says which domain this is, not whose birth it is.
+
+## `CALCULATION_RULE_VERSION` — the fold's contract version
+
+Every node the fold draws is stamped `calculation_rule_version`, and the value
+is folded into every input fingerprint. It reads `timeline-rules:N`, and it
+lives in exactly one place, `temporal_timeline.CALCULATION_RULE_VERSION`
+(**`timeline-rules:17`** at v350).
+
+`N` is not a release number and not a schema version. It is the **fold's own
+contract**: the promise that the same receipts, folded by these rules, produce
+the same drawing. It is bumped whenever a rule in the fold changes *what the
+same claims calculate to* — a different node set, placement set, alternates set
+or work-item set for claims nobody edited — and that is what makes a stale
+projection **detectable** rather than merely wrong. It deliberately does **not**
+move for a better question, a nicer sentence, a faster path or a display
+decision: v318's incremental fold, v328's owner-identity digest, v336's card
+gate, v348's fast binder path and v349's landmark repair all left it alone, and
+each of those releases says so and proves it.
+
+The bump-by-bump table, `:8` through `:17` with the release that took each
+slot, is in the eras handbook:
+[The fold's contract version](docs/handbook/eras.md#the-folds-contract-version).
+`:6` and `:7` predate it (v301 cross-dating context, v312 one-slot-one-tenure),
+and `:1`–`:5` belong to the Eras and event-identity programs, narrated in the
+same section.
+
+## The verbs a person or an operator runs
+
+Checked against `python3 system/lifehug.py --help` (134 subcommands at v350).
+**Dry-run by default** means the bare verb writes nothing and prints what it
+would do.
+
+| Verb | What it writes | Dry-run by default? |
+|---|---|---|
+| `python3 system/temporal_publication.py` (**publish**) | the projection and the work items (`state/temporal_claims/calculated-timeline.json`, `work-items.json`) — the drawing, refolded from the receipts. `--rebuild` deletes both first and folds from nothing, the correctness oracle; `--check` verifies the standing generation still reproduces and writes nothing. Also runs implicitly wherever the loop republishes. | **no** — it publishes (`--check` is the read-only leg) |
+| `bind-episodes [--apply]` | binding envelopes and proposals under `state/temporal_claims/identities/{bindings,operations}/`, plus the binder receipt under `state/temporal_claims/binder_receipt.json`. `--apply` files; `--dry-run` prints every pair's reasons and wins if both flags are given. | **yes** |
+| `resolve --execute` | dated claims on nodes (extractor `resolver/rule:3`), supersession corrections for the raw handles they replace, and `state/resolver/resolutions.json`. The two legs for hosts: `resolve --plan --out <path>` writes exactly the prompts it would buy and touches **nothing** in the vault (an `--out` inside the vault root is refused), and `resolve --from-response <envelope>` files what came back, re-verifying every citation against the vault *as it is now* — so a stale story, an already-placed moment or a replayed envelope is refused rather than filed. | **yes** — the bare verb plans, `--execute` files |
+| `entity-roster [--type <t>]` | the AI-curated roster under `state/entity_rosters/<type>.json`. | no |
+| `entity-roster --ensure-introduced [--dry-run]` | one person row per relative a source introduces with a relationship phrase, through `entity_verdict.apply_verdict(..., ensure=True)`. Deterministic, no AI, additive, one atomic per-row write, never a rewrite of the file. | no — pass `--dry-run` |
+| `landmark-record <domain> …` | one filed landmark source under `sources/landmarks/entry-*.md`, the redrawn `state/landmarks.json`, and the entry's claims as receipts. Refuses at filing what cannot improve the spine: an unnamed organization, and a `birth` record that names somebody who is not the owner. | no |
+| `landmark-reinstate --domain <d> [--since <ts>] --apply` | **one** `retract` correction under `sources/corrections/`, naming every supersession that stops standing, plus `state/`. Nothing writes an entry — the entries come back because `state/landmarks.json` is a *drawing* and the sources behind it were never touched. Deterministic and idempotent twice over. You need it when a landmark answer wrongly retired a domain's standing entries — the v349 incident, where one bare `residences` answer superseded thirty stays and every moment they had placed by containment fell to unplaced. `--since` is what keeps the repair surgical. | **yes** — bare prints the plan |
+| `migrate-classifier-moments [--dry-run]` | a source-backed temporal claim for every current classifier moment — the bridge from `state/classifications/` into the receipts. `--source PATH` restricts it. | no — pass `--dry-run` |
+| `compile` (the **wiki compile**) | the private wiki under `wiki/`, including `wiki/timeline.md`. `--no-ai` for deterministic excerpts only; `--emit-tasks PATH` for the keyless agent path. | no |
+
+Two notes a reader will trip on. The CLI verb is **`resolve`**, not
+`resolver` — `resolver` is the module and the concept. And **`publish`** is not
+a `lifehug.py` subcommand: it is `system/temporal_publication.py`'s own
+entrypoint and the function every write path calls, which is why the changelogs
+name it as a step rather than as a command.
+
 ## Contents
 
+- [The mental model, in one paragraph](#the-mental-model-in-one-paragraph) — immutable sources, derived everything, one fold
 - [Two users, one Loop](#two-users-one-loop) — the minimum, the maximum, and the four surfaces
+- [Nomenclature](#nomenclature) · [Timeline](#timeline) · [The substrate](#the-substrate--the-nouns-the-timeline-is-actually-made-of)
+- [How a memory becomes a dated moment](#how-a-memory-becomes-a-dated-moment) — one answer, end to end
+- [How the timeline is computed](#how-the-timeline-is-computed) — bases, containment, ages, the binder, the five laws
+- [The owner's rulings, as rules](#the-owners-rulings-as-rules)
+- [`CALCULATION_RULE_VERSION`](#calculation_rule_version--the-folds-contract-version) — the fold's contract version
+- [The verbs a person or an operator runs](#the-verbs-a-person-or-an-operator-runs)
 - [The big picture](#the-big-picture) — how the whole thing fits together
 - [The daily loop](#the-daily-loop) — what happens every morning
 - [Core concepts](#core-concepts) — Focus, Roadmap, Wiki, Neighborhood, Candidate, Piece, Project, Pass
@@ -259,7 +646,7 @@ No ratings, no streaks, no friction. **The answer itself is the only feedback th
 | **Piece** | The product payoff: a single versioned work — a produced letter, post, caption, tweet, chapter, speech, or other deliverable. Drafts live in `outputs/`; approved finals/context can be promoted as sources. Code/CLI term: **artifact**. | `outputs/`, `sources/artifacts/` |
 | **Project** | A composite piece built over time — today, the book: a Focus with a book-class deliverable whose categories are chapters. Virtual while planning; becomes a concrete piece once assembled. | `state/roadmap.json`, `outputs/` |
 | **Pass** | A depth cycle over the whole story: skeleton → depth → connections → polish. Each pass deepens what the last one outlined. | `system/rotation.json` embedded; `state/rotation.json` external |
-| **Interaction** | A role definition for the AI in one situation: behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. Six today: **conversation** (chats + conversations), **question judgment** (ADR 0007), **focus curation** (ADR 0010), plus three *children* of conversation, each adding exactly one goal — **question candidate** (placement, ADR 0018), **focus candidate** (onboarding, ADR 0021), **entity candidate** (identity, ADR 0022). | `interactions/` |
+| **Interaction** | A role definition for the AI in one situation: behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. Nine registered: **conversation** (chats + conversations), **question judgment** (ADR 0007), **focus curation** (ADR 0010), plus six *children* of conversation, each adding exactly one goal — **question candidate** (placement, ADR 0018), **focus candidate** (onboarding, ADR 0021), **entity candidate** (identity, ADR 0022), **arc walk** (v193), **timeline** (v195), **landmarks** (v199). | `interactions/`, `interactions/registry.json` |
 | **Chat** | The short exchange around the daily question: system-initiated, ~3 exchanges, arc-carded, graceful third-turn exit, closing takeaway. | `state/conversations/<session_id>.json` |
 | **Conversation** | A long user-initiated session (a story, "something on your mind", or a thread the system offered); runs the full interviewer arc; closes with a narrative takeaway. | `state/conversations/<session_id>.json` |
 | **Arc card** | The pre-planned skeleton for a chat/conversation: opening framing + 2–4 follow-up intents (not scripted text), planned weekly, executed live per turn. | `state/arc_cards.json` |
@@ -414,9 +801,14 @@ You can still review with `candidates-review`, inspect `needs_review` items, upd
 
 Weekly maintenance classifies a capped number of new or source/context-stale sources (`LIFEHUG_WEEKLY_CLASSIFY_LIMIT`, default `5`), migrates accepted events into temporal claims, runs the **resolver** over the stories it just filed (below), and then runs candidate auto-promotion. A response echoes the source revision and stable context digest it saw; changed source/context rejects the response before any write, so the previous accepted classification and claims remain intact. Context is limited to independently grounded dated landmarks/episodes, includes competing stays and human identity decisions, and accepts only supplied IDs plus an exact unique source quote. The source file stays immutable; the derived record is written under `state/classifications/` using a repo-relative key, and any follow-up questions are added to the reviewable candidate store.
 
-#### How the timeline places itself: the spine and the resolver (v314)
+#### How the timeline places itself: the spine and the resolver
 
-The classifier records what a story *says*; it does not work out what that means in years. That job belongs to one loop, and it is deliberately simple:
+The classifier records what a story *says*; it does not work out what that
+means in years. That job belongs to one loop, and it is deliberately simple.
+(The fold's own arithmetic — bases, containment, age anchors, the binder and the
+laws that protect the drawing — is
+[How the timeline is computed](#how-the-timeline-is-computed) above; this is the
+model's half of it.)
 
 1. **Build the spine.** From the published projection, `resolver.spine` gathers the dated facts every question is read against: birth and the age table it implies, stays, tenures and schooling as intervals, dated points, people. The spine is generic at first — any lifetime has this shape, and a birthday alone fills the age table — and the person's own **landmarks** and **keystone** answers are what make it theirs. Adding a landmark improves the spine; the next run reads everything against the better spine.
 2. **Index everything.** Every source, answer, landmark record, placed fact and prior resolution goes into one full-text index, rebuilt per run.
@@ -424,7 +816,16 @@ The classifier records what a story *says*; it does not work out what that means
 4. **Verify mechanically.** Every cited quote must occur in the cited passage, every date must parse, ranges must be ordered, a derived answer must cite the spine fact it came from. What fails verification files nothing.
 5. **File once, remember forever.** A verified answer becomes a dated claim on the moment's own node (extractor `resolver/rule:3`, declared on the classifier's telling); the raw handle it replaces is superseded. `state/resolver/resolutions.json` records every outcome, so a settled moment is never re-asked and never re-bought, and new information — a correction, a new landmark, a new story — is what re-opens a question, not a clock.
 
-Owner statements outrank inference, the latest dated correction wins, and the resolver never dates a residence episode (two stays that look alike are an identity problem, not a dating one). Run it by hand with `lifehug resolve --execute`; the batch loop runs it after every accepted classification batch (`LIFEHUG_RESOLVER=0` skips it). Design: [ADR 0037](docs/adr/0037-the-spine-and-the-resolver.md).
+Owner statements outrank inference, the latest dated correction wins, and the resolver never dates a residence episode (two stays that look alike are an identity problem, not a dating one).
+
+Four things the resolver has learned to do since, all on the pass it already runs:
+
+- **Two legs, so a host can run the same loop** (v316). `resolve --plan --out <path>` writes exactly the prompts it would buy and touches nothing in the vault; `resolve --from-response <envelope>` files what came back, re-verifying every citation against the vault *as it is now* — so a story you edited in the meantime is refused (`stale_source`), a moment something else already placed is refused (`stale_targets`), and filing the same envelope twice files nothing the second time. A moment it comes back silent about is re-asked once, in a smaller group, then left alone.
+- **Not every moment is an event** (v317). Beside a date, a range and a question, an answer may say `not_an_event` with a closed kind — `future`, `meta`, `fact_statement`, `duplicate`. That is filed as a dated **retraction** through the ordinary correction path, never a delete, and the node leaves the page on the next publish instead of sitting there as a question nobody can answer.
+- **Revisit, aim, estimate** (v325). A newly filed story re-opens the settled unknowns it bears on, once each. An answer may return `handle_binds` — *"this moment's unresolved handle names THAT node"* — which files a `relative_order` claim and retires the raw handle, so the `missing_anchor` card goes away because nothing is missing. And when the vault genuinely cannot tell, the answer carries a mechanically-verified **`probable_window`**: published on the node and its card, drawn as a floating dot whose height is the window's width, and **never a claim** — the score, the strip and the derivation do not read it, and only your answer moves the dot to the line.
+- **Salvage, everywhere** (v323/v326). One event's bad link or failed bookkeeping falls to its conservative state and the resolver dates it later, while the story's other moments file normally. Structural failures — a stale snapshot, a tampered event key — still refuse before any write.
+
+Run it by hand with `python3 system/lifehug.py resolve --execute` (the verb is `resolve`; `resolver` is the module); the batch loop runs it after every accepted classification batch (`LIFEHUG_RESOLVER=0` skips it). Design, with every amendment through v350: [ADR 0037](docs/adr/0037-the-spine-and-the-resolver.md).
 
 For an archive build, `--batch-plan` loads that catalog once and emits one bounded private JSON plan (50 by default, at most 500); prompt construction happens only for the selected slice. Finite callers can pass `--exclude-items-json` with exact source-path plus four-key snapshot identities already attempted: pending stays truthful, only unchanged identities leave selection, and changed source/context is eligible again. `--from-batch-response` validates one response envelope against a shared catalog, reloads the catalog once as a race gate, and files valid siblings even when another item is malformed. A context-only refresh asks only for events and preserves all non-timeline fields and candidate IDs. Exact-current work is skipped before a model call. Empty or unsafe sources are reported as typed ineligible rows rather than silently skipped; a full pass is complete only when pending and ineligible counts are both zero. Deterministic content-free replay receipts live at `state/classification_batches/<batch-id>.json`; changed input under the same ID fails closed. `--skip-candidates` is an explicit archive-only policy on both commands: it removes question generation from full prompts and preserves prior candidate IDs, while ordinary new-story behavior continues generating candidates.
 
@@ -666,7 +1067,7 @@ Lifehug is **script-first**: the Python scripts *are* the system, and `lifehug.p
 
 | Script | What it does |
 |---|---|
-| **`lifehug.py`** | The CLI dispatcher (~40 subcommands). A thin router — it just shells out to the focused scripts below with the right working directory. This is the canonical interface; prefer it over calling scripts directly. |
+| **`lifehug.py`** | The CLI dispatcher (134 subcommands at v350 — `--help` is the authority). A thin router: it shells out to the focused scripts below with the right working directory. This is the canonical interface; prefer it over calling scripts directly. |
 | **`lifehug_core.py`** | Shared library. Parses the question bank, computes coverage, defines all file paths and the question-ID format, and does atomic JSON/text writes. Every other script imports it. |
 | **`jobs.py`** + **`job_execute.py`** | Durable metadata-only queue and single-writer worker. Typed payloads stay in private sidecars and cross the child boundary through stdin, never process argv. Explicit schedule/provider identities deduplicate (including `conversation-close:<session_id>`, issue #119's idle-sweep dedupe key); ordinary repeated actions create fresh jobs. |
 | **`vault_paths.py`** | One authority for keeping installed framework assets separate from the active user vault (`--vault-root` → `LIFEHUG_VAULT_ROOT` → embedded layout), with process binding, no-follow file operations, deterministic tree preflight, and an exportable versioned contract. |
@@ -839,6 +1240,21 @@ python3 system/lifehug.py conversation-close --expired          # sweep + enqueu
 python3 system/lifehug.py arc-plan                               # plan this week's arc cards (usually via weekly-maintenance)
 python3 system/lifehug.py arc-thread-offers                     # offer ≤1 system-initiated Conversation thread (monthly)
 python3 system/lifehug.py conversation-evals                    # run the interaction eval harness (issue #120)
+
+# The timeline (see "The verbs a person or an operator runs" above)
+python3 system/temporal_publication.py              # publish: refold the receipts, redraw the timeline
+python3 system/temporal_publication.py --check      # does the standing generation still reproduce? (writes nothing)
+python3 system/temporal_publication.py --rebuild    # delete both files and fold from nothing (the oracle)
+python3 system/lifehug.py bind-episodes             # which tellings are one event? (dry run)
+python3 system/lifehug.py bind-episodes --apply     # file the envelopes and proposals
+python3 system/lifehug.py resolve                   # plan what would be asked (writes nothing)
+python3 system/lifehug.py resolve --execute         # date undated moments from the vault, with cited evidence
+python3 system/lifehug.py migrate-classifier-moments --dry-run  # classifier moments -> temporal claims
+python3 system/lifehug.py landmark-record residences --label "701 North Williams" --address "701 North Williams"
+python3 system/lifehug.py landmark-reinstate --domain residences --since 2026-09-24T19:17:00Z  # plan only
+python3 system/lifehug.py entity-roster --ensure-introduced --dry-run  # relatives a source introduced
+python3 system/lifehug.py timeline-candidates        # the timeline questions above the shared threshold
+python3 system/lifehug.py timeline-receipt           # the realized-gain receipt for a published generation
 
 # Plan & grow
 python3 system/lifehug.py weekly-maintenance        # lint/fix, classify, update profile, plan queue

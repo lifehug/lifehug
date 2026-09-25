@@ -10,11 +10,6 @@ The wiki is the core memory layer — an AI-maintained knowledge graph connectin
 
 ## Nomenclature
 
-A house is an individual place below its city; a residence is one stay there.
-Add Landmark preserves house nicknames for future stories without inventing a
-date or choosing between ambiguous stays. These identities and aliases survive
-roster refresh; existing city-alias conflicts need an explicit decision.
-
 The wiki is a **graph of Dave's life**. The standard terms:
 
 - **Node** — a graph vertex: a durable subject in Dave's life that can be compiled into a wiki page. People, places, periods, objects, themes, projects, and Dave himself are nodes.
@@ -29,7 +24,7 @@ The wiki is a **graph of Dave's life**. The standard terms:
 - **Studio** — the one workspace for making pieces and projects: grouped by Focus, project cards expand into their chapter table, piece cards keep their version history, and a create form starts new pieces.
 - **Entity graduation / node graduation** — entities mentioned across answers are detected, AI-curated into a roster (`state/entity_rosters/<type>.json`), and graduated into node pages from their mentions. Places/periods graduate on a low bar (a few mentions); **objects** graduate on symbolic meaning (the cleats, the orange shorts), not frequency; people on score. Relationship edges use a dyadic path: Focus relationship pages can graduate from dedicated answers or enough cross-story mentions about the person. Rosters refresh monthly; compile graduates the current roster entries into pages, so the graph grows on its own. `lifehug.py entity-verdict <type> <slug> graduate|never|clear` (v173, ADR 0013) is the owner's override — graduate now, veto a page forever, or clear back to automatic — and it survives every future refresh.
 - **The Loop** — the canonical continuous-learning cycle: capture source → compile wiki → lint/repair source truth → classify/score signals → promote candidates and plan the queue → ask a better question → create artifacts → feed final artifacts back as source.
-- **Interaction** — a role definition for the AI in one situation: purpose, behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. First: the conversation interaction.
+- **Interaction** — a role definition for the AI in one situation: purpose, behavior contract, context recipe, scope, and evals, packaged as files any qualified model can execute. Nine are registered in `interactions/registry.json`: **conversation**, **question judgment**, **focus curation**, and six children of conversation that each add exactly one goal — **question candidate**, **focus candidate**, **entity candidate**, **arc walk**, **timeline**, **landmarks**.
 - **Chat** — the short exchange around the daily question: system-initiated, ~3 exchanges, arc-carded, graceful third-turn exit, closing takeaway.
 - **Conversation** — a long user-initiated session (a story, "something on my mind", or a thread the system offered); runs the full interviewer arc; closes with a narrative takeaway.
 - **Arc card** — the pre-planned skeleton for a chat/conversation: opening framing + 2–4 follow-up *intents* (not scripted text), planned by the loops, executed live per turn.
@@ -37,6 +32,31 @@ The wiki is a **graph of Dave's life**. The standard terms:
 - **In the Loop** — code, state, or docs reached by the daily, weekly, monthly, or artifact flows, and whose output can affect Dave's future questions, wiki pages, relationship understanding, or artifacts.
 - **Loop-adjacent** — useful manual, dry-run, inspection, setup, or repair surfaces. They support the Loop but do not change future behavior until their output is promoted into a Loop surface.
 - **Out of the Loop** — code or data that exists but is not called by Loop entrypoints and is not read downstream. Mission-critical features should not remain here.
+
+### The timeline
+
+- **Source** — a file of raw text Dave wrote: an answer, a story, a pasted record, a correction. **Immutable.** Everything else is derived from it.
+- **Telling** — one account of one event inside one source. The same event told twice is two tellings.
+- **Claim** — one assertion a telling makes, with an EDTF interval, a **basis** (how it was arrived at: `stated`, `age`, `anchor`, `document`, …) and a quote. A losing claim is never deleted — it is superseded, retracted, or left disputed beside the claim it disagrees with.
+- **Receipt** — the append-only file a filing writes under `state/temporal_claims/receipts/`. The receipts are the substrate.
+- **The fold** — the pure function from every receipt to the drawing. Recomputed on every publish, so a correction needs no migration: add a new source and the whole timeline is redrawn.
+- **Node** — a group of claims the fold decided are about one event: a dated moment on the Timeline. Its id is *derived*, never assigned.
+- **Work item** (a **card**) — the published question about one gap: *when did this happen?*, *which of these two dates is right?*, *which James is this?*. A card is only ever asked when a person could answer it, and only when narrowing it would change something.
+- **Landmark** — one answer in the universal dating set (birth, family, residences, schools, partnerships, children, work, military, losses), each domain with a specificity ladder so a vague answer is still an answer. A house is a place below its city; a residence is one stay there. Add Landmark preserves house nicknames for future stories without inventing a date or choosing between ambiguous stays; those identities and aliases survive a roster refresh, and an existing city-alias conflict needs an explicit decision.
+- **Frame** vs **Era** — a **frame** (Childhood, Teen years, every reached decade) is calculated from Dave's birthday and is the permanent coordinate system; an **era** (College, the Mission) is Dave's own interpretation, dated only by what he said.
+- **The spine** — the dated facts every *"when?"* is read against: birth and the age table it implies, stays, tenures, dated points, people. Generic at first; Dave's landmarks make it his.
+- **The resolver** — the model reading each undated moment against the spine and the whole vault, answering *when* with citations that are verified mechanically before anything is filed. What it cannot answer becomes the one question that would settle it, asked once.
+
+```bash
+python3 system/temporal_publication.py           # publish: refold the receipts, redraw the timeline
+python3 system/lifehug.py resolve                # what the resolver would ask (writes nothing)
+python3 system/lifehug.py resolve --execute      # date undated moments from the vault, with citations
+python3 system/lifehug.py bind-episodes          # which tellings are one event? (dry run; --apply files)
+python3 system/lifehug.py landmark-record residences --label "…" --address "…"
+```
+
+See *The substrate*, *How a memory becomes a dated moment* and *How the timeline
+is computed* in the framework README for the full picture.
 
 ## Focuses
 
