@@ -75,6 +75,33 @@ def _src_block(ids):
     return "".join(f'  - "answers/{i}.md"\n' for i in ids)
 
 
+def _bind_private_timeline(test_case):
+    """Point `sys.modules["timeline"]` at this file's private copy, and PUT IT
+    BACK afterwards.
+
+    v349. `load()` above goes to real trouble not to clobber the shared
+    `sys.modules` entry, and these two tests then did exactly that and never
+    restored it — so every LATER test in the same process that imported
+    `timeline` lazily (a `cmd_*` in `lifehug.py` does, inside the function) got
+    this file's private module instead of the canonical one. A `mock.patch` on
+    the canonical module's `LANDMARKS_STORE` then did not apply, and
+    `timeline.redraw_landmarks()` redrew the CHECKOUT: full-suite runs were
+    leaving `state/landmarks.json` and `state/temporal_claims/` in the repo,
+    which `tests/test_queue_convergence.py` went on to read. Found by bisecting
+    a v349 CLI test that failed only in the full suite.
+    """
+    previous = sys.modules.get("timeline")
+
+    def _restore():
+        if previous is None:
+            sys.modules.pop("timeline", None)
+        else:
+            sys.modules["timeline"] = previous
+
+    test_case.addCleanup(_restore)
+    sys.modules["timeline"] = tl
+
+
 class TimelineFixture(unittest.TestCase):
     """Temp wiki tree with 2 periods, 3 entities, 1 chapters source, 1 classification."""
 
@@ -208,7 +235,7 @@ class GapTests(TimelineFixture):
 class ViewSmokeTests(TimelineFixture):
     def test_view_renders_with_data(self):
         sw = load("serve_wiki")
-        sys.modules["timeline"] = tl  # view imports by name; use our patched module
+        _bind_private_timeline(self)  # view imports by name; use our copy
         title, body, wide = sw.view_timeline()
         self.assertEqual(title, "Timeline")
         self.assertIn("Childhood", body)
@@ -221,7 +248,7 @@ class ViewSmokeTests(TimelineFixture):
 
     def test_periods_are_collapsible(self):
         sw = load("serve_wiki")
-        sys.modules["timeline"] = tl
+        _bind_private_timeline(self)
         _, body, _ = sw.view_timeline()
         # v80: each period is a <details>, collapsed by default, with a
         # counts line in the summary so the folded row stays informative.
@@ -245,7 +272,7 @@ class ViewSmokeTests(TimelineFixture):
             tl.CLASSIFICATIONS_DIR = Path(empty) / "clf"
             try:
                 sw = load("serve_wiki")
-                sys.modules["timeline"] = tl
+                _bind_private_timeline(self)
                 title, body, _ = sw.view_timeline()
             finally:
                 (tl.WIKI_DIR, tl.STATE_DIR, tl.MANUAL_SOURCES_DIR, tl.CLASSIFICATIONS_DIR) = orig

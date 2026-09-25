@@ -197,6 +197,12 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # writer lock like the rest of the source-repair family.
     "source-filenames-repair",
     "landmark-record",
+    # v349: files ONE reinstatement correction under sources/corrections/ and
+    # redraws + republishes. Same single-transaction vault mutation family as
+    # landmark-record; --apply is the writing door and a bare run writes
+    # nothing, but the command is classified BY NAME exactly as era-migrate and
+    # bind-episodes are.
+    "landmark-reinstate",
     "source-lint", "source-manifest", "timeline-place", "timeline-retire",
     # v232 (wave E, item E2): a drag files a durable correction source under
     # sources/corrections/ and republishes the calculated projection. Same
@@ -2176,6 +2182,62 @@ def cmd_landmarks_evals(args: argparse.Namespace) -> int:
     return run_python("landmarks_evals.py", flags)
 
 
+def cmd_landmark_reinstate(args: argparse.Namespace) -> int:
+    """Put a landmark domain's wrongly-superseded entries back (v349).
+
+    The repair half of
+    `landmarks_interaction.A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE`. Shows its
+    work by default and writes only on ``--apply``, because a verb that undoes
+    corrections in bulk is one the person should be able to read before it
+    runs.
+    """
+    import json as _json  # noqa: PLC0415
+
+    import landmark_projection as _lp  # noqa: PLC0415
+    import timeline as _timeline  # noqa: PLC0415
+    from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    try:
+        summary = _lp.reinstate_domain(
+            REPO_DIR,
+            domain=args.domain,
+            since=args.since or None,
+            until=args.until or None,
+            reason=args.reason or None,
+            apply=args.apply,
+        )
+    except TemporalContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if summary["applied"]:
+        # The ENTRIES come back here, and nothing writes one: the claims are
+        # active again, so the drawing draws them from the sources that were
+        # never touched.
+        drawn = _timeline.redraw_landmarks()
+        summary["entries"] = len((drawn.get("domains") or {}).get(
+            summary["domain"]) or ())
+    if args.json:
+        print(_json.dumps(summary, indent=2, sort_keys=True))
+        return 0
+    if not summary["corrections"]:
+        print(f"✓ nothing to reinstate for {summary['domain']}"
+              f" — no standing supersession matches")
+        return 0
+    if not summary["applied"]:
+        print(f"{len(summary['corrections'])} {summary['domain']} supersession(s) "
+              f"would be reinstated, restoring {len(summary['claim_ids'])} claim(s):")
+        for path in summary["correction_paths"]:
+            print(f"  {path}")
+        print("  (nothing written — re-run with --apply)")
+        return 0
+    print(f"✓ reinstated {len(summary['corrections'])} {summary['domain']} "
+          f"supersession(s); every one of them remains on disk")
+    print(f"  correction: {summary['filed']}")
+    print(f"  claims restored: {len(summary['claim_ids'])}")
+    print(f"  {summary['domain']} entries drawn: {summary['entries']}")
+    return 0
+
+
 def cmd_landmark_record(args: argparse.Namespace) -> int:
     """File one landmark answer (v197). The only writer for the landmark set."""
     import chronology as _chrono  # noqa: PLC0415
@@ -4152,6 +4214,26 @@ def build_parser() -> argparse.ArgumentParser:
                  "relation"):
         p.add_argument(f"--{rung}", default="", help=f"ladder rung: {rung}")
     p.set_defaults(func=cmd_landmark_record)
+
+    p = sub.add_parser(
+        "landmark-reinstate",
+        help="Put back a landmark domain's wrongly-superseded entries (v349)")
+    p.add_argument("--domain", required=True,
+                   help="landmark domain to repair (residences, work, …)")
+    p.add_argument("--since", default="",
+                   help="only supersessions filed at or after this timestamp "
+                        "(e.g. 2026-09-24T19:17:00Z) — the window is what "
+                        "keeps the repair surgical")
+    p.add_argument("--until", default="",
+                   help="only supersessions filed at or before this timestamp")
+    p.add_argument("--reason", default="",
+                   help="why they are being reinstated (a default is written "
+                        "naming the rule)")
+    p.add_argument("--apply", action="store_true",
+                   help="write the reinstatement; without it nothing is "
+                        "written and the plan is printed")
+    p.add_argument("--json", action="store_true", help="machine-readable summary")
+    p.set_defaults(func=cmd_landmark_reinstate)
 
     p = sub.add_parser(
         "arc-plan-target",

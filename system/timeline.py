@@ -1159,7 +1159,9 @@ def flip_landmarks_if_needed() -> dict | None:
     return summary
 
 
-def save_landmark(domain: str, record: object, *, digest_override: str | None = None) -> dict:
+def save_landmark(domain: str, record: object, *,
+                  digest_override: str | None = None,
+                  findings: list | None = None) -> dict:
     """Add or replace ONE landmark entry, keyed by its identity in a domain.
 
     The signature, the return value and the MEANING are v214's. What changed in
@@ -1185,12 +1187,23 @@ def save_landmark(domain: str, record: object, *, digest_override: str | None = 
     here at write time. That is why the flip is invisible: the same function
     folds the same records in the same order and gets the same entry.
 
-    The one cross-entry rule (`landmarks_interaction.entry_superseded_by` — a
+    The one cross-entry rule (`landmarks_interaction.supersession_reason` — a
     none retires its domain, a substantive answer clears a standing terminal,
     a clean record retires the collapsed aggregate) is now expressed as a
     durable CORRECTION rather than as an entry quietly not copied forward. The
     retired entry keeps its evidence and gains a record of why it stopped
     standing.
+
+    v349 puts the SHAPE rule's two guards here, where the evidence is
+    (`landmarks_interaction.A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE`): a
+    retirement is declined for any entry with a promoted source of its own,
+    and a whole write whose shape rule would retire more than ONE prior entry
+    retires nothing at all. Both refusals are appended to ``findings`` when a
+    caller supplies a list — additive, so every existing call site is
+    byte-identical — in `landmarks_interaction.lint_landmark_reply`'s shape,
+    which is what a host already renders. The record itself always files: the
+    answer is the person's, and a rule that cannot decide what it retires is
+    no reason to drop what they said.
     """
     if not isinstance(record, dict):
         raise ValueError("a landmark record must be an object")
@@ -1217,22 +1230,77 @@ def save_landmark(domain: str, record: object, *, digest_override: str | None = 
     rerouted = _birth_landmark_is_the_owners(root, key, record)
     if rerouted is not None:
         return save_landmark(rerouted["domain"], rerouted,
-                             digest_override=digest_override)
+                             digest_override=digest_override,
+                             findings=findings)
 
     entry_key = landmarks_interaction.landmark_entry_key(record, row)
-    for existing in load_landmarks().get(key) or ():
-        if landmarks_interaction.landmark_entry_key(existing, row) == entry_key:
+    others = [entry for entry in (load_landmarks().get(key) or ())
+              if isinstance(entry, dict)
+              and landmarks_interaction.landmark_entry_key(entry, row) != entry_key]
+
+    # v349 rule 2: ONE ANSWER IS ONE ENTRY. A single substantive record that
+    # would retire more than one prior entry by shape is refused out loud, and
+    # the finding names the count — the number is the only part of the
+    # 2026-09-24 incident a log could have shown anybody.
+    refusals = landmarks_interaction.supersession_findings(others, record, row)
+    fanned_out = bool(refusals)
+    sources = landmark_projection.load_landmark_sources(root)
+
+    for existing in others:
+        reason = landmarks_interaction.supersession_reason(existing, record, row)
+        if reason is None:
             continue
-        if landmarks_interaction.entry_superseded_by(existing, record, row):
-            landmark_projection.retire_entry(
-                root,
-                domain=key,
-                entry_key=landmarks_interaction.landmark_entry_key(existing, row),
-                reason=(
-                    f"superseded by a later {key} answer "
-                    "(landmarks_interaction.entry_superseded_by)"
-                ),
-            )
+        retired_key = landmarks_interaction.landmark_entry_key(existing, row)
+        if reason == landmarks_interaction.SUPERSEDED_AS_COLLAPSED:
+            # The SHAPE rule, and the only one that carries guards. The two
+            # spoken rules — a `none`, a substantive answer over a standing
+            # terminal — are things the person said and are never held back.
+            if fanned_out:
+                continue
+            # v349 rule 1's last clause: an entry with a promoted source of
+            # its own is an entry somebody stated, and provenance outranks a
+            # merely SUGGESTIVE reading of its shape. Every one of the thirty
+            # residences retired on 2026-09-24 still had its own
+            # `sources/landmarks/entry-*.md` on disk while the rule was
+            # deciding it had been written by a machine that had many entries
+            # and filed one.
+            #
+            # A straddling span is the exception, and
+            # `landmarks_interaction.collapsed_by_a_straddling_span` says why:
+            # after the flip EVERY entry has a source, so a blanket provenance
+            # veto would retire rule 3 itself and leave v214's four-children
+            # row uncleanable forever.
+            stated = (
+                landmark_projection.entry_source_ids(
+                    sources, domain=key, entry_key=retired_key)
+                if not landmarks_interaction.collapsed_by_a_straddling_span(
+                    existing, row)
+                else set())
+            if stated:
+                refusals.append({
+                    "lint": landmarks_interaction.SUPERSESSION_STATED_LINT,
+                    "detail": (
+                        f"{key}/{retired_key} keeps standing: "
+                        f"{len(stated)} promoted source(s) of its own say the "
+                        f"person stated it, and "
+                        f"{landmarks_interaction.A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE}"
+                    ),
+                    "domain": key,
+                    "entry_keys": [retired_key],
+                    "count": 1,
+                })
+                continue
+        landmark_projection.retire_entry(
+            root,
+            domain=key,
+            entry_key=retired_key,
+            reason=(
+                f"superseded by a later {key} answer "
+                "(landmarks_interaction.entry_superseded_by)"
+            ),
+        )
+    if findings is not None:
+        findings.extend(refusals)
 
     filed = dict(record)
     filed.setdefault("domain", key)
@@ -1344,7 +1412,8 @@ def _retire_answered_timeline_candidates(domain: str, record: dict) -> list[str]
         return []
 
 
-def save_landmarks(domain: str, records: object) -> list[dict]:
+def save_landmarks(domain: str, records: object, *,
+                   findings: list | None = None) -> list[dict]:
     """File a whole recorder outcome — ONE entry per record (v214).
 
     The batch writer named by ADR 0028's many-records amendment: one answer
@@ -1358,7 +1427,7 @@ def save_landmarks(domain: str, records: object) -> list[dict]:
     saved = []
     for record in rows:
         if isinstance(record, dict) and not record.get("skipped"):
-            saved.append(save_landmark(domain, record))
+            saved.append(save_landmark(domain, record, findings=findings))
     return saved
 
 

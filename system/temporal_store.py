@@ -1236,6 +1236,27 @@ ORDERING_CONSTRAINT_TYPE = "ordering_constraint"
 #: reads exactly these — one correction machine, two kinds of target.
 CONSTRAINT_CORRECTION_SCOPE = "ordering_constraint"
 
+#: v349. The ``correction_scope`` a retraction carries when its target is
+#: another CORRECTION rather than a claim — one correction machine, now three
+#: kinds of target. A ``retract`` under this scope is a REINSTATEMENT: the
+#: marks the named corrections laid stop standing, and every claim they
+#: superseded is active again on the next fold.
+#:
+#: It exists because a defect retired thirty landmark entries the owner had
+#: stated (see `landmarks_interaction.A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE`)
+#: and the vault had no verb for *"that correction was not a correction"*.
+#: Undo is a STATEMENT here exactly as it is for a move: the 29 supersessions
+#: stay on disk with their reasons, and a reinstatement explains that they no
+#: longer stand. Nothing is edited and nothing is deleted.
+#:
+#: The fold stays order-independent because reinstatement is resolved as a SET
+#: before any mark is laid (:func:`_fold`) — not as a later writer beating an
+#: earlier one. A reinstatement of a reinstatement is deliberately not a thing:
+#: re-deciding that those claims should go needs a NEW supersession, whose own
+#: reason says why, which is the same rule
+#: :data:`CONSTRAINT_CORRECTION_SCOPE` holds a move to.
+CORRECTION_CORRECTION_SCOPE = "temporal_correction"
+
 #: FROZEN. What makes two moves the same move: the gesture's *meaning*, plus the
 #: record it replaces. Deliberately absent are the wall clock, the explanation,
 #: the device, and any idempotency token a host invented — a retried drag, a
@@ -1497,6 +1518,65 @@ def read_ordering_constraint(vault_root: str | Path, relative: str) -> dict | No
     normalized["relative_path"] = relative
     normalized["reason"] = _correction_reason(body)
     return normalized
+
+
+def reinstate_corrections(
+    vault_root: str | Path,
+    correction_ids: Iterable[str],
+    *,
+    reason: str,
+    title: str | None = None,
+    author: str | None = None,
+    occurred_at: object = None,
+) -> TemporalCorrection:
+    """"Those corrections were not corrections." One record, idempotent.
+
+    v349. Files ONE ``retract`` scoped to
+    :data:`CORRECTION_CORRECTION_SCOPE` naming every correction that stops
+    standing, so the claims they superseded are active again on the next fold.
+    The superseded corrections stay on disk with their own reasons — undo is a
+    statement, never a delete, exactly as it is for a move.
+
+    Deterministic and idempotent by construction: the targets are sorted by
+    :func:`_claim_id_list` and the record's id is
+    :func:`derive_correction_id` over what it SAYS, so re-filing the same
+    reinstatement finds its own existing file rather than minting a sibling.
+    """
+    targets = _claim_id_list(correction_ids)
+    if not targets:
+        raise TemporalStoreError(
+            "correction_claim_ids_required",
+            "a reinstatement names the corrections it voids",
+        )
+    for target in targets:
+        if not target.startswith(f"{CORRECTION_ID_PREFIX}:"):
+            raise TemporalStoreError(
+                "reinstate_target_not_a_correction",
+                f"a reinstatement names a correction id, not {target!r}",
+            )
+    return file_temporal_correction(
+        vault_root,
+        kind="retract",
+        claim_ids=targets,
+        reason=reason,
+        scope=CORRECTION_CORRECTION_SCOPE,
+        title=title or f"Reinstate {len(targets)} correction(s)",
+        author=author,
+        occurred_at=occurred_at,
+    )
+
+
+def reinstated_correction_ids(vault_root: str | Path) -> tuple[str, ...]:
+    """Every correction id a reinstatement has voided, sorted. v349.
+
+    What a repair verb reads to know what it has already done, so a second run
+    proposes nothing rather than re-filing.
+    """
+    found: set[str] = set()
+    for correction in load_temporal_corrections(vault_root):
+        if correction.scope == CORRECTION_CORRECTION_SCOPE and correction.kind == "retract":
+            found.update(correction.claim_ids)
+    return tuple(sorted(found))
 
 
 def retract_ordering_constraint(
@@ -2174,8 +2254,29 @@ def _fold(inputs: _FoldInputs) -> dict:
                     _mark("superseded", "superseded_by_claim", collapsed_text(row.get("claim_id")))
                 )
 
+    # v349. Reinstatement is resolved as a SET, before any mark is laid, so the
+    # fold stays a function of the corrections on disk and not of the order
+    # they were discovered in. A `retract` scoped to
+    # `CORRECTION_CORRECTION_SCOPE` names CORRECTIONS, never claims: the marks
+    # those corrections laid stop standing, which is how the vault says "that
+    # correction was not a correction" without editing or deleting a byte of
+    # it. See the scope's own note for the incident that needed the verb.
+    reinstated = {
+        collapsed_text(target)
+        for correction in correction_rows
+        if correction.get("scope") == CORRECTION_CORRECTION_SCOPE
+        and correction["kind"] == "retract"
+        for target in correction.get("claim_ids") or ()
+    }
+
     unresolved: set[str] = set()
     for correction in correction_rows:
+        if correction.get("scope") == CORRECTION_CORRECTION_SCOPE:
+            # It acts on corrections, not on claims. Its targets are not claim
+            # ids and must never be reported as unresolved ones.
+            continue
+        if correction["correction_id"] in reinstated:
+            continue
         status = STATUS_BY_CORRECTION_KIND[correction["kind"]]
         for target in correction.get("claim_ids") or ():
             if target not in entries:
@@ -2472,6 +2573,7 @@ def file_message_extraction(
 
 __all__ = [
     "CONSTRAINT_CORRECTION_SCOPE",
+    "CORRECTION_CORRECTION_SCOPE",
     "CONVERSATION_SOURCES_DIR",
     "CONVERSATION_SOURCE_TYPE",
     "CORRECTION_IDENTITY_KEYS",
@@ -2534,6 +2636,8 @@ __all__ = [
     "retract_ordering_constraint",
     "split_frontmatter",
     "store_path",
+    "reinstate_corrections",
+    "reinstated_correction_ids",
     "supersede_claims",
     "write_active_index",
     "write_receipt",

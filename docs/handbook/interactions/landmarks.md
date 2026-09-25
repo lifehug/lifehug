@@ -96,7 +96,15 @@ the person plainly stated more entries than came back. That branch never
 withholds: it files what it has, because a partial record is worth more than
 none. Each record lands as its own entry in the store, and the only prior
 entries a new one retires are a standing terminal and the collapsed aggregate
-— an entry carrying a field its own ladder has no rung for.
+— and since v349 "collapsed aggregate" means a DEMONSTRABLE one: a field the
+domain's own writer never emits, or a `span` the domain has no rung for whose
+bounds straddle a stretch. It used to mean any field the ladder could not read,
+which on 2026-09-24 retired thirty residence entries the owner had stated,
+because the writer itself emits four descriptors no residences rung asks for.
+**A stated entry is never retired by shape**: an entry with a promoted source of
+its own is never retired by the shape rule at all, and one substantive answer
+may retire at most ONE prior entry — a wider fan-out is refused out loud, with a
+finding naming the count.
 
 **The recorder knows what it already knows** (v216, ADR 0028 amendment). The
 same class again, from the other end: the recorder's prompt has told it
@@ -610,6 +618,8 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | The recorder (v212; v216 known entries) | `system/landmark_recorder.py` — `build_recorder_prompt`, `parse_recorder_output`, `record_answer`, `recordable_keys`; leaf `interactions/landmarks/prompt/recorder.md`. The already-filed block and the lints' names: `landmarks_interaction.render_known_entries`, `known_entry_labels`, `landmark_entries`, `render_entry`, `entry_name` |
 | Its blocking backstop (v212) | `landmarks_interaction.ANSWER_MUST_RECORD_LINT`, `answer_must_record`, `answer_shape`, `recording_reminder` |
 | Its retryable one (v214) | `landmarks_interaction.RECORD_EVERY_ENTRY_LINT`, `records_missing_entries`, `many_records_reminder`; filing `landmark_entry_key`, `entry_superseded_by`, `unreadable_fields`, `landmark_invocations` |
+| A stated entry is never retired by shape (v349) | `landmarks_interaction.A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE`, `supersession_reason` (the named rule: `SUPERSEDED_BY_NONE` / `SUPERSEDED_AS_TERMINAL` / `SUPERSEDED_AS_COLLAPSED`), `collapsed_aggregate_fields`, `writer_stored_fields`, `WRITER_DESCRIPTOR_FIELDS`, `supersession_findings`, `SUPERSESSION_FAN_OUT_LINT`, `SUPERSESSION_STATED_LINT`. The two guards live at the seat that can see the provenance: `timeline.save_landmark(findings=…)` |
+| Putting a wiped domain back (v349) | `lifehug.py landmark-reinstate --domain <d> [--since <ts>] [--until <ts>] --apply`; `landmark_projection.reinstate_domain`, `domain_supersessions`, `landmark_correction_scope`; `temporal_store.reinstate_corrections`, `reinstated_correction_ids`, `CORRECTION_CORRECTION_SCOPE`. Deterministic, idempotent, and it writes only `sources/corrections/` and `state/` — the ENTRIES come back because the store is a drawing |
 | The warrant a date carries (v222) | `chronology.date_argv` / `date_from_argv`, `WARRANT_FIELDS`, `date_flag_names`; `lifehug.py landmark-record --basis/--granularity/--confidence/--anchor/--provenance`, and the same five under `--start-` and `--end-` |
 | Two stays at one address (v277) | `landmarks_interaction.same_landmark_stay`, `entry_stay_interval`, `SEQUENCE_ENTRY_ABUT_MONTHS`; applied in the fold by `landmark_projection.stay_slots`, so the frontmatter key never moves and no promoted source is rewritten. `chronology.overlap_months` / `gap_months` are the one arithmetic behind it and behind `temporal_timeline`'s `residence_overlap` |
 | One home at a time (v277) | `temporal_timeline.RESIDENCE_MOVE_TOLERANCE_MONTHS`, `_residence_overlaps`, `compose_residence_overlap_question`; the work-item kind `residence_overlap`; retiring ONE stay is `landmark_projection.retire_entry(slot=…)` |
@@ -625,11 +635,46 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | Its ONE reading (v291, R6) | `system/landmark_reading.py`: `build_reading_prompt(text, landmarks=…, roster=…)` · `parse_reading(raw, text=…)` → `Reading(units, events, stories, unplaced, findings)` · `reading_extractor` (versioned by the leaf's own bytes) · `render_name_keys` / `render_date_shapes` / `render_span_nouns` / `render_estimation_marks` / `name_keys_for` / `date_shape_for` / `span_noun`. Leaf: `prompt/reading.md`; slot: `composition.reading`; role: `role.reading` (sonnet-class) |
 | Its retired extractor, now deleted (v287 shipped it, uncalled at v291, gone at v293/Cut 6h) | `system/go_dig_grammar.py` (the deterministic block grammar; no model) and `go_dig_writer.plan_import` were reachable ONLY through `landmark_offer.grammar_units`, which R6 (v291) took off the offer path and Cut 6h (v293) deleted along with `_date_dict` and `_grammar_block_quote` — neither `landmark_offer` nor `landmark_reading` names `go_dig_grammar` any more, by any route (`tests/test_landmark_offer.py::NoSecondCopyTests`). `go_dig_writer.record_unit` remains the writer seam `apply` uses; `go_dig_writer` itself and `go_dig_grammar.py` are Cut 7b's to delete |
 | The host-run reading protocol (v289 Cut 6c; v291 Cut 6f) | `host_reading_prompt(text, vault_root, model=, landmarks=, roster=)` → `{"reading": {"prompt", "model", "prompt_version"}}` · `propose_from_completions(text, vault_root, {"reading": <completion>}, ...)` → `propose`'s own return, writing the proposal · `host_completions_call(completions)` — the `call` it builds, which needs no dispatch because there is one prompt per submission (R9) · `load_host_context(path)` for `--context`'s `{landmarks, roster, generation}`. `host_listener_prompt` and `host_recorder_prompts` were DELETED at v291 with the passes they named |
-| The verbs | `lifehug.py landmark-record`, `lifehug.py landmark-offer --propose\|--apply\|--retract` (v287), `--propose --prompts\|--completions FILE [--context FILE]` (v289; ONE reading prompt and a `{"reading": …}` completion since v291), `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
-| Tests | `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_landmark_offer.py` (v287), `tests/test_landmark_offer_host.py` (v289), `tests/test_landmark_reading.py` (v291), `tests/test_go_dig.py`, `tests/test_roster_relations.py` and `tests/test_event_identity_i2b_containers.py` (v292) |
+| The verbs | `lifehug.py landmark-record`, `lifehug.py landmark-reinstate` (v349), `lifehug.py landmark-offer --propose\|--apply\|--retract` (v287), `--propose --prompts\|--completions FILE [--context FILE]` (v289; ONE reading prompt and a `{"reading": …}` completion since v291), `lifehug.py arc-plan-target --landmarks`, `lifehug.py landmarks-evals` |
+| Tests | `tests/test_v349_a_stated_entry_is_never_retired_by_shape.py` (v349), `tests/test_landmarks.py`, `tests/test_general_listener.py`, `tests/test_extraction_claims.py`, `tests/test_landmark_offer.py` (v287), `tests/test_landmark_offer_host.py` (v289), `tests/test_landmark_reading.py` (v291), `tests/test_go_dig.py`, `tests/test_roster_relations.py` and `tests/test_event_identity_i2b_containers.py` (v292) |
 
 ## 8. Decisions
 
+- **A stated entry is never retired by shape** (v349, 2026-09-24;
+  [ADR 0037's v349 amendment](../../adr/0037-the-spine-and-the-resolver.md)).
+  v214 gave filing one cross-entry rule with three legs, and its third —
+  "a clean record retires the collapsed aggregate" — tested the wrong thing.
+  It asked `unreadable_fields`, which answers *"which fields does no rung of
+  this domain read?"*, and treated the answer as proof of a machine that had
+  many entries and filed one. But the landmark WRITER itself emits five
+  descriptors no ladder asks for (`link`, `nickname`, `ongoing`, `place_ref`,
+  `note`, added by v278's E-L2c and declared to nothing), so every
+  place-enriched residence in the owner's vault carried that signature. On
+  2026-09-24 19:18 UTC a single bare answer — `{"address": "701 North
+  Williams", "label": "701 North Williams"}` — retired all thirty residence
+  entries he had stated, filed 29 supersessions over 89 claims, and dropped
+  every moment those stays had placed by containment (a marriage, a
+  graduation, a fall on a nail) back to unplaced with a card each. Three rules
+  now stand between a person's answer and that outcome: the shape rule may
+  fire only on a DEMONSTRABLE aggregate and its readable set is DERIVED from
+  the writer rather than listed by hand, so it cannot drift again; an entry
+  with a promoted source of its own is never retired by shape at all, because
+  provenance outranks any reading of a field list; and one substantive record
+  may retire at most ONE prior entry, because one answer is one entry — a
+  wider fan-out is refused with a finding naming the count, which is the only
+  part of that incident a log could have shown anybody. A `none` keeps its
+  whole-domain reach, because retiring the domain is exactly what it means.
+- **Undoing a correction is a statement, never a delete** (v349). A wiped
+  domain is repaired by `landmark-reinstate`, which files ONE `retract`
+  scoped to `temporal_store.CORRECTION_CORRECTION_SCOPE` naming the
+  supersessions that stop standing — one correction machine, now three kinds
+  of target, beside the constraint scope `timeline-move-undo` already used.
+  Every superseded correction stays on disk with its own reason; the claims go
+  active again; nothing writes an entry, because `state/landmarks.json` is a
+  drawing and the `sources/landmarks/entry-*.md` behind it were never touched.
+  The `--since` window is what keeps a repair surgical: a domain may hold
+  perfectly good supersessions from other days, and a verb that reinstated
+  those would be the same class of defect it exists to undo.
 - The **name is Landmarks** (owner-set, 2026-08-23) — product word, handbook
   word, package name, module name and CLI verb, so there is one name from the
   surface down to the file on disk. **`anchor` is the code term for a

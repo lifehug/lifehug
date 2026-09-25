@@ -593,6 +593,128 @@ amendment exists to refuse, so the row ships without one. And the appositive
 not read, deliberately: reading it would introduce the owner's father a THIRD
 time, under a third spelling, and hand "dad" back to nobody.
 
+## Amendment (v349, 2026-09-24): a stated entry is never retired by shape
+
+**What happened.** Staging, 19:18:10 UTC, hosted package pinned to v347
+(`48ddabdf`). The owner answered a `residences` landmark card. The job filed
+one source whose whole body is
+
+```json
+{"address":"701 North Williams","domain":"residences","label":"701 North Williams"}
+```
+
+and commit `398b85df` "Landmark: residences (Lifehug Cloud)" retired **all 30**
+existing residence entries with it. `state/landmarks.json` residences went
+30 → 1. Twenty-nine `sources/corrections/temporal-*.md` were filed, each
+*"Supersede N temporal claim(s) … superseded by a later residences answer
+(landmarks_interaction.entry_superseded_by)"*, `correction_scope:
+landmarks/residences`, 89 claims in all. The published projection went
+generation 152 → 153: nodes 1190 → 1161, unplaced 35 → 117, open work items
+45 → 154. Every moment those stays had placed by containment — "Attended
+Longfellow Elementary", "Fell on a nail", "Marriage to Katie", "Job at Boeing",
+"Graduation from MIT", the whole childhood-moves sequence — fell to unplaced and
+minted a card. Later residence answers ("dad's house", "Fiegers' house") filed
+normally, so the wipe happened once: on the first substantive answer after the
+pin. `work` at 19:03 and `partnerships` at 19:39 did not wipe their domains.
+
+**What it was, and it is not what it looked like.** Nothing in v343–v347 broke.
+Running `unreadable_fields` over the 30 real entries and the residences row at
+v278, v342, v343, v345, v346, v347 and v348 returns the identical answer every
+time, and `entry_superseded_by` returns `True` for 30 of 30 at every one of
+them. The defect is **v278** (`8030d26`, E-L2c) meeting **v214** (`eb50e89`,
+the cross-entry rule). Before E-L2c, `validate_landmark` on a rich residence
+emitted `{address, city, domain, label, span}` and `unreadable_fields` returned
+`()`. After it, the same value emits `{…, link, nickname, ongoing, place_ref}`
+— five new descriptors, declared to `NON_RUNG_FIELDS` not at all — and
+`unreadable_fields` returns four. v214's rule 3 read those four as the signature
+of *"a machine that had many entries and filed one"* for sixty-four releases,
+waiting only for a residences record lean enough to have none of them itself.
+The 09-15 place-enriched import armed it; the 19:18 bare answer fired it.
+`work` and `partnerships` were spared only because no entry of theirs carried a
+descriptor, so `unreadable_fields` was `()` on both sides and the rule could
+not fire at all.
+
+The ladder-consistency guard exists to catch exactly this and did not, because
+its probe (`tests/test_landmarks.py`, leg 4) is a hand-written `everything`
+dict that E-L2c never joined. The guard never asked about the five fields, its
+pinned `UNREAD` set stayed at six `(domain, field)` pairs, and CI was green
+throughout. That is the recurring-defect doctrine's own failure mode: a
+centralized definition (`unreadable_fields`, promoted onto the module by v214)
+whose *inputs* are still a hand list.
+
+**The rule.** `landmarks_interaction.A_STATED_ENTRY_IS_NEVER_RETIRED_BY_SHAPE`.
+`entry_superseded_by` becomes a yes/no reading of `supersession_reason`, which
+names which of the three legs fired (`SUPERSEDED_BY_NONE`,
+`SUPERSEDED_AS_TERMINAL`, `SUPERSEDED_AS_COLLAPSED`) — because the two SPOKEN
+legs are things the person said and carry no further guard, and the SHAPE leg
+is the one that needs them.
+
+1. **Only a demonstrable aggregate.** `collapsed_aggregate_fields` replaces
+   `unreadable_fields` at rule 3. A field is evidence of a collapse only when
+   it is one the domain's own writer never emits, or a `span` the domain has no
+   rung for whose bounds straddle a stretch — which is v214's live instance
+   exactly, the founder's four children as one row with a span across all four
+   birthdays, and which a single child's own single-date span is not. The
+   readable set is DERIVED: `writer_stored_fields` runs `validate_landmark`
+   itself over `_writer_probe_value`, built from `_TEXT_CAPS`,
+   `WRITER_DESCRIPTOR_FIELDS` and the row's ladder and from no hand list at
+   all, and `validate_landmark` now drops any field not in that same
+   declaration, so the writer and the store cannot drift apart again. The
+   pinned six-pair slack is unchanged, and is now reproduced from the derived
+   probe — which is the proof that the two probes agree.
+2. **Provenance outranks shape.** An entry with a promoted source of its own is
+   never retired by rule 3, whatever its fields look like. Every one of the
+   thirty still had its `sources/landmarks/entry-*.md` on disk while the rule
+   was deciding a machine had written it. The guard lives in
+   `timeline.save_landmark`, the seat that can see the sources.
+3. **One answer is one entry.** A single substantive record whose shape rule
+   would retire more than one prior entry retires **nothing**, and the refusal
+   is spoken: `supersession_findings` returns a finding in
+   `lint_landmark_reply`'s shape naming the count
+   (`SUPERSESSION_FAN_OUT_LINT`), which `save_landmark` appends to an optional
+   `findings` list. A count is the only part of this incident a log could have
+   shown anybody. A `none` is exempt and always will be — retiring the whole
+   domain is what "I never served" means, so its fan-out is the point rather
+   than a symptom. The record itself always files: a rule that cannot decide
+   what it retires is no reason to drop what the person said.
+
+**The repair, as a package verb.** `lifehug.py landmark-reinstate --domain
+<domain> [--since <ts>] [--until <ts>] --apply`
+(`landmark_projection.reinstate_domain`). Undo is a **statement**, never a
+delete, exactly as it is for a move: it files ONE `retract` correction scoped
+to `temporal_store.CORRECTION_CORRECTION_SCOPE` naming every supersession that
+stops standing, and the fold resolves reinstatement as a SET before any mark is
+laid, so it stays order-independent. The superseded corrections keep every byte
+and every reason. The claims go active again. **Nothing writes an entry** — the
+entries come back because `state/landmarks.json` is a drawing and the sources
+behind it were never touched, which is the invariant this ADR's flip
+established. It writes `sources/corrections/` and `state/` and nothing else, it
+is deterministic (targets selected and sorted by content, never by mtime), and
+it is idempotent twice over: the correction's id is a digest of what it says,
+and `domain_supersessions` excludes what a previous run already reinstated, so
+a second `--apply` reports nothing to do. A bare run writes nothing and prints
+the plan. The `--since` window is what keeps it surgical — a domain may hold
+perfectly good supersessions from other days, and a verb that reinstated those
+would be the same class of defect it exists to undo.
+
+**Measured** on a copy of the owner's staging vault: residences drawn 3 → 33
+(the 30 restored plus the three later answers, all kept), residence stays
+carrying a usable interval 0 → 30, containment placements
+(`participation_span_applied`) 31 → 61, unplaced 51 → 32, open work items
+76 → 48, nodes 1203 → 1233, projection generation 164 → 165, one file written
+under `sources/corrections/`.
+
+**Not this release's defect, and named so it is not mistaken for one.** The
+`landmark_flip: … parked=6 codes=invalid_landmark_identity_kind` line on every
+hosted job is a separate, stable, pre-existing condition and is unrelated to
+the wipe. It is `temporal_claims._validated_landmark_identity_kind` refusing
+six records whose `landmark_identity_kind` annotation (attached by
+`landmark_projection.entry_claims` when a place's name ENUMERATES — a label
+with commas, which most residences have) does not carry the deterministic
+import provenance ADR 0033 requires. Those six never acquired claims at all,
+which is the likeliest reason 29 corrections covered 30 entries. The wipe was
+rule 3 and nothing else; the parked records are their own issue.
+
 ## Consequences
 
 - The classifier's validator is no longer the place where placement is won or
