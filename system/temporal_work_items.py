@@ -512,11 +512,17 @@ PRECISION_STAKES_WINDOW_MONTHS = 12
 #: freestanding anecdote arrives as, and that exclusion is the whole gate: the
 #: mid-anger hug with James is a `moment`, and the father's mission is not.
 #:
-#: NAMED GAP, not a silent one: the vocabulary has no kind for a baptism or a
-#: mission today, so both arrive as `moment` and neither is recognised here.
-#: The day a kind for either is seeded upstream it is recognised with no edit,
-#: which is the point of reading the seed tuple instead of re-typing the
-#: ruling's list.
+#: THE GAP THIS USED TO NAME IS CLOSED (v356, owner ruling 2026-09-25: *"a
+#: mission is a span like military service ...; a baptism is a discreet event
+#: on a date"*). `mission` and `baptism` are seeded in
+#: `temporal_claims.EVENT_KINDS` — `mission` as the `missions` ladder's
+#: participation episode, `baptism` as the `baptism` ladder's date semantic —
+#: and are recognised here with no edit, which is the point of reading the
+#: seed tuple instead of re-typing the ruling's list. A mission TOLD as an
+#: anecdote the classifier read (*"Father's mission to New Zealand"*) still
+#: arrives as `moment` and still has no card of its own; what carries the kind
+#: is a landmark entry, which the person's mention is what opens
+#: (`landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION`).
 LIFE_EVENT_KINDS = tuple(sorted(set(tc.EVENT_KINDS) | {"residence"}))
 
 #: WHY A DATE CARD WAS NOT MINTED. A closed vocabulary, like every other

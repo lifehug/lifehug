@@ -958,6 +958,8 @@ and the part someone else can help finish.
 | 9 | "Do you have children? What are their birthdays?" | children's births | month-grain anchors that also date the *other* person's whole timeline | **month** | **O** |
 | 10 | "What work have you done? Roughly what years?" | job spans | parallel-domain cue (Belli); the "what were you doing for work then" rung | **year, hedged** — never month (§2.4) | **L** |
 | 11 | "Did you serve in the military? When?" | service span | sharply bounded, institutionally dated | month | **L** |
+| 11a | "Did you serve a mission? When did you leave, and when did you come home?" (v356) | mission span — LDS full-time service, ~2 years (men) / 18 months (women), begun 18–25; departure, MTC, assigned areas, return | sharply bounded like service; contains the MTC and area stays | month | **L — only once mentioned** |
+| 11b | "Were you baptized? Roughly when?" (v356) | baptism — one dated ordinance, conventionally at eight or at conversion | a point; age arithmetic off the birthday | day | **L — only once mentioned** |
 | 12 | "Who have you lost, and when?" | deaths | high-salience *terminus ante quem*; usually exact | year, often month | **L** — never at onboarding |
 | 13 | "Was there a move that changed everything — a country, a coast?" | major migration | a transition in Brown's sense; usually splits the life in two | year | **L** |
 | 14 | "Was there a year that was hard — an illness, an accident, something that stopped things?" | health/rupture | the person's own strongest landmark, if they offer it | year | **L** — offered, never demanded |

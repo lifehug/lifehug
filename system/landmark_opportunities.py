@@ -178,6 +178,10 @@ REASON_BELOW_THRESHOLD = "below_threshold"  # the best remaining gap is not wort
 REASON_NOTHING_REMAINING = "nothing_remaining"  # the graph names no gap at all
 REASON_LIST_FINISHED = "list_declared_finished"  # a closed list the person closed
 REASON_OFFER_ONLY = "offer_only"           # sensitive, and the subject was not raised
+#: v356 — an ``offered: on_mention`` domain the vault has never mentioned
+#: (`landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION`). Its ladder is not
+#: live, so there is nothing to be privileged about by construction.
+REASON_NOT_MENTIONED = "not_mentioned"
 
 SUFFICIENCY_REASONS = (
     REASON_OPEN,
@@ -185,6 +189,7 @@ SUFFICIENCY_REASONS = (
     REASON_NOTHING_REMAINING,
     REASON_LIST_FINISHED,
     REASON_OFFER_ONLY,
+    REASON_NOT_MENTIONED,
 )
 
 #: ``episode event kind -> landmark domain``, INVERTED from
@@ -205,6 +210,7 @@ SPAN_END_TEXTS = {
     "work": "When did you leave {label}?",
     "schools": "When did you finish at {label}?",
     "military": "When did you come out of the {label}?",
+    "missions": "When did you come home from {label}?",
 }
 
 #: R-Q2. The mirror image: the stay is closed at the far end and open at the
@@ -214,6 +220,7 @@ SPAN_START_TEXTS = {
     "work": "When did you start at {label}?",
     "schools": "When did you start at {label}?",
     "military": "When did you go into the {label}?",
+    "missions": "When did you leave for {label}?",
 }
 
 #: The two ambiguity kinds the containment rung mints, and the domain each one
@@ -286,6 +293,33 @@ def _projection_parts(projection: object) -> tuple[list, list, dict]:
     index = row.get("dependency_index")
     index = dict(index) if isinstance(index, dict) else {}
     return nodes, items, index
+
+
+def graph_mentioned_domains(projection: object, *,
+                            framework_root: object = None) -> frozenset:
+    """The ``on_mention`` domains the GRAPH itself already holds an event of.
+
+    A node whose event kind is a domain's own — its participation episode
+    (``mission`` for ``missions``, :data:`DOMAIN_BY_EPISODE_KIND`) or one of
+    its point date semantics (``baptism``) — is that subject already raised:
+    something of that kind is on the person's timeline, so the ladder that
+    dates it is live (`landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION`).
+    """
+    nodes, _items, _index = _projection_parts(projection)
+    kinds = {collapsed_text(node.get("event_kind")) for node in nodes}
+    kinds.discard("")
+    if not kinds:
+        return frozenset()
+    found: set[str] = set()
+    for row in li.load_questions(framework_root):
+        if row.get("offered") != li.OFFERED_ON_MENTION:
+            continue
+        own = {kind for kind in li.date_semantics(row) if kind != "span"}
+        own |= {kind for kind, domain in DOMAIN_BY_EPISODE_KIND.items()
+                if domain == row["domain"]}
+        if own & kinds:
+            found.add(row["domain"])
+    return frozenset(found)
 
 
 def _domains_state(landmarks_state: object) -> dict:
@@ -766,12 +800,19 @@ def candidates(projection: object, landmarks_state: object, roster: object = (),
 
 
 def sufficiency(rows: object, state: object = None, *, threshold: object = None,
-                raised: object = (), framework_root: object = None) -> dict:
-    """``{domain: {sufficient, best_leverage, reason}}`` over ALL nine domains.
+                raised: object = (), mentioned: object = (),
+                framework_root: object = None) -> dict:
+    """``{domain: {sufficient, best_leverage, reason}}`` over EVERY declared domain.
 
     THE RULE (R2). A domain is **sufficient** when nothing it holds is worth a
     privileged surface, and the branches say which kind of nothing it is:
 
+    0. (v356) A domain whose ladder is **not live** — ``not_mentioned``. An
+       ``offered: on_mention`` domain (missions, baptism) the vault has never
+       mentioned and holds no entry in
+       (`landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION`). ``mentioned``
+       names the domains the record does mention, and ``raised`` counts as a
+       mention too.
     1. A **sensitive** domain nobody has raised — ``offer_only``. Losses are
        offered, never asked (§4.6), and that is not a judgement about their
        leverage, which is published beside it either way.
@@ -801,6 +842,10 @@ def sufficiency(rows: object, state: object = None, *, threshold: object = None,
     """
     bar = _threshold(threshold)
     wanted = {collapsed_text(name) for name in (raised or ()) if collapsed_text(name)}
+    # v356: a domain the person RAISED is mentioned by definition — the losses
+    # rule's word and the on-mention rule's word are one act.
+    heard = wanted | {collapsed_text(name) for name in (mentioned or ())
+                      if collapsed_text(name)}
     domains = _domains_state(state)
     by_domain: dict = {}
     for row in rows or ():
@@ -813,7 +858,9 @@ def sufficiency(rows: object, state: object = None, *, threshold: object = None,
         best = max((int(r["leverage"]) for r in found), default=0)
         graph_best = max((int(r["leverage"]) for r in found
                           if r["kind"] in GRAPH_KINDS), default=0)
-        if row.get("sensitive") and domain not in wanted:
+        if not li.domain_is_live(row, domains.get(domain) or (), mentioned=heard):
+            verdict, reason = True, REASON_NOT_MENTIONED
+        elif row.get("sensitive") and domain not in wanted:
             verdict, reason = True, REASON_OFFER_ONLY
         elif not found:
             verdict, reason = True, REASON_NOTHING_REMAINING
@@ -832,7 +879,7 @@ def sufficiency(rows: object, state: object = None, *, threshold: object = None,
 
 def landmark_opportunities(projection: object, landmarks_state: object,
                            roster: object = (), *, threshold: object = None,
-                           raised: object = (),
+                           raised: object = (), mentioned: object = (),
                            owner: object = twi.OWNER_SUBJECT_REF,
                            framework_root: object = None) -> list[dict]:
     """The opportunities a host may surface. **A sufficient domain has none.**
@@ -844,21 +891,24 @@ def landmark_opportunities(projection: object, landmarks_state: object,
     returned.
     """
     return surface(projection, landmarks_state, roster, threshold=threshold,
-                   raised=raised, owner=owner, framework_root=framework_root)[0]
+                   raised=raised, mentioned=mentioned, owner=owner,
+                   framework_root=framework_root)[0]
 
 
 def landmark_sufficiency(projection: object, landmarks_state: object,
                          roster: object = (), *, threshold: object = None,
-                         raised: object = (),
+                         raised: object = (), mentioned: object = (),
                          owner: object = twi.OWNER_SUBJECT_REF,
                          framework_root: object = None) -> dict:
     """:func:`sufficiency` over this projection's own candidates."""
     return surface(projection, landmarks_state, roster, threshold=threshold,
-                   raised=raised, owner=owner, framework_root=framework_root)[1]
+                   raised=raised, mentioned=mentioned, owner=owner,
+                   framework_root=framework_root)[1]
 
 
 def surface(projection: object, landmarks_state: object, roster: object = (),
             *, threshold: object = None, raised: object = (),
+            mentioned: object = (),
             owner: object = twi.OWNER_SUBJECT_REF,
             framework_root: object = None) -> tuple[list, dict]:
     """``(opportunities, sufficiency)`` in ONE pass over the graph.
@@ -873,8 +923,10 @@ def surface(projection: object, landmarks_state: object, roster: object = (),
     bar = _threshold(threshold)
     found = candidates(projection, landmarks_state, roster, owner=owner,
                        framework_root=framework_root)
+    heard = set(mentioned or ()) | graph_mentioned_domains(
+        projection, framework_root=framework_root)
     verdicts = sufficiency(found, landmarks_state, threshold=bar, raised=raised,
-                           framework_root=framework_root)
+                           mentioned=heard, framework_root=framework_root)
     offered = [row for row in found
                if row["leverage"] >= bar
                and not verdicts.get(row["domain"], {}).get("sufficient", True)]
@@ -892,6 +944,7 @@ __all__ = [
     "REASON_BELOW_THRESHOLD",
     "REASON_LIST_FINISHED",
     "REASON_NOTHING_REMAINING",
+    "REASON_NOT_MENTIONED",
     "REASON_OFFER_ONLY",
     "REASON_OPEN",
     "SENSITIVITY_OFFER_ONLY",
@@ -903,6 +956,7 @@ __all__ = [
     "candidates",
     "default_threshold",
     "gain_for",
+    "graph_mentioned_domains",
     "landmark_opportunities",
     "landmark_sufficiency",
     "opportunity_id",

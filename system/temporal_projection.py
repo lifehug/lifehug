@@ -425,6 +425,8 @@ LANES_BY_EVENT_KIND = {
     "job": "worked",
     "school": "schooled",
     "military": "worked",
+    # v356: a mission is service, drawn where `military` is.
+    "mission": "worked",
 }
 
 #: The lanes themselves, in the order §9.2 names them.

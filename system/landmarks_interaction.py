@@ -82,9 +82,9 @@ QUESTIONS_FILE = "questions.yaml"
 
 #: Every field a domain row carries, and how it is coerced.
 _TEXT_FIELDS = ("ask", "complete_at", "precision", "why",
-                "collection", "closure", "identity_kind")
+                "collection", "closure", "identity_kind", "offered")
 _BOOL_FIELDS = ("onboarding", "sensitive", "per_entry_ladder")
-_LIST_FIELDS = ("ladder", "unlocks", "date_semantics")
+_LIST_FIELDS = ("ladder", "unlocks", "date_semantics", "mentioned_by")
 
 # --------------------------------------------------------------------------
 # Cardinality is DATA, not a flag (v219, lifehug-platform#664; audited
@@ -132,7 +132,14 @@ IDENTITY_KINDS = ("person", "organization", "place", "relationship_edge",
 #: than a point, which is why :func:`dates_each_entry` can read this field
 #: instead of re-deriving the same judgment from the ladder.
 DATE_SEMANTICS = ("birth", "death", "first_met", "dating_started", "married",
-                  "started", "ended", "transition", "span")
+                  "started", "ended", "transition", "span", "baptism")
+
+#: v356 — WHEN a domain's ladder is live at all. ``always`` is every domain
+#: before v356 and the default when a row declares nothing; ``on_mention`` is
+#: :data:`A_LADDER_OPENS_ON_A_MENTION`.
+OFFERED_ALWAYS = "always"
+OFFERED_ON_MENTION = "on_mention"
+OFFERED = (OFFERED_ALWAYS, OFFERED_ON_MENTION)
 
 
 def is_multi_entry(row: object) -> bool:
@@ -241,6 +248,12 @@ def load_questions(framework_root: str | Path | None = None) -> tuple[dict, ...]
                 f"landmark domain {domain!r} completes at {row['complete_at']!r}, "
                 "which is not on its ladder"
             )
+        row["offered"] = row["offered"] or OFFERED_ALWAYS
+        row["mentioned_by"] = tuple(
+            key for key in (mention_key(phrase) for phrase in row["mentioned_by"])
+            if key
+        )
+        _validate_offered(row)
         _validate_cardinality(row)
         # v219: DERIVED BACKWARD and deprecated. `chain` used to be the
         # declaration; it is now one consequence of `closure`, kept on the row
@@ -251,6 +264,29 @@ def load_questions(framework_root: str | Path | None = None) -> tuple[dict, ...]
         row["chain"] = row["closure"] == "user_completable"
         rows.append(row)
     return tuple(rows)
+
+
+def _validate_offered(row: dict) -> None:
+    """``offered`` is in vocabulary, and ``mentioned_by`` is declared exactly
+    where it is read — checked BOTH ways, like ``identity_kind``.
+
+    A domain that opens on a mention and names no mention could never open,
+    which is a ladder nobody can reach; a phrase list on an ``always`` domain
+    would be read by nothing, which is a declaration that lies.
+    """
+    domain = row["domain"]
+    if row["offered"] not in OFFERED:
+        raise LandmarkInteractionError(
+            f"landmark domain {domain!r} declares offered {row['offered']!r}, "
+            f"which is not one of {OFFERED}")
+    if row["offered"] == OFFERED_ON_MENTION and not row["mentioned_by"]:
+        raise LandmarkInteractionError(
+            f"landmark domain {domain!r} opens on a mention but declares no "
+            "mentioned_by phrases")
+    if row["offered"] != OFFERED_ON_MENTION and row["mentioned_by"]:
+        raise LandmarkInteractionError(
+            f"landmark domain {domain!r} declares mentioned_by but is offered "
+            f"{row['offered']!r}, so nothing would read it")
 
 
 def _validate_cardinality(row: dict) -> None:
@@ -314,6 +350,101 @@ def onboarding_domains(framework_root: str | Path | None = None) -> tuple[str, .
     """The domains asked at onboarding, in order (owner ruling 1)."""
     return tuple(row["domain"] for row in load_questions(framework_root)
                  if row["onboarding"])
+
+
+# --------------------------------------------------------------------------
+# A ladder that opens on a mention (v356, owner ruling 2026-09-25)
+# --------------------------------------------------------------------------
+
+#: The owner's ruling, verbatim (2026-09-25), and the rule it became.
+#:
+#:     "a mission is a span like military service look up lds or mormon
+#:     mission for context; a baptism is a discreet event on a date; both
+#:     should not get default landmark questions but if mentioned should
+#:     enable landmark questions"
+#:
+#: THIS module owns "which ladders are live for this vault", and this is the
+#: one place it is decided: :func:`domain_is_live` is the predicate and
+#: :func:`live_domains` / :func:`landmark_rows` its readers, so the Landmarks
+#: Play, the Timeline's landmark ledger, the plan verb and
+#: `landmark_opportunities.sufficiency` can never disagree about whether a
+#: mission ladder exists.
+A_LADDER_OPENS_ON_A_MENTION = (
+    "a domain declared `offered: on_mention` adds no question to a vault that "
+    "has never mentioned it: its ladder is live only once the person has "
+    "raised the subject — an entry filed in the domain (a `none` included), "
+    "or one of the domain's `mentioned_by` phrases in their own record — and "
+    "from then on it is offered exactly as if they had asked for it"
+)
+
+_MENTION_KEY_RE = re.compile(r"[^0-9a-z]+")
+
+
+def mention_key(text: object) -> str:
+    """Casefolded words joined by single spaces — the one normal form a
+    ``mentioned_by`` phrase and a piece of the person's record are compared
+    in, so "two-year mission" and "Two year mission" are one phrase and
+    "Baptist" is never "baptism"."""
+    return " ".join(_MENTION_KEY_RE.sub(" ", str(text or "").casefold()).split())
+
+
+def mentioned_domains(texts: object, *,
+                      framework_root: str | Path | None = None) -> frozenset[str]:
+    """The ``on_mention`` domains the person's own words name.
+
+    ``texts`` is any iterable of strings from the vault's own record — event
+    labels, claim mentions, the quotes they were read out of. A phrase counts
+    when it occurs as whole words (:func:`mention_key` on both sides, padded),
+    so a substring inside a longer word is never a mention. Pure; the caller
+    decides which words are the record.
+    """
+    rows = [row for row in load_questions(framework_root)
+            if row.get("offered") == OFFERED_ON_MENTION]
+    if not rows:
+        return frozenset()
+    if isinstance(texts, str):
+        texts = (texts,)
+    found: set[str] = set()
+    for text in texts or ():
+        haystack = f" {mention_key(text)} "
+        if haystack == "  ":
+            continue
+        for row in rows:
+            if row["domain"] in found:
+                continue
+            if any(f" {phrase} " in haystack for phrase in row["mentioned_by"]):
+                found.add(row["domain"])
+        if len(found) == len(rows):
+            break
+    return frozenset(found)
+
+
+def domain_is_live(row: object, entries: object = (), *,
+                   mentioned: object = ()) -> bool:
+    """:data:`A_LADDER_OPENS_ON_A_MENTION` — is this domain's ladder live?
+
+    ``always`` domains are live unconditionally, which is every domain before
+    v356. An ``on_mention`` domain is live when anything is filed in it — a
+    filed entry, a ``none`` included, is the person having raised it — or when
+    it is in ``mentioned`` (:func:`mentioned_domains`' answer).
+    """
+    if not isinstance(row, dict):
+        return False
+    if (row.get("offered") or OFFERED_ALWAYS) != OFFERED_ON_MENTION:
+        return True
+    if any(isinstance(entry, dict) for entry in (entries or ())):
+        return True
+    return row.get("domain") in {str(name) for name in (mentioned or ())}
+
+
+def live_domains(landmarks: object = None, *, mentioned: object = (),
+                 framework_root: str | Path | None = None) -> tuple[str, ...]:
+    """Every domain whose ladder is live for this vault, in question-set order."""
+    filed = landmarks if isinstance(landmarks, dict) else {}
+    return tuple(
+        row["domain"] for row in load_questions(framework_root)
+        if domain_is_live(row, filed.get(row["domain"]) or (), mentioned=mentioned)
+    )
 
 
 # --------------------------------------------------------------------------
@@ -443,6 +574,14 @@ RUNG_TEXTS = {
     ("losses", "happened"): "Is there someone you have lost that belongs on this?",
     ("losses", "who"): "Who was that?",
     ("losses", "year"): "Roughly when did you lose {label}?",
+    # v356 — both live only once mentioned (A_LADDER_OPENS_ON_A_MENTION).
+    ("missions", "happened"): "Did you serve a mission?",
+    ("missions", "where"): "Where did you serve?",
+    ("missions", "span"): "When did you leave for {label}, and when did you come home?",
+    ("baptism", "happened"): "Were you baptized?",
+    ("baptism", "year"): "Roughly when were you baptized?",
+    ("baptism", "month"): "Do you remember the month you were baptized?",
+    ("baptism", "day"): "And the day?",
 }
 
 #: The DISTINCT events a domain dates, as distinct asks (audited plan §2.2).
@@ -469,6 +608,8 @@ EVENT_QUESTION_TEXTS = {
     ("military", "span"):
         "When did you go into the {label}, and when did you come out?",
     ("losses", "death"): "Roughly when did you lose {label}?",
+    ("missions", "span"):
+        "When did you leave for {label}, and when did you come home?",
 }
 
 
@@ -1106,19 +1247,27 @@ LANDMARK_STATUSES = ("open", "partial", "complete")
 
 
 def landmark_rows(landmarks: object, *, keystone_domains: object = (),
+                  mentioned: object = (),
                   framework_root: str | Path | None = None) -> tuple[dict, ...]:
-    """Every domain with its status and its next question.
+    """Every LIVE domain with its status and its next question.
 
     This is what a host renders: ONLY the rows whose status is not
     ``complete`` are offerable, and each carries the exact next question so
     the surface never has to invent one. ``keystone: true`` marks the domain
     holding the highest-leverage anchor — the star moves with it.
+
+    v356: a domain whose ladder is not live (:func:`domain_is_live`,
+    :data:`A_LADDER_OPENS_ON_A_MENTION`) has NO row at all — not a row marked
+    closed — so no host can offer a mission ladder to a vault that never
+    mentioned one. ``mentioned`` is :func:`mentioned_domains`' answer.
     """
     filed = landmarks if isinstance(landmarks, dict) else {}
     starred = {str(k).strip() for k in (keystone_domains or ()) if str(k).strip()}
     rows: list[dict] = []
     for row in load_questions(framework_root):
         entries = filed.get(row["domain"]) or ()
+        if not domain_is_live(row, entries, mentioned=mentioned):
+            continue
         status = status_for_domain(entries, row)
         question = next_rung(entries, row)
         rows.append({
@@ -2642,6 +2791,8 @@ ANCHOR_KINDS = {
     "work": "period",
     "military": "period",
     "losses": "landmark",
+    "missions": "period",
+    "baptism": "landmark",
 }
 
 
@@ -3584,13 +3735,15 @@ DEFAULT_LANDMARK_PLAN_SIZE = 6
 
 def build_landmarks_plan(landmarks: object, *, keystone_domains: object = (),
                          limit: int = DEFAULT_LANDMARK_PLAN_SIZE,
+                         mentioned: object = (),
                          framework_root: str | Path | None = None) -> dict:
     """One Play's worth of open landmarks, best first.
 
     ``{"count", "complete", "items": [{domain, status, rung, text, keystone}]}``
+    — over the LIVE domains only (:func:`landmark_rows`, v356).
     """
     rows = landmark_rows(landmarks, keystone_domains=keystone_domains,
-                         framework_root=framework_root)
+                         mentioned=mentioned, framework_root=framework_root)
     offerable = open_landmarks(rows)
     items = []
     for row in offerable[:max(int(limit), 0)]:
@@ -3965,6 +4118,7 @@ def main(argv: list[str] | None = None) -> int:
     plan = build_landmarks_plan(
         timeline.load_landmarks(),
         keystone_domains=starred,
+        mentioned=timeline.mentioned_landmark_domains(data),
         limit=args.limit if args.limit is not None else DEFAULT_LANDMARK_PLAN_SIZE,
     )
     if args.json:

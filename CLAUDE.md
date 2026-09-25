@@ -82,6 +82,14 @@ Missing literal same-subject date/age proof returns null grounding independently
 of a valid relative link. This instruction clarification does not invalidate
 cached results or change validator policy, context/prompt, extractor, or schema versions.
 
+**A mission is a span, a baptism is a day (v356).** `missions` (a stretch like
+`military`) and `baptism` (one dated point, the owner's) are landmark domains
+declared `offered: on_mention`: they add no question until the vault mentions
+one — a filed entry, a `mentioned_by` phrase in the person's own record, or a
+node of that kind. `landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION` decides
+which ladders are live; never offer either ladder by hand to a vault that has
+not raised it.
+
 ## First Session: Setup
 
 If there are no project-specific categories in `system/question-bank.md` (only A-E), this is a new user. Run the setup flow:

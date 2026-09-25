@@ -391,6 +391,8 @@ class WriterDerivationTest(unittest.TestCase):
             ("birth", "label"), ("birth", "span"), ("family", "span"),
             ("partnerships", "span"), ("children", "span"),
             ("losses", "span"),
+            # v356: a singleton point, exactly like `birth`.
+            ("baptism", "label"), ("baptism", "span"),
         })
 
     def test_the_descriptors_are_exactly_what_the_writer_emits(self) -> None:

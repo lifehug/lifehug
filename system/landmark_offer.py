@@ -254,6 +254,8 @@ UNIT_KIND_BY_DOMAIN = {
     "work": "tenure",
     "military": "service",
     "losses": "loss",
+    "missions": "mission",
+    "baptism": "baptism",
 }
 
 #: The unit kind of text that is not a landmark at all (R3a: non-landmark
@@ -271,12 +273,15 @@ STORY_KIND = "story"
 #: Deliberately partial. `birth` is absent because a birth event is the
 #: owner's, a sibling's or a child's and the kind alone cannot say which;
 #: guessing there is exactly the fabrication this mode exists to avoid.
+#: `baptism` (v356) is absent for the same reason: the one baptism the owner's
+#: own vault mentions is his daughter's, and the `baptism` ladder is his.
 DOMAIN_BY_EVENT_KIND = {
     "move": "residences",
     "job": "work",
     "school": "schools",
     "graduation": "schools",
     "military": "military",
+    "mission": "missions",
     "child_born": "children",
     "loss": "losses",
     "death": "losses",

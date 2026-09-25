@@ -229,6 +229,9 @@ RELATION_ANCHOR_ARITY = {
 LANDMARK_DATE_SEMANTICS = (
     "birth", "death", "first_met", "dating_started", "married",
     "started", "ended", "transition", "span",
+    # v356 (owner ruling 2026-09-25): "a baptism is a discreet event on a
+    # date" — a POINT, dated by the `baptism` ladder like a birth.
+    "baptism",
 )
 
 #: SEED set, not a closed one — plan §5.1 ends its list with ``...``. It is
@@ -245,6 +248,9 @@ EVENT_KINDS = LANDMARK_DATE_SEMANTICS + (
     "engaged", "separated", "divorced", "reconciled",
     # the §5.1 examples the ladders express as domains
     "school", "graduation", "move", "job", "military", "child_born",
+    # v356 (owner ruling 2026-09-25): "a mission is a span like military
+    # service" — a STRETCH, the `missions` ladder's participation episode.
+    "mission",
 )
 
 EVENT_KIND_RE = re.compile(r"^[a-z][a-z0-9_]{1,39}$")

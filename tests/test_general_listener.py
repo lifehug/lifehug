@@ -383,14 +383,20 @@ class ListenerPromptTests(unittest.TestCase):
         Naming the accepted forms, the bracket-estimate convention, and one
         `span` example costs 12004 characters measured here. Re-measured,
         not rounded up.
+
+        v356 moved it again, from 12100: the domain digest gained its tenth
+        and eleventh lines (`missions`, `baptism` — owner ruling 2026-09-25).
+        The listener must be able to FILE a mission the person mentions,
+        because that mention is what opens the ladder; 12163 measured.
         """
-        self.assertLess(len(self._prompt()), 12100)
+        self.assertLess(len(self._prompt()), 12200)
 
     def test_the_digest_is_nine_lines_and_not_nine_ladders(self):
         digest = gl.render_domain_digest()
         rows = li.load_questions()
         self.assertEqual(len(digest.splitlines()), len(rows))
-        self.assertLess(len(digest), 900)
+        # v356: eleven domains, 917 characters measured.
+        self.assertLess(len(digest), 950)
         for row in rows:
             with self.subTest(domain=row["domain"]):
                 self.assertIn(f"- {row['domain']}: ", digest)

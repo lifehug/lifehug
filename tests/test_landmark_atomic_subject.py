@@ -78,7 +78,7 @@ class AtomicSubjectContractTests(unittest.TestCase):
                 if row.get("identity_kind") in tc.ATOMIC_LANDMARK_IDENTITY_KINDS:
                     self.assertEqual(claims(row["domain"])[0]["landmark_identity_kind"],
                                      row["identity_kind"])
-                elif row["domain"] != "birth":
+                elif row["collection"] != "singleton":  # v356: birth, baptism
                     with self.assertRaises(tc.TemporalClaimError) as caught:
                         claims(row["domain"], "Ada and Bo")
                     self.assertEqual(caught.exception.code, "aggregate_subject_mention")

@@ -429,3 +429,24 @@ are filed again.
   the founder shape (four filed, re-answered, nothing new: no records, ONE
   attempt, no lint), a re-answer carrying one genuinely new entry, and a
   finer date on an entry already filed.
+
+## Amendment (v356, 2026-09-25): a mission is a span, a baptism is a day
+
+The founder's answer that opens this ADR — *"It's not military service, but I
+did serve a two-year mission for my church"* — had nowhere to go but `work`
+("Missionary - The Church of Jesus Christ of Latter Day Saints"). The owner's
+ruling of 2026-09-25: *"a mission is a span like military service look up lds
+or mormon mission for context; a baptism is a discreet event on a date; both
+should not get default landmark questions but if mentioned should enable
+landmark questions"*.
+
+- `missions` is a span domain shaped like `military` (`happened → where →
+  span`), a participation episode of kind `mission`; `baptism` is a singleton
+  point (`happened → year → month → day`, date semantic `baptism`) whose
+  subject is the owner, as `birth`'s is.
+- Both are `offered: on_mention` (`landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION`).
+  The recorder and the general listener still KNOW both domains, because a
+  mention filed as an entry is exactly what opens the ladder; what the rule
+  withholds is the QUESTION.
+- Existing entries are not reinterpreted: the founder's mission stays filed
+  under `work` until he files it as a mission.

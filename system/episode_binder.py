@@ -220,7 +220,10 @@ KIND_FAMILIES = (
                      "separated", "divorced", "reconciled")),
     ("arrival", ("birth", "child_born")),
     ("parting", ("death", "loss")),
-    ("service", ("military",)),
+    ("service", ("military", "mission")),
+    # v356: a baptism is one dated ordinance, once per subject — its tellings
+    # are one another's and nothing else's.
+    ("ordinance", ("baptism",)),
 )
 
 #: Event kinds with no family at all — named so the refusal reads as a
