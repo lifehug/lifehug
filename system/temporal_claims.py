@@ -768,30 +768,55 @@ AN_EXTRACTORS_NAME_IS_WHO_READ_IT = (
 )
 
 
+#: v355 (lifehug#412). The characters that separate a reader's NAME from
+#: its VERSION, wherever the wild writes that boundary: ``/`` and ``:``
+#: (`extractor_version_string`'s own two renderings — `name/schema:1/...`
+#: and the older `name:rule`), plus ``@``, ``;`` and whitespace. The
+#: hosting platform's acceptance substrate
+#: (`lifehug-platform services/api/tests/acceptance/substrate.py`) writes
+#: ``"g2-acceptance@schema=1"`` and, for a re-extraction,
+#: ``"g2-acceptance@schema=1;model=newer"`` — a spelling this package never
+#: produces but whose contract test (O2, "re-extraction is a new
+#: interpretation, never a cache rebuild") already asserts the v354 rule
+#: against: the newer reading must supersede the older one, because both
+#: are the SAME reader. A name never contains a separator — a name in the
+#: first segment is guaranteed clean of ``:`` because
+#: :func:`extractor_version_string`'s own label pass strips it out before
+#: assembly — so splitting on the first occurrence of ANY of these
+#: characters, rather than only ``/`` then only ``:``, keeps every existing
+#: spelling's identity unchanged and stops a reader's identity from
+#: depending on which separator its writer happened to choose.
+EXTRACTOR_NAME_SEPARATORS = re.compile(r"[/:@;\s]")
+
+
 def extractor_identity(extractor_version: object) -> str:
     """WHO read it — an extractor version with its VERSION stripped off.
 
     ``"general_listener/schema:1/prompt:9f2a/model:haiku"`` -> ``"general_listener"``,
     ``"answer-placement/rule:1"`` -> ``"answer-placement"``,
     ``"story-classifier:2"`` -> ``"story-classifier"``, ``"era_record"`` ->
-    ``"era_record"``. One derivation, because
-    :data:`AN_EXTRACTORS_NAME_IS_WHO_READ_IT` is what
+    ``"era_record"``, ``"g2-acceptance@schema=1"`` and
+    ``"g2-acceptance@schema=1;model=newer"`` -> ``"g2-acceptance"`` (the SAME
+    identity for both — see :data:`EXTRACTOR_NAME_SEPARATORS`). One
+    derivation, because :data:`AN_EXTRACTORS_NAME_IS_WHO_READ_IT` is what
     `temporal_store._fold` elects a winning receipt WITHIN, and a second
     spelling of "which reader is this" would let one reader's reading retire
-    another's (lifehug#409).
+    another's (lifehug#409), or let two spellings of the SAME reader read as
+    two different ones (lifehug#412).
 
-    Both spellings of a version are handled deliberately. Every version built
-    through :func:`extractor_version_string` separates the name with ``/`` and
-    that function's own label pass strips ``:`` out of a name, so a ``:`` in
-    the first segment is always the older ``name:rule`` spelling
-    (`classifier_context.EXTRACTOR_VERSION`) and never part of a name.
+    Every spelling this package or its host writes is handled deliberately.
+    Every version built through :func:`extractor_version_string` separates
+    the name with ``/`` and that function's own label pass strips every
+    separator out of a name, so whichever of ``/``, ``:``, ``@``, ``;`` or
+    whitespace appears first in the string is always the boundary between
+    the name and its version, and never part of the name itself.
     """
     text = _text(extractor_version)
     if not text:
         raise ExtractionReceiptError(
             "extractor_version_required", "a receipt names the extractor that wrote it"
         )
-    name = text.split("/", 1)[0].split(":", 1)[0].strip()
+    name = EXTRACTOR_NAME_SEPARATORS.split(text, maxsplit=1)[0].strip()
     return name or text
 
 
@@ -1998,6 +2023,7 @@ __all__ = [
     "ERROR_CODES",
     "EVENT_KINDS",
     "EVENT_KIND_RE",
+    "EXTRACTOR_NAME_SEPARATORS",
     "IDEMPOTENCY_KEYS",
     "LANDMARK_DATE_SEMANTICS",
     "LANDMARK_LEGACY_EXTRACTOR",
