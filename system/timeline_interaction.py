@@ -677,7 +677,7 @@ def precision_so_far(session: object) -> object:
 WORK_ITEM_KINDS = ("contradiction", "identity_uncertain",
                    "missing_anchor", "place_ambiguous", "precision_gap",
                    "residence_overlap", "tenure_ambiguous", "chain_gap",
-                   "same_event", "possible_overmerge")
+                   "same_event", "possible_overmerge", "relation_word")
 
 #: How many quoted spans a work-item context block carries. The same number as
 #: `mirror_work.MAX_PLAY_EVIDENCE` and pinned equal to it
@@ -796,6 +796,15 @@ WORK_ITEM_PROBES = {
                     "\u201c{episode_quote}\u201d as one thing, but "
                     "something doesn't line up around {anchor} \u2014 keep "
                     "together, split, or fix a date?",
+    },
+    # v358 (`relation_words.A_CARD_ONLY_WHERE_THE_WORD_HAS_A_GENDERED_PAIR`).
+    # One choice about one named person, the three options already on the
+    # card (`candidates`): the gendered pair, or keep the neutral word. No
+    # anchored variant: a landmark has nothing to do with which word he uses.
+    "relation_word": {
+        "step": "content", "cost": 1,
+        "text": "When you talk about {label}, which word is right \u2014 "
+                "{candidates}?",
     },
 }
 
@@ -1001,6 +1010,8 @@ def _work_item_has_material(row: dict) -> bool:
         return bool(row["candidates"])
     if kind == "precision_gap":
         return bool(row["readings"]) or bool(row.get("requested_field"))
+    if kind == "relation_word":
+        return bool(row["candidates"])
     if kind in ("same_event", "possible_overmerge"):
         # Event identity I3: the pair's own two quotes ARE the question — an
         # anchored before/after fallback would ask something the person

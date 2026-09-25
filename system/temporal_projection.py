@@ -301,6 +301,11 @@ WORK_ITEM_KINDS = (
     "missing_anchor", "precision_gap", "contradiction", "identity_uncertain",
     "place_ambiguous", "tenure_ambiguous", "residence_overlap", "chain_gap",
     "same_event", "possible_overmerge",
+    # v358 (owner ruling 2026-09-25, `relation_words`): which FORM of a
+    # relationship word the owner uses for one roster person — son or
+    # daughter, father or mother. About a person, never a moment, so it
+    # carries no node and requests `relation_gender`.
+    "relation_word",
 )
 
 #: ``offered`` is "shown to the person and not yet answered"; ``obsolete`` is

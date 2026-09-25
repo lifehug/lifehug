@@ -404,6 +404,10 @@ SURFACES_BY_KIND = {
     # not only Timeline's voluntary surface.
     "same_event": ("timeline", "mirror", "daily_question"),
     "possible_overmerge": ("timeline", "mirror", "daily_question"),
+    # v358 (`relation_words`). The Timeline's queue and nowhere else: never the
+    # daily question, never a whisper, never Mirror — and never a person page,
+    # which asks nothing (owner ruling).
+    "relation_word": ("timeline",),
 }
 
 #: Surfaces a loss-discovery item may use. Timeline only: the system may OFFER
@@ -444,6 +448,9 @@ WORK_ITEM_VALUE_DEFAULTS = {
     # one: the substrate already grouped two tellings and something now
     # disagrees about whether it should have.
     "possible_overmerge": {"person_value": 0.6, "interaction_cost": 0.45, "context_fit": 0.4},
+    # v358 (`relation_words`): cheap to answer and worth knowing, but it places
+    # no moment, so it is priced below every dating card and never crowds one.
+    "relation_word": {"person_value": 0.3, "interaction_cost": 0.1, "context_fit": 0.3},
 }
 
 #: How sensitive asking about this event is, before any per-person signal. A
