@@ -171,6 +171,16 @@ Four rules travel with the composer and none of them is a preference:
   predicate whatever its length (`temporal_timeline._leads_with_a_verb`,
   `_is_gerund_phrase`'s mirror on the same `_ING_EVENT_NOUNS` vocabulary), so
   *"left Kristen"* is quoted back the way *"moved in with dad"* already was.
+- **A full name outranks a shared first name** (v357, `timeline-rules:18`,
+  `identity_resolution.A_FULL_NAME_OUTRANKS_A_SHARED_FIRST_NAME`). A card
+  about *"James Edwin Taylor"* is a card about the owner's father, because that
+  mention carries his roster spelling `James Taylor` given name through
+  surname — so an age said about it (*"19-21 years old"*) is measured from
+  HIS 1954 birth instead of having no birth to count from. `<Name> Sr.` is a different person,
+  never a tie (`A_GENERATIONAL_SUFFIX_IS_ONE_GENERATION`), and a roster alias
+  row is never offered, counted or bound (`AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE`).
+  A bare *"James"* on a roster where four people answer to it still asks
+  *which James*, naming the real people and never the pointer row.
 
 ## 3. The playbook, the anchors, and the stage
 

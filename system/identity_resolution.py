@@ -159,12 +159,43 @@ SHARED_NAME_TOKEN_REASON = "shared_name_token"
 #: James would leave "my son James" uncertain, as it should.
 RELATIONSHIP_QUALIFIED_REASON = "relationship_qualified_name"
 
+#: v357 (`timeline-rules:18`). A FULL NAME OUTRANKS A SHARED FIRST NAME. The
+#: owner's father's mission — *"Father's mission to New Zealand"*, subject
+#: mention ``"James Edwin Taylor"`` — could not be dated from his age because
+#: that mention bound nobody: no roster key spells it (the roster knows his
+#: father as ``James Taylor``), and the only rungs that read inside a name were
+#: the bare-given-name census, which is about ONE token. So a full name fell to
+#: ``no_candidate`` on a roster holding four people who bear *James*, while the
+#: one person whose given name AND surname it carries, in order, at the same
+#: generation, was right there. :func:`full_name_candidates` is that reading.
+FULL_NAME_REASON = "full_name"
+
+A_FULL_NAME_OUTRANKS_A_SHARED_FIRST_NAME = (
+    "a mention that carries one roster person's own full spelling — given name "
+    "through surname, in order, at the same generation, optionally with middle "
+    "names the roster does not spell — is that person, however many others "
+    "share its first word; a bare first name still binds nobody when several "
+    "people answer to it"
+)
+
+#: v357. The generational half of the same rule, read off
+#: :data:`GENERATIONAL_SUFFIX_STEPS`: ``James Edwin Taylor`` and ``James Edwin
+#: Taylor Sr.`` are a father and HIS father, never a tie between two spellings
+#: of one man. A spelling's generation is part of the name, so a mention with
+#: no suffix is the UNSUFFIXED person and a suffixed spelling never answers it.
+A_GENERATIONAL_SUFFIX_IS_ONE_GENERATION = (
+    "a generational suffix names a different person one generation away: a "
+    "mention without the suffix is the unsuffixed person, and never a tie "
+    "with the suffixed one"
+)
+
 #: Named deterministic rules, in ladder order. These are the values ``reason``
 #: may take when the resolver reached the verdict on its own.
 DETERMINISTIC_REASONS = (
     "exact_ref",
     "roster_alias",
     "unique_name",
+    FULL_NAME_REASON,
     RELATIONSHIP_QUALIFIED_REASON,
     SHARED_NAME_TOKEN_REASON,
     "ambiguous_candidates",
@@ -482,12 +513,89 @@ ROSTER_RELATIONSHIP_KEY = "relationship"
 #: if they were two different people.
 ROSTER_MAPS_TO_FOCUS_KEY = "maps_to_focus"
 
+#: v357 (`timeline-rules:18`). The same convention, stated as the rule every
+#: reader of a roster answers the same way — the census, the BINDING path and
+#: the card path alike. v343 put it into :func:`roster_index`, which is what
+#: the card path reads; the fold's birth index and family-tier index read the
+#: raw rows through `axis_membership.roster_person_rows` and still counted the
+#: owner's ``james`` row (``maps_to_focus: anthon-james-taylor``) as a person
+#: with a ref and a birthday of its own. :func:`is_alias_row` is the one
+#: predicate both seats now ask.
+AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE = (
+    "a roster row with maps_to_focus set is a pointer to another row, not a "
+    "person: it is never offered, never counted toward ambiguity, never bound "
+    "to, and never anchors an age — in the binding path exactly as in the card "
+    "path"
+)
+
+
+def is_alias_row(entity: object) -> bool:
+    """Is this roster row a POINTER (:data:`AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE`)?"""
+    return isinstance(entity, dict) and bool(
+        collapsed_text(entity.get(ROSTER_MAPS_TO_FOCUS_KEY))
+    )
+
 #: Determiners and possessives a mention may wrap a name in. They carry no
 #: identity, so they are dropped before a mention's tokens are counted —
 #: "my son James" and "our son James" are the same three-token question.
 MENTION_QUALIFIER_WORDS = frozenset(
     {"a", "an", "the", "my", "our", "his", "her", "their", "its", "of", "and"}
 )
+
+#: A generational suffix is a GENERATION, not a nickname. ``<Name> Sr.`` is one
+#: generation ABOVE the unsuffixed ``<Name>`` and ``<Name> Jr.`` one below —
+#: steps are counted from the unsuffixed name, so ``III`` is two below it.
+#: Compared on the last token with its full stop removed, so ``Sr``, ``Sr.``,
+#: ``Snr`` and ``Senior`` are one suffix.
+#:
+#: **v357 moved it here** from `roster_relations` (v347), which re-exports this
+#: same object under its historical name — the v350 `IN_LAW_RE` precedent. Two
+#: readers need it and they must not disagree: the introducer, which steps a
+#: suffixed name one seat along `roster_relations.GENERATION_TIERS`, and the
+#: resolver, where it is :data:`A_GENERATIONAL_SUFFIX_IS_ONE_GENERATION` — and
+#: this module is pure and cannot import the introducer, so the one definition
+#: lives at the bottom of the import graph.
+GENERATIONAL_SUFFIX_STEPS = {
+    "sr": 1,
+    "snr": 1,
+    "senior": 1,
+    "i": 1,
+    "jr": -1,
+    "jnr": -1,
+    "junior": -1,
+    "ii": -1,
+    "iii": -2,
+}
+
+
+def generation_of_tokens(tokens: object) -> tuple[tuple[str, ...], int]:
+    """``(base tokens, generation step)`` of one tokenised name.
+
+    ``("james", "edwin", "taylor", "sr")`` is ``(("james", "edwin", "taylor"),
+    1)``; a name with no suffix is itself at step ``0``. A one-token name has no
+    suffix: ``"Sr"`` alone is not a person.
+    """
+    words = tuple(tokens or ())
+    if len(words) < 2:
+        return words, 0
+    step = GENERATIONAL_SUFFIX_STEPS.get(words[-1].rstrip(".").casefold(), 0)
+    if not step:
+        return words, 0
+    return words[:-1], step
+
+
+def generational_suffix(name: object) -> tuple[str, int]:
+    """``(base name, generation step)`` — ``("James Edwin Taylor", 1)`` for
+    ``"James Edwin Taylor Sr."`` — or ``("", 0)`` when there is no suffix.
+
+    :func:`generation_of_tokens` over the collapsed spelling, keeping its case,
+    which is the shape v347's introducer has always read.
+    """
+    tokens = collapsed_text(name).split()
+    base, step = generation_of_tokens(tokens)
+    if not step:
+        return "", 0
+    return " ".join(base), step
 
 #: Relationship words a mention may carry, mapped to the roster
 #: ``relationship`` values that satisfy them. A word resolves nothing on its
@@ -734,6 +842,14 @@ class RosterIndex:
     by_given_name: dict = field(default_factory=dict)
     #: ref -> the roster's own ``relationship`` value, normalized.
     relationship_of: dict = field(default_factory=dict)
+    #: v357. ref -> every FULL spelling that person answers to, as
+    #: ``(base tokens, generation step)``: each name, slug and alias with its
+    #: determiners and relationship words dropped and its generational suffix
+    #: split off (:func:`generation_of_tokens`), kept only when the base still
+    #: runs from a given name to a DIFFERENT surname. ``"James Taylor (Dad)"``
+    #: is ``(("james", "taylor"), 0)``; the alias ``"James"`` is no full name
+    #: at all. :func:`full_name_candidates` reads it.
+    full_names: dict = field(default_factory=dict)
 
     def size(self) -> int:
         return len(self.refs)
@@ -817,10 +933,11 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
     by_name_token: dict = {}
     by_given_name: dict = {}
     relationship_of: dict = {}
+    full_names: dict = {}
     for entity in entities:
         if not isinstance(entity, dict):
             continue
-        if collapsed_text(entity.get(ROSTER_MAPS_TO_FOCUS_KEY)):
+        if is_alias_row(entity):
             continue
         name = collapsed_text(entity.get("name"))
         slug = _entity_slug(entity)
@@ -856,6 +973,16 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
         if is_collective:
             continue
 
+        # v357: the full spellings this person answers to (see
+        # :attr:`RosterIndex.full_names`), read from the same keys.
+        for key in keys:
+            base, step = generation_of_tokens(mention_tokens(key)[0])
+            if len(base) >= 2 and base[0] != base[-1]:
+                spelling = (base, step)
+                held = full_names.setdefault(ref, [])
+                if spelling not in held:
+                    held.append(spelling)
+
         # The token census. Every word of every spelling this person answers to,
         # counted per REF, so one person spelled five ways is still one person.
         for key in keys:
@@ -877,6 +1004,7 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
         by_name_token={k: tuple(dict.fromkeys(v)) for k, v in by_name_token.items()},
         by_given_name={k: tuple(dict.fromkeys(v)) for k, v in by_given_name.items()},
         relationship_of=relationship_of,
+        full_names={k: tuple(v) for k, v in full_names.items()},
     )
 
 
@@ -1237,6 +1365,72 @@ def shared_name_token_refs(
     return bearers if len(bearers) > 1 else ()
 
 
+def _in_order(inner: tuple, outer: tuple) -> bool:
+    """Is ``inner`` a subsequence of ``outer`` — every word, in the same order?"""
+    words = iter(outer)
+    return all(word in words for word in inner)
+
+
+def full_name_candidates(
+    mention: object, roster: object, *, entity_type: object = None
+) -> tuple[dict, ...]:
+    """The roster people whose OWN full spelling this mention carries
+    (:data:`A_FULL_NAME_OUTRANKS_A_SHARED_FIRST_NAME`).
+
+    A person answers when one of their :attr:`RosterIndex.full_names` spellings
+    matches the mention's name words on all four counts:
+
+    * the same GIVEN name — the first word of each;
+    * the same SURNAME — the last word of each, after the suffix is split off;
+    * every word of the roster's spelling appears in the mention, in order, so
+      ``"James Edwin Taylor"`` carries ``James Taylor`` plus a middle name the
+      roster does not spell — and never the reverse: a mention SHORTER than
+      the roster's spelling is not this rung's to read, because "James Taylor"
+      carries only part of "James Everett Taylor";
+    * the same GENERATION (:data:`A_GENERATIONAL_SUFFIX_IS_ONE_GENERATION`), so
+      ``"James Edwin Taylor"`` is never ``James Edwin Taylor Sr.``.
+
+    This is not the containment folding this module's docstring rejects: the
+    words are whole, the given name and surname are both anchored, the roster's
+    spelling is the thing contained (a mention never reaches INTO a longer
+    roster name to bind it), and the result is uniqueness-gated by
+    :func:`resolve_mention` like every other rung. A bare given name has no
+    surname to anchor, so it never reaches this rung at all — v335's census
+    still decides it.
+
+    A relationship word the mention carries is a VETO, never a key: a person
+    whose roster ``relationship`` is recorded and does not satisfy it is
+    dropped (``"my son James Edwin Taylor"`` is not the owner's father), and a
+    person with no recorded relationship is kept, because the name did the
+    work.
+    """
+    names, relations = mention_tokens(mention)
+    base, step = generation_of_tokens(names)
+    if len(base) < 2 or base[0] == base[-1]:
+        return ()
+    index = roster_index(roster, entity_type=entity_type)
+    wanted: set[str] = set()
+    for word in relations:
+        wanted |= RELATIONSHIP_MENTION_WORDS.get(word, frozenset())
+    out: list[dict] = []
+    for ref in index.refs:
+        if not any(
+            spelling_step == step
+            and spelling[0] == base[0]
+            and spelling[-1] == base[-1]
+            and _in_order(spelling, base)
+            for spelling, spelling_step in index.full_names.get(ref, ())
+        ):
+            continue
+        recorded = index.relationship_of.get(ref, "")
+        if wanted and recorded and recorded not in wanted:
+            continue
+        out.append(
+            RosterCandidate(ref=ref, name=index.name_of(ref), basis="name").to_dict()
+        )
+    return tuple(out)
+
+
 def relationship_qualified_candidates(
     mention: object, roster: object, *, entity_type: object = None
 ) -> tuple[dict, ...]:
@@ -1348,6 +1542,36 @@ def resolve_mention(
         )
 
     if not matches:
+        # v357: a full name is read before a relationship word. Without it
+        # "James Edwin Taylor" fell straight to `no_candidate` (the census below
+        # is about ONE bare word), and even "my dad James Edwin Taylor" missed:
+        # the relationship rung needs EVERY name word borne by the candidate,
+        # and the middle name the roster does not spell for the father is
+        # borne only by the grandfather, whom the word "dad" then vetoes.
+        full = full_name_candidates(mention, roster, entity_type=entity_type)
+        if len(full) == 1:
+            return resolution_record(
+                {
+                    "mention": mention,
+                    "candidates": full,
+                    "resolution": "same",
+                    "resolved_ref": full[0]["ref"],
+                    "reason": FULL_NAME_REASON,
+                    "evidence_ref": evidence_ref,
+                },
+                now=now,
+            )
+        if len(full) > 1:
+            return resolution_record(
+                {
+                    "mention": mention,
+                    "candidates": full,
+                    "resolution": "uncertain",
+                    "reason": "ambiguous_candidates",
+                    "evidence_ref": evidence_ref,
+                },
+                now=now,
+            )
         qualified = relationship_qualified_candidates(
             mention, roster, entity_type=entity_type
         )
@@ -1821,6 +2045,16 @@ __all__ = [
     "RELATIONSHIP_QUALIFIED_REASON",
     "ROSTER_RELATIONSHIP_KEY",
     "SHARED_NAME_TOKEN_REASON",
+    "FULL_NAME_REASON",
+    "A_FULL_NAME_OUTRANKS_A_SHARED_FIRST_NAME",
+    "A_GENERATIONAL_SUFFIX_IS_ONE_GENERATION",
+    "AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE",
+    "GENERATIONAL_SUFFIX_STEPS",
+    "ROSTER_MAPS_TO_FOCUS_KEY",
+    "full_name_candidates",
+    "generation_of_tokens",
+    "generational_suffix",
+    "is_alias_row",
     "mention_tokens",
     "relationship_qualified_candidates",
     "shared_name_token_refs",

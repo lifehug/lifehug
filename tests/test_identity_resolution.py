@@ -109,6 +109,9 @@ class VocabularyTests(unittest.TestCase):
                 "exact_ref",
                 "roster_alias",
                 "unique_name",
+                # v357: a mention carrying one person's own full spelling is
+                # that person, however many others share its first word.
+                "full_name",
                 # v335: a relationship word the roster corroborates is the
                 # distinguishing token that answers a shared given name; a
                 # shared given name with no such token answers nobody.

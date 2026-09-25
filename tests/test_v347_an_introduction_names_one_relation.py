@@ -643,7 +643,10 @@ class TheRuleIsStatedOnceTests(unittest.TestCase):
         landable = {tier for tier in rr.GENERATION_TIERS
                     if tier in FOCUS_RELATIONSHIPS}
         self.assertEqual(landable, {"child", "sibling", "parent", "grandparent"})
-        self.assertEqual(set(rr.GENERATIONAL_SUFFIX_STEPS.values()), {1, -1})
+        # v357 added ``Snr``/``Jnr``/``II`` and ``III`` to the one table (now
+        # `identity_resolution`'s): ``III`` is two generations below the
+        # unsuffixed name, so the step set grew by exactly that one value.
+        self.assertEqual(set(rr.GENERATIONAL_SUFFIX_STEPS.values()), {1, -1, -2})
 
     def test_the_relationship_basis_is_a_closed_vocabulary(self) -> None:
         rows = batch([mother_claim(), grandfather_claim()],

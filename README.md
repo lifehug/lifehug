@@ -446,7 +446,7 @@ real page on a real vault.
 Every node the fold draws is stamped `calculation_rule_version`, and the value
 is folded into every input fingerprint. It reads `timeline-rules:N`, and it
 lives in exactly one place, `temporal_timeline.CALCULATION_RULE_VERSION`
-(**`timeline-rules:17`** at v350).
+(**`timeline-rules:18`** at v357).
 
 `N` is not a release number and not a schema version. It is the **fold's own
 contract**: the promise that the same receipts, folded by these rules, produce
