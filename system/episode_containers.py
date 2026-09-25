@@ -312,6 +312,17 @@ def resolve_entities(text: object, index: object) -> frozenset:
     through its alias — which is v221's normalization applied to a phrase
     rather than to a whole mention. Nothing here reads evidence prose: only
     the mentions the substrate already keeps as names.
+
+    **v350** refuses one run this match used to take
+    (`identity_resolution.A_COMPOUND_RELATION_IS_NEVER_THE_WORD_INSIDE_IT`): a
+    key that is ONE relationship word, matched inside the COMPOUND word it sits
+    in. The owner's vault is what taught it — a roster introduction had filed
+    ``mother`` as an alias of his mother, so *"Wedding reception in
+    mother-in-law's backyard"* resolved to HER, the binder read the reception
+    and his parents' wedding as two tellings of one marriage, and the owner's
+    own 2007 reception was drawn at his parents' 1976 date. A LONGER key is the
+    compound itself and still matches: a roster that knows a mother-in-law by
+    that phrase resolves her by it.
     """
     if not isinstance(index, EntityIndex) or not index.by_first:
         return frozenset()
@@ -322,8 +333,11 @@ def resolve_entities(text: object, index: object) -> frozenset:
     for position, token in enumerate(tokens):
         for key, refs in index.by_first.get(token, ()):  # type: ignore[union-attr]
             end = position + len(key)
-            if tuple(tokens[position:end]) == key:
-                found.update(refs)
+            if tuple(tokens[position:end]) != key:
+                continue
+            if ir._not_a_simple_relation(tokens, position, end):
+                continue
+            found.update(refs)
     return frozenset(found)
 
 

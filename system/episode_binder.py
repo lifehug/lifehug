@@ -383,6 +383,33 @@ A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT = (
     "happened"
 )
 
+#: v350, and it is v345's own rule finishing its sentence. A COUPLE is two
+#: people; it is not a relationship word found somewhere in what a telling is
+#: called. The owner's vault: `node:b8681112f7eed9342e7e4d56` *"Wedding
+#: reception in mother-in-law's backyard"* — HIS reception, his own anniversary
+#: 2007-01-11, subject `self` — was folded into his PARENTS' wedding at
+#: 1976-06-25 beside *"Mom married dad at 21"*, because a roster introduction
+#: had filed ``mother`` as an alias of his mother and the run matcher read that
+#: word out of ``mother-in-law``. It surfaced as a contradiction card, so v340
+#: held; the merge was still wrong.
+#:
+#: Two legs and one seat each. The couple is read from the telling's own
+#: SUBJECTS (`identity_resolution.couple_key`, now handed
+#: :attr:`TellingView.subject_mentions`), so the owner's own subject names the
+#: OWNER's couple and a word in a backyard names nobody; and a compound
+#: relationship word is never the simple word inside it
+#: (`identity_resolution.A_COMPOUND_RELATION_IS_NEVER_THE_WORD_INSIDE_IT`,
+#: enforced where the wrong person was resolved —
+#: `episode_containers.resolve_entities` — so every rung that reads a roster
+#: match is fixed once rather than R2b alone).
+A_COUPLE_IS_TWO_PEOPLE = (
+    "a couple is two people, not one relationship word: a couple key is read "
+    "from a telling's own subjects — the owner's own subject naming the owner's "
+    "couple — and a compound relationship word is never the simple word inside "
+    "it, so mother-in-law is not mother and a wedding reception is not a "
+    "wedding somebody else had"
+)
+
 #: The milestone read out of a NOUN the label carries. `wedding` alone, and the
 #: omissions are the rule: `marriage` is a STATE a life spends years inside —
 #: the owner's vault holds "Marriage became hard", "Early marriage arguments and
@@ -791,6 +818,14 @@ class TellingView:
     #: participant set where it does not. The owner is dropped for the reason
     #: :data:`INDEPENDENT_SIGNALS` drops him: he is on every telling.
     people: frozenset = frozenset()
+    #: v350. This telling's own ``subject_mention`` texts, as written — who it
+    #: is ABOUT, in the person's own words, owner mentions included. Read by
+    #: :data:`A_COUPLE_IS_TWO_PEOPLE`'s couple key and by nothing else, and
+    #: deliberately NOT :attr:`people`: `people` is every name anywhere in the
+    #: telling, tokenized and roster-resolved, which is the right input for "did
+    #: these two tellings name the same person" and the wrong one for "whose
+    #: event is this".
+    subject_mentions: tuple = ()
     #: v345. This telling's OWN sentences — its event mentions, its subject
     #: mentions and its evidence quotes (:func:`_claim_texts`, the same reader
     #: the containment rung uses). Read by :func:`milestone_of` and by nothing
@@ -822,6 +857,7 @@ class TellingView:
             "node_refs": sorted(self.node_refs),
             "reads_node": self.reads_node,
             "people": sorted(self.people),
+            "subject_mentions": list(self.subject_mentions),
             "phrases": sorted(self.phrases),
             "eligible": self.eligible,
             "ineligible_reason": self.ineligible_reason,
@@ -1491,6 +1527,7 @@ def telling_views(claims: object, *, manifest: object = None,
             reads_node=reads_node(telling_ref, rows_here),
             people=person_tokens(tuple(mentions) + tuple(subject_mentions),
                                  participants, entity_index),
+            subject_mentions=tuple(subject_mentions),
             phrases=frozenset(_claim_texts(rows_here)),
             label=label,
             stem=label_stem(label, participants, event_kind=event_kind),
@@ -2695,14 +2732,21 @@ def milestone_links(views: Mapping[str, TellingView]) -> list:
     **v345** sweeps a second set of buckets beside the per-person ones
     (:data:`A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT`). A marriage is
     once per COUPLE (`identity_resolution.ONCE_PER_COUPLE_EVENT_KINDS`), so a
-    telling whose people ARE one couple (`identity_resolution.couple_key`) is
+    telling whose SUBJECTS are one couple (`identity_resolution.couple_key`) is
     bucketed under that couple as well as under each of its words — which is how
-    *"Mom married dad at 21"* (people ``{mother}``) reaches *"Parents' wedding
-    date"* (people ``{parents}``) at all. Inside a couple bucket
+    *"Mom married dad at 21"* (subject ``mother``) reaches *"Parents' wedding
+    date"* (subject ``Author's parents``) at all. Inside a couple bucket
     :func:`_same_people` is not asked, because the bucket key has already
     asserted the stronger thing: the two tellings name the same two people, in
     two vocabularies for them. Every other guard is the per-person rung's own —
     compatible kinds, and dates that do not contradict.
+
+    **v350** (:data:`A_COUPLE_IS_TWO_PEOPLE`) changed WHICH words the couple key
+    is read from: the telling's own ``subject_mention`` texts rather than every
+    person token anywhere in it. A telling has a couple when it is ABOUT one;
+    *"Wedding reception in mother-in-law's backyard"* is about the owner, and
+    under the old reading it was about his mother because that word is inside
+    that one.
     """
     buckets: dict[tuple, list] = {}
     couples: dict[tuple, list] = {}
@@ -2716,7 +2760,7 @@ def milestone_links(views: Mapping[str, TellingView]) -> list:
         for token in sorted(view.people):
             buckets.setdefault((milestone, token), []).append(telling_ref)
         if milestone in ONCE_PER_COUPLE_EVENT_KINDS:
-            key = couple_key(view.people)
+            key = couple_key(view.subject_mentions)
             if key:
                 couples.setdefault((milestone, key), []).append(telling_ref)
     rows: list = []
@@ -4485,6 +4529,7 @@ __all__ = [
     "MATURE_EPISODE_MEMBERS",
     "A_MERGE_NEVER_MOVES_A_DATED_MOMENT",
     "A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT",
+    "A_COUPLE_IS_TWO_PEOPLE",
     "NON_TRANSITIVE_RULE_TEXT",
     "OVERMERGE_DISJOINT_REASON",
     "PLAUSIBILITY_FLOOR",

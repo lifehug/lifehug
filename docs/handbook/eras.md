@@ -345,8 +345,20 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:16 -->
-`timeline-rules:16` (v347), which made an introduction name one person in one
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:17 -->
+`timeline-rules:17` (v350) — one couple, one alias, one label. A couple key is
+read from a telling's own SUBJECTS rather than from any person token anywhere in
+it, and a compound relationship word is never the simple word inside it, so the
+owner's *"Wedding reception in mother-in-law's backyard"* stopped folding into
+his parents' 1976 wedding: a different node set. A subject that newly resolves
+moves the node id derived from it, so the id it used to be drawn at is published
+as a redirect and every claim still holding that id — a resolver reading's frozen
+`event_ref` among them — is carried onto the new one: a different alias table, and
+one fewer fact drawn twice. And an anchor handle that is an internal id mints no
+card at all, while no composer's sentence may carry one, so
+*"When was node:0809d05e26d18f128fd83126?"* cannot be asked: a different
+work-item set.
+`timeline-rules:16` (v347) made an introduction name one person in one
 clause. The arithmetic did not change; the roster it reads did. `:15` read the
 evidence quote *"my grandpa James Edwin Taylor Sr., my dad's dad, died of a
 heart attack"* as introducing a second FATHER, because the appositive shape

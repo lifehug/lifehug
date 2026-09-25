@@ -157,6 +157,20 @@ Four rules travel with the composer and none of them is a preference:
   resolved, and the OWNER's own roster row is dropped from the running by
   `identity_resolution.identity_work_item`'s `owner_refs` — so a card mints
   only when at least two DISTINCT people remain to ask about.
+- **A card never shows a node id as its label** (v350, `timeline-rules:17`,
+  `temporal_timeline.A_CARD_NEVER_SHOWS_A_NODE_ID_AS_ITS_LABEL`). A
+  cross-dating anchor may be a NODE REF, and the anchor rung asked about
+  whatever text it was handed — *"When was node:0809d05e26d18f128fd83126?"*, 28
+  `missing_anchor` cards on the owner's hosted head. An anchor handle that
+  names an internal id now mints NOTHING, reported
+  `anchor_without_a_human_label` with the nodes that were waiting on it (each
+  of which already carries a card of its own), and `conversation_lints
+  .lint_question` refuses any composed sentence carrying one — the shape read
+  off the minter's own `temporal_claims.ID_RE` rather than a list of prefixes.
+  One grammar rule joins v343's: a phrase that LEADS with a verb is a bare
+  predicate whatever its length (`temporal_timeline._leads_with_a_verb`,
+  `_is_gerund_phrase`'s mirror on the same `_ING_EVENT_NOUNS` vocabulary), so
+  *"left Kristen"* is quoted back the way *"moved in with dad"* already was.
 
 ## 3. The playbook, the anchors, and the stage
 

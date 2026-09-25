@@ -80,6 +80,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import landmarks_interaction as li
+import temporal_claims as tc
 from lifehug_core import INTERACTIONS_DIR, _parse_simple_yaml
 
 DEFAULT_CAP_TURN_CHARS = 1200
@@ -392,6 +393,38 @@ _QUESTION_EMPTY_SUBJECT_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: v350 (`timeline-rules:17`). An INTERNAL IDENTIFIER, printed to the person:
+#: *"When was node:0809d05e26d18f128fd83126?"* — 28 `missing_anchor` cards on
+#: the owner's hosted head, 13 after a sweep, every one of them a question
+#: nobody alive can answer. The shape is derived rather than listed: every id
+#: this substrate mints is `temporal_claims.ID_RE`'s ``<prefix>:<digest>``, so
+#: one pattern covers `node:`, `claim:`, `work:`, `episode:`, `edge:`,
+#: `membership:` and whatever the next prefix turns out to be, and a hand list
+#: of prefixes cannot fall behind the minter (v349's own lesson: a centralized
+#: definition whose INPUTS are a hand list is not centralized).
+#:
+#: It sits HERE, in the refusing backstop every composer already routes through
+#: (`temporal_timeline.compose_question`, `compose_anchor_question`,
+#: `compose_place_ambiguity_question` and `_mint_work_item` itself), because
+#: "no prompt template ever emits a raw id" is a property of the SENTENCE and
+#: a rule proved once is a rule the next template cannot forget.
+_QUESTION_INTERNAL_ID_RE = re.compile(
+    rf"(?<!\w)[a-z_]+:[0-9a-f]{{{tc.ID_DIGEST_LENGTH}}}(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def names_an_internal_id(text: object) -> bool:
+    """Does this text carry one of the substrate's own ids?
+
+    :data:`_QUESTION_INTERNAL_ID_RE`'s other reader. The lint refuses a
+    composed SENTENCE that leaked one; `temporal_timeline`'s anchor rung asks
+    this about the HANDLE before it composes anything, because an anchor whose
+    whole text is a digest is not a thing a person mentioned and there is no
+    sentence to withhold — the card is never minted at all.
+    """
+    return bool(_QUESTION_INTERNAL_ID_RE.search(str(text or "")))
+
 
 def lint_question(text: object) -> list[dict]:
     """Deterministic findings for ONE composed work-item question.
@@ -410,13 +443,16 @@ def lint_question(text: object) -> list[dict]:
     backstop, never prompt prose (ADR 0028's audit finding, applied to a
     deterministic writer).
 
-    Four refusals:
+    Five refusals:
 
     * an internal node kind printed after an em dash — ``San Diego — span``;
     * a third-person owner handle — ``speaker's mission``, ``Author's birth``;
     * a question whose subject is a bare first-person pronoun — ``When did I
       happen?`` — which is a subject string, not a person's own words;
-    * a question whose subject slot is empty or a placeholder.
+    * a question whose subject slot is empty or a placeholder;
+    * v350: an INTERNAL IDENTIFIER — ``When was node:0809d05e26d18f128fd83126?``
+      (:data:`_QUESTION_INTERNAL_ID_RE`). A card is asked only when a person
+      could answer it, and nobody can answer about a digest.
 
     Not checked here: whether the text ends in a question mark. A
     ``prompt_intent`` is what the interaction is FOR, and two of the substrate's
@@ -451,6 +487,13 @@ def lint_question(text: object) -> list[dict]:
         findings.append({
             "lint": QUESTION_TEMPLATE_LEAK,
             "detail": "the question's subject slot is empty",
+            "span": [match.start(), match.end()],
+        })
+    match = _QUESTION_INTERNAL_ID_RE.search(body)
+    if match:
+        findings.append({
+            "lint": QUESTION_TEMPLATE_LEAK,
+            "detail": f"internal identifier printed to the person: {match.group(0)!r}",
             "span": [match.start(), match.end()],
         })
     return findings

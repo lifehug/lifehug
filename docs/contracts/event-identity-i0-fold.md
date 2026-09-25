@@ -149,6 +149,30 @@ its kind. The row is reported `landmark_date_kind_redrawn`, so the re-key is
 never silent, and the identity layer's own tables still win a collision: a
 person's decision outranks a redraw.
 
+**Amendment (v350): the RESOLVER can re-key a node too, and it publishes the
+redirect.** The fifth way, and the last one arithmetic can reach: a node id is
+derived from its SUBJECT, and `temporal_timeline._subject_handle` reads "the
+resolved ref when identity landed, the raw mention when it did not" — so the
+moment a roster introduction makes *"Dad graduated"* resolve to
+`person/james-taylor`, the node moves. On the owner's vault
+`node:1bdbc9ecc7305d5a90c6e4a4` became `node:2156ca1018344c8248882c44` for the
+identical claim `claim:cd8e993b6bf95a5f4c80c862`, and no redirect was published:
+the v340/v342 audit read it as a lost placement.
+`temporal_timeline._identity_rekeys` derives the map — the former id is
+arithmetic over the mention the claim still carries, never a cache and never a
+read of the previous publication — and both of v342's dispositions apply to it
+unchanged. A key nothing publishes any more is published as a redirect and
+reported `identity_subject_rekeyed`; a key some claim STILL publishes is not
+redirected, and that claim is carried onto the new id instead. The carry is what
+the owner's duplicate undated *"Mom babysat Kodi and Acey Nixon"* node needed:
+the resolver reading of that stay froze the old id into its own `event_ref`, so
+the derived key moved out from under it and the same fact was drawn twice —
+once dated 1982-08/1986-06 at the old id, once undated at the new one, with a
+fresh *"when?"* card on the copy. A claim follows the node it folds under,
+whichever act moved that node. The invariant is the same single line, and it
+now has four sources of aliases to hold: no key of `node_aliases` is the id of
+a node the drawing publishes.
+
 ### Entailment (§2.2)
 
 `entailed_not_same()` computes `same(A,E) ∧ not_same(B,E) ⇒ not_same(A,B)` and
