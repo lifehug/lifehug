@@ -1460,6 +1460,11 @@ def subject_view(subject_ref: object, *, relation_words: object = (),
         name = _fold(person.get("display_name"))
     elif word_row is not None and _fold(word_row.get("name")) and "/" in subject:
         name = _fold(word_row.get("name"))
+    elif "/" in subject:
+        # A roster REF nobody's row names ("person/katie") is a machine
+        # spelling; the model is given the name it spells, never the ref.
+        name = " ".join(part.capitalize() for part in
+                        subject.rsplit("/", 1)[-1].replace("_", "-").split("-") if part)
     word = ""
     gender = ""
     if word_row is not None:

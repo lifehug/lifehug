@@ -127,6 +127,12 @@ class WhoItIsAboutTests(unittest.TestCase):
                      "relationship": "parent", "relation_word": "Father"}])
         self.assertEqual(who["phrase"], "Dad (your father)")
 
+    def test_a_roster_ref_nobody_names_reads_as_the_name_it_spells(self):
+        """Never the machine spelling: "person/katie" is Katie to the model."""
+        self.assertEqual(ti.subject_view("person/katie")["name"], "Katie")
+        self.assertEqual(ti.subject_view("person/james-edwin-taylor")["phrase"],
+                         "James Edwin Taylor")
+
     def test_the_owner_is_the_owner(self):
         for ref in ("self", "", "me", None):
             with self.subTest(ref=ref):
