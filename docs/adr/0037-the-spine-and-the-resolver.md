@@ -14,7 +14,8 @@ one person in one clause; v349 stops a stated entry being retired by shape and
 adds `landmark-reinstate`; v350 fixes the couple key, the identity re-key's
 alias and the card that showed a node id; v352 makes an answer to a card place
 the moment that card is about; v354 stops that answer's receipt retiring the
-listener's reading of the same message.
+listener's reading of the same message; v361 stops the resolver re-guessing a
+moment it already estimated.
 
 Every amendment below carries the version that shipped it in its own heading.
 The CLI verb is `resolve`; `resolver` is the module (`system/resolver.py`) and
@@ -1414,3 +1415,95 @@ written (`relative_place_reference`), an existing one folds as a MENTION
 through `landmark-fold-duplicates` (never into a stay he gave), and such words
 never resolve to a stay in the fold. A dated one keeps his dates.
 
+## Amendment (v361, 2026-09-26): a guess never replaces a guess
+
+**What happened.** On 2026-09-26 the owner's hosted vault re-resolved
+`answers/A14bc.md` — an immutable, dateless answer about his four children's
+activities — six times in four hours (`lifehug/dave` `d0f6236e`, `c36c76f5`,
+`d1441f61`, `55ecaa90`, `6e50fcb3`, `1ed1febd`; `answers/C20.md` the same
+at `5fd4601a`). "Going to James's baseball games" was placed by estimate at
+2018-01 (07:47), 2018-05 (07:54) and 2019-05 (08:10): every different month
+retired the standing estimate by a `temporal-*` correction, filed a new claim
+and republished the whole projection. The archive-classification backfill was
+running, so this repeated every 5–10 minutes, each round costing a model call,
+a commit, a republish and the vault lease.
+
+**The selection that was at fault.** Every "Classify archive chunk" commit
+starts its own hop-0 `resolve_source` chain. The chunk it hints has nothing to
+place, so leg A falls through `_ordered` to the vault-wide order, and
+`_still_asking`'s `no_answer_returned` rung (`attempts < MAX_ATTEMPTS`) offered
+James's row to it. Three chains (triggers `5f5d757a`, `e4a05407`, `a24921c6`)
+planned the SAME item (key `c1b0d4f0…`) from the SAME ledger and filed it at
+07:47, 07:54 and 08:10. Leg C's staleness check, `targets_digest`, covered the
+node ids and the raw handles only. Since v360 an estimate is filed beside the
+handle (`AN_ESTIMATE_NEVER_RETIRES_HIS_WORDS`) and a placed-by-estimate node
+stays a target ("reachable for revisits", `_Read.__init__`), so nothing in the
+digest moved: the second and third envelope filed as if nobody had answered,
+and `_place_estimate` retired and refiled on any month difference. The loop
+closed through `_unanswered`: an envelope bought before the estimate came back
+silent (04:34, `d1441f61`) and REPLACED the settled row with
+`no_answer_returned`, attempts 1 — erasing the question, the estimate and the
+pointer to the estimate claim it had filed (left active and unowned: Harvey's
+`claim:52ed170d006a74d252a6c39d`) — and that row was the one the next round's
+vault-wide order selected. The date-gated refine path (`revisit_targets`) was
+never involved: every ledger row shows `revisited_by: null`.
+
+**Decision.** Four rules in `system/resolver.py`, one seat each, and one in the
+answer seat.
+
+1. **A plan is filed against the ledger it read**
+   (`A_PLAN_IS_FILED_AGAINST_THE_LEDGER_IT_READ`). `targets_digest` also
+   carries each planned moment's ledger row, so once another filing has written
+   one of its rows the item is `stale_targets` and files nothing — the refusal
+   hosts already treat as a successful no-op. No schema change: the digest is
+   the same opaque string.
+2. **An estimate is revisited only by a dated story**
+   (`AN_ESTIMATE_IS_REVISITED_ONLY_BY_A_DATED_STORY`). `_still_asking` never
+   offers a placed-by-estimate moment to a plan unless it is a revisit, whatever
+   its status says; and `revisit_targets` re-opens one only for a trigger that
+   carries a year (the refine gate, `chronology.YEAR_RE`) or for the person's
+   own answer to its card (the conversation signal). It stays a target, so a
+   revisit can reach it and leg C can file it.
+3. **A guess never replaces a guess** (`A_GUESS_NEVER_REPLACES_A_GUESS`). A
+   standing estimate is replaced only by a verified answer, by an estimate read
+   from a dated revisit, or by one materially narrower inside it (at most
+   `MATERIALLY_NARROWER` = 0.75 of its months, wholly inside —
+   `estimate_is_materially_narrower`). Anything else — a different month, a
+   wider window, no estimate at all — keeps the row, the claim and the
+   projection byte-for-byte (`kept_estimate` on the report); a revisit is still
+   remembered in `revisited_by`.
+4. **A silence never unsettles a reading**
+   (`A_SILENCE_NEVER_UNSETTLES_A_READING`). `_unanswered` keeps a row that
+   already has a reading; only a never-answered or `no_answer_returned` /
+   `file_error` row counts another attempt.
+5. **A date he said in a sentence is a date he said**
+   (`answer_placement.A_DATE_HE_SAID_IN_A_SENTENCE_IS_A_DATE_HE_SAID`). The
+   same morning he answered the card "What year did Charlee switch from flag
+   football to track?" with *"Charlee switched from football to track her
+   freshmen year January 2026"*. `chronology.parse_stated_date` reads a whole
+   reply and refuses prose, so the reply would have filed as a telling and the
+   resolver's 2019–2021-10 window stayed drawn. A reply naming exactly one date
+   — a year, month and year, or season and year, not behind an ordering word
+   and not an address or a quantity — is read as that date, by the one date
+   parser. Under `temporal_timeline.AN_ANSWER_IS_THE_PLACEMENT` it places the
+   moment at 2026-01, basis `stated`; and because it carries a date it re-opens
+   an estimated moment, so a verified answer from his words retires the guess.
+
+`CALCULATION_RULE_VERSION` does **not** move: the fold, the claims it reads and
+the arithmetic are unchanged; this release changes which purchases the
+resolver makes and files. No prompt byte changes, no new verb, no schema.
+
+**Measured** on scratch worktrees of `lifehug/dave` (the original never
+written). Replaying 07:30–08:10 at `a24921c6` with the real answers rebuilt from
+the ledger rows of `55ecaa90`, `6e50fcb3` and `1ed1febd`: the three chains plan
+the same item; the first files its estimate (2018-01) and the other two are
+refused `stale_targets` — no correction, where the real run filed two and
+republished twice more — and A14bc is never planned again. At the head
+(`44b2186a`), `place-answers` reads the Charlee reply as `stated_date` 2026-01;
+the node is placed from his words with no card and no window left.
+
+GUARD: `tests/test_v361_a_guess_never_replaces_a_guess.py` — the three-chain
+race, the vault-wide fallback, a dated story that sharpens, a noisy re-estimate
+that files nothing, a narrower one that replaces, a silent re-ask, and twelve
+backfill rounds of three racing chains over a synthetic vault that settle and
+then churn nothing; the Charlee card end to end.

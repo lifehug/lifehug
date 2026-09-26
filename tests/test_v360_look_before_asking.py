@@ -529,10 +529,12 @@ class ADuplicateNamesItsSurvivorTests(unittest.TestCase):
                                         value={"relation": "after", "anchors": ["the move to Cedarport"]})
         self.dup, self.keep = self.retired["event_ref"], self.survivor["event_ref"]
         self.vault.publish()
-        self.item = resolver.plan_items(self.vault.root, limit=5)["items"][0]
         self.vault.ledger({self.dup: {"status": "unknown", "question": "Which year did the downtown shop open?",
                                       "label": "the downtown shop opens", "source_path": "answers/shop2.md"}})
         self.vault.publish()
+        # v361 (`resolver.A_PLAN_IS_FILED_AGAINST_THE_LEDGER_IT_READ`): the item is
+        # planned from the ledger it will be filed against.
+        self.item = resolver.plan_items(self.vault.root, limit=5, force=True)["items"][0]
         self.card = next(row for row in self.vault.cards() if row.get("node_ref") == self.dup)
         # He answers the card he was shown …
         ts.promote_conversational_source(self.vault.root, "June 1997", {

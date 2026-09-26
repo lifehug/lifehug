@@ -574,6 +574,21 @@ calculating placement against a spine**:
   (`resolver.AN_ESTIMATE_WIDER_THAN_FIVE_YEARS_STAYS_A_WINDOW`): a wider one
   stays the probable window and is asked about only when hot
   (`temporal_publication.A_WIDE_ESTIMATE_IS_ASKED_ONLY_WHEN_HOT`).
+- **An estimate is not guessed again** (v361, the A14bc churn of 2026-09-26).
+  A moment the resolver placed by its own estimate is never planned again by
+  the vault-wide ordering; only a new story that carries a date, or the
+  person's answer to that moment's card, re-opens it
+  (`resolver.AN_ESTIMATE_IS_REVISITED_ONLY_BY_A_DATED_STORY`). A standing
+  estimate is replaced only by a verified answer, by an estimate read from that
+  new dated evidence, or by a window materially narrower inside it — a
+  different month guessed from the same undated story files nothing
+  (`resolver.A_GUESS_NEVER_REPLACES_A_GUESS`). A plan item files only against
+  the ledger rows it was planned from, so two hosted chains that planned the
+  same moment file it once (`resolver.A_PLAN_IS_FILED_AGAINST_THE_LEDGER_IT_READ`),
+  and a re-ask that comes back silent leaves a settled reading exactly as it
+  stood (`resolver.A_SILENCE_NEVER_UNSETTLES_A_READING`). An answer to a card
+  that names one date inside a sentence — *"her freshmen year January 2026"* —
+  is that date (`answer_placement.A_DATE_HE_SAID_IN_A_SENTENCE_IS_A_DATE_HE_SAID`).
 - **Verification is mechanical**: every cited quote must occur in the cited
   passage, every date must parse, ranges must be ordered, a `derived` answer
   must cite the spine fact it came from. What fails files nothing.
@@ -595,7 +610,8 @@ forwarded by the wrapper.) Since v316 that run is also available as two halves a
 host can run apart — `lifehug.py resolve --plan --out <file>` writes the prompts
 it would buy and touches nothing in the vault, `lifehug.py resolve
 --from-response <envelope>`
-files the answers that come back (refusing any whose story has changed since),
+files the answers that come back (refusing any whose story has changed since,
+or — v361 — whose moments another filing has answered since),
 and a card carries the resolver's own proposed question rather than the
 generic one. Since v317 the resolver can also answer that a listed moment is
 **not an event** — an anticipated future milestone, a conversation about the
