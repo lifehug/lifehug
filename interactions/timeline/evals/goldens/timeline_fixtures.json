@@ -833,7 +833,7 @@
   },
   {
     "fixture_id": "timeline-card-answer-ends-at-noted",
-    "context": "The owner's real exchange (staging, 2026-09-26 15:03Z). He pressed ▸ on \"About Charlee · What year did Charlee switch from flag football to track?\" and answered it. The reply he got was \"Football to track, freshman year, January 2026 — noted. What pulled you toward track?\" — a story beat, about the wrong person (he typed \"This is Charlee not me\"). The card has no related moments, so its FIRST reply is its last: confirm in one line, about Charlee, and ask nothing (v361, A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB).",
+    "context": "The owner's real exchange (staging, 2026-09-26 15:03Z). He pressed ▸ on \"About Charlee · What year did Charlee switch from flag football to track?\" and answered it. The reply he got was \"Football to track, freshman year, January 2026 — noted. What pulled you toward track?\" — a story beat, about the wrong person (he typed \"This is Charlee not me\"). The card has no related moments, so its FIRST reply is its last: confirm in one line, about Charlee, and ask nothing (v362, A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB).",
     "action": "card",
     "subject": {
       "ref": "Charlee",

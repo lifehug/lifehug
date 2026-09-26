@@ -549,7 +549,7 @@ WORK_ITEM_STAGE = "work_item"
 ERA_STAGE = "era"
 
 #: The stage a conversation opened right after a MOVE on the Timeline runs in
-#: (v361, owner 2026-09-26: "after I make an edit or a move… it asks me why I
+#: (v362, owner 2026-09-26: "after I make an edit or a move… it asks me why I
 #: made that move"). Like `work_item` and `era` it is a stage of this child,
 #: not a new child: it mints no output field (`placed` is the lane's own, and a
 #: correction that carries a time fills it), and a correction files through the
@@ -1243,12 +1243,12 @@ def work_item_retire_ids(target: object, placed: object) -> tuple[str, ...]:
     return tuple(retire)
 
 
-#: v361: the `correction_kind` of an answer that PLACES a card with nothing to
+#: v362: the `correction_kind` of an answer that PLACES a card with nothing to
 #: retire. A host routes it to `answer_placement.place_card_answer` (the card
 #: seat), never to `mirror_work.resolve_mirror_item`, which retires readings.
 CORRECTION_KIND_PLACE = "place"
 
-#: The rule, in one sentence (v361).
+#: The rule, in one sentence (v362).
 AN_ANSWER_WITH_NOTHING_TO_RETIRE_IS_PLACED = (
     "an answer that dates a card with no rival readings (a precision gap, a "
     "missing anchor) is placed on the turn through the card seat, so the card "
@@ -1280,7 +1280,7 @@ def work_item_resolution(target: object, placed: object, *,
     if not text:
         return None
     if not row["readings"]:
-        # v361 (:data:`AN_ANSWER_WITH_NOTHING_TO_RETIRE_IS_PLACED`): a card with
+        # v362 (:data:`AN_ANSWER_WITH_NOTHING_TO_RETIRE_IS_PLACED`): a card with
         # no rival readings — a precision gap, a missing anchor — has nothing
         # to retire, and before this its answer filed NOTHING on the turn and
         # waited for the daily sweep while the card stayed in front of him.
@@ -1306,7 +1306,7 @@ def work_item_resolution(target: object, placed: object, *,
 
 
 # --------------------------------------------------------------------------
-# A conversation opened from a Timeline ACTION does one job (v361)
+# A conversation opened from a Timeline ACTION does one job (v362)
 # --------------------------------------------------------------------------
 #
 # Owner, 2026-09-26 (staging): he pressed ▸ on "About Charlee · What year did
@@ -1555,7 +1555,7 @@ def card_related(item: object, nodes: object, *, node_aliases: object = None,
     skipped, a node with no label is skipped (a node id is a machine spelling,
     never a question), duplicates collapse, and a former node id resolves
     through ``node_aliases`` first. Moved here from the platform's
-    `work_item_walk.card_constellation` (v361), unchanged in what it keeps.
+    `work_item_walk.card_constellation` (v362), unchanged in what it keeps.
     """
     if not isinstance(item, dict):
         return ()
@@ -1650,7 +1650,7 @@ def card_is_done(session: object, *, related: object = 0) -> bool:
     ``related`` is a count or the related rows themselves. There is no
     `MAX_PROBES` here (owner amendment 2026-09-22, "no hard cap"): the related
     moments bound it. Moved from the platform's `work_item_walk.card_is_done`
-    (v361), unchanged.
+    (v362), unchanged.
     """
     turns = _turn_rows(session)
     if not any(turn.get("role") == "user" for turn in turns):
@@ -2451,13 +2451,13 @@ TIMELINE_LINT_CLASSES = (
     # (`landmarks_interaction.LANDMARK_LINT_CLASSES`) — one definition, two
     # callers (recurring-defect doctrine).
     "never_proposes_a_date",
-    # v361 (owner, 2026-09-26, `A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB`):
+    # v362 (owner, 2026-09-26, `A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB`):
     # a conversation opened from a Timeline action does ONE job. After a
     # card's answer or a move, a story beat ("What pulled you toward
     # track?"), a question about why, or any question where the stage allows
     # none is the defect. Scored only on turns that name the action.
     "one_job",
-    # v361: a card or a move about SOMEONE ELSE is spoken of in the third
+    # v362: a card or a move about SOMEONE ELSE is spoken of in the third
     # person. A question that says "you"/"your" about a life that is not the
     # person typing's ("What pulled you toward track?" on a card about his
     # daughter) asks the wrong person. Scored only when the subject is not
@@ -2465,7 +2465,7 @@ TIMELINE_LINT_CLASSES = (
     "right_person",
 )
 
-#: v361: the replies the owner has ruled out after a Timeline action — a
+#: v362: the replies the owner has ruled out after a Timeline action — a
 #: reflective story beat, an invitation to keep telling, a question about why.
 #: Matched anywhere in the reply, and only on a turn that names its action.
 ONE_JOB_STORY_BEAT_RES = (
@@ -2579,7 +2579,7 @@ def lint_timeline_reply(text: str, *, stage: str, probe_step: str | None = None,
     Findings share `conversation_lints.lint_turn`'s shape so a caller can
     merge them with the inherited Conversation findings uniformly.
 
-    v361: ``action`` ("card" or "move") names a conversation opened from a
+    v362: ``action`` ("card" or "move") names a conversation opened from a
     Timeline action and turns on ``timeline_gates.one_job``; ``subject`` (a
     :func:`subject_view` dict, or a name) turns on
     ``timeline_gates.right_person`` when it is not the owner. Absent, both
@@ -2589,7 +2589,7 @@ def lint_timeline_reply(text: str, *, stage: str, probe_step: str | None = None,
     if stage not in VALID_TIMELINE_STAGES:
         stage = "place"
     if action in ("card", "move") and not action_question_allowed(stage):
-        # v361: a Timeline action's closing reply CONFIRMS — it asks nothing,
+        # v362: a Timeline action's closing reply CONFIRMS — it asks nothing,
         # so the probe's rung (a card's `bounds` probe, say) no longer judges
         # it: "Noted — January 2026" is not a bounds question that failed to
         # offer bounds. It is scored as the rung that means "that's enough to

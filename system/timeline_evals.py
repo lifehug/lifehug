@@ -58,7 +58,7 @@ def _applicable(stage: str, probe_step: str | None,
                 timeline_asks_so_far: int = 0, *, action: str | None = None,
                 subject: object = None) -> frozenset[str]:
     applicable = set(_ALWAYS_APPLICABLE_LINTS)
-    # v361: a conversation opened from a Timeline action is scored on its one
+    # v362: a conversation opened from a Timeline action is scored on its one
     # job, and a moment about someone else on speaking of them in the third
     # person. Only the turns that name them — every other golden is unchanged.
     if action in ("card", "move"):
@@ -121,7 +121,7 @@ def load_gates(*, framework_root: str | Path | None = None) -> dict[str, float]:
     }
 
 
-#: v361: the keys a Timeline-ACTION golden may add — the action it came from,
+#: v362: the keys a Timeline-ACTION golden may add — the action it came from,
 #: the person it is about (`timeline_interaction.subject_view`), the card
 #: (`card_view`) or the move (`move_target`) the conversation carried, and the
 #: one line a move conversation opens with.
@@ -282,7 +282,7 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
         transcript: list[dict] = []
         for turn, pred_turn in zip(fixture["turns"], prediction.get("turns") or []):
             stage = turn["stage"]
-            # v361: the stage an ACTION golden's turn is in is not the
+            # v362: the stage an ACTION golden's turn is in is not the
             # fixture's to assert — it is the one rule's
             # (`card_stage_for_session` / `move_stage_for_session`) over the
             # transcript so far, and the golden is scored on agreeing with it.

@@ -46,7 +46,7 @@ is an ordinary message, `placed` is the same optional field, and any further
 temporal facts in the same breath are heard by the general listener exactly as
 they are in any other conversation.
 
-The card block (v361, `timeline_interaction.render_card_context` over
+The card block (v362, `timeline_interaction.render_card_context` over
 `card_view`) rides a `work_item` turn opened from a Timeline card: the card's
 question, the moment, where it stands now (the node's placement, or "not placed
 yet" with the system's guess labelled as a guess), WHO it is about

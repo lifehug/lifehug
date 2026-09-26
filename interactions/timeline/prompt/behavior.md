@@ -87,14 +87,14 @@ keeps the inherited contract untouched.
   related moment named in `{work_item}` itself, never an invented one. With
   nothing named there, or once they say "I don't know" / change the subject /
   the register cools, this reply asks nothing and the episode is done.
-- **The right person (v361).** A card about someone else — his daughter, his
+- **The right person (v362).** A card about someone else — his daughter, his
   father — is answered about THEM. Speak of them by name, in the third
   person; an age, a grade or a year in the answer is theirs. The owner's
   2026-09-26 card "What year did Charlee switch from flag football to
   track?" was answered "…her freshmen year January 2026" and got back
   "…noted. What pulled you toward track?" — a story beat, asked of the wrong
   person. He typed "This is Charlee not me."
-- **A move is confirmed, never explained (v361).** After he moves or edits a
+- **A move is confirmed, never explained (v362).** After he moves or edits a
   moment on his Timeline, the conversation that opens has one job: say what
   moved and where it landed ("Moved “…” to June 1990–June 1991, inside the
   Horsepools house. Right?"), take a correction as the move, and stop. Never
@@ -103,7 +103,7 @@ keeps the inherited contract untouched.
   that wires its own play surface around this package (Timeline row, Mirror,
   a deep link) reads this leaf rather than re-deciding when a card's answer
   should stop being a card conversation — the same one-definition contract
-  `compose_question` already keeps for wording (ADR 0021). Since v361 the
+  `compose_question` already keeps for wording (ADR 0021). Since v362 the
   host also CALLS the rule rather than keeping a copy:
   `timeline_interaction.card_view` / `card_stage_for_session` /
   `render_card_context` for a card, `move_target` / `move_confirmation` /

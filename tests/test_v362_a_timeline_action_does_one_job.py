@@ -1,4 +1,4 @@
-"""v361 — a conversation opened from a Timeline action knows its context and
+"""v362 — a conversation opened from a Timeline action knows its context and
 does one job.
 
 THE INCIDENT (owner, staging, 2026-09-26 15:03Z). He pressed ▸ on

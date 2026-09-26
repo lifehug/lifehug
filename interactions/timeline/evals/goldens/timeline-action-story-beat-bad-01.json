@@ -1,6 +1,6 @@
 {
  "fixture_id": "timeline-action-story-beat-bad-01",
- "note": "INTENTIONALLY BROKEN (v361, owner 2026-09-26). The replies a conversation opened from a Timeline action must never give — the first three are the owner's real staging replies of 2026-09-26, word for word. NOT a correct reference, so deliberately NOT in timeline_fixtures.json, whose gates are all 1.0. tests/test_timeline_action_conversation.py runs timeline_interaction.lint_timeline_reply over every case and asserts every named class fires.",
+ "note": "INTENTIONALLY BROKEN (v362, owner 2026-09-26). The replies a conversation opened from a Timeline action must never give — the first three are the owner's real staging replies of 2026-09-26, word for word. NOT a correct reference, so deliberately NOT in timeline_fixtures.json, whose gates are all 1.0. tests/test_timeline_action_conversation.py runs timeline_interaction.lint_timeline_reply over every case and asserts every named class fires.",
  "subject": {
   "ref": "Charlee",
   "name": "Charlee",

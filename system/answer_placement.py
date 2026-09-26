@@ -169,14 +169,14 @@ EXTRACTOR_NAME = "answer-placement"
 #: definition; `resolver` reads it from here rather than keeping a second copy.
 SESSION_WORK_ITEM_MARKER = "work_item:"
 
-#: v361 (owner, 2026-09-26: after a move the conversation "asks me why I made
+#: v362 (owner, 2026-09-26: after a move the conversation "asks me why I made
 #: that move"). The marker a MOVE conversation's session carries —
 #: ``conversation:cand:timeline:moved:node:<hex>`` — naming the node he just
 #: moved. A reply there is a confirmation or a correction of that move, and a
 #: correction is filed exactly as a card's answer is (:func:`card_for_move`).
 SESSION_MOVE_MARKER = "timeline:moved:"
 
-#: The rule, in one sentence (v361).
+#: The rule, in one sentence (v362).
 A_MOVE_CORRECTION_IS_THE_MOVE = (
     "a reply promoted with a session_ref naming a move is a confirmation or a "
     "correction of that move: a correction is filed on the moved node exactly as "
@@ -256,7 +256,7 @@ AN_ANSWER_OUTLIVES_ITS_CARD = (
 #: one :data:`AN_ANSWER_OUTLIVES_ITS_CARD` re-derived.
 CARD_PUBLISHED = "published"
 CARD_CLOSED = "closed"
-#: v361: the card a MOVE conversation's reply answers (:func:`card_for_move`).
+#: v362: the card a MOVE conversation's reply answers (:func:`card_for_move`).
 CARD_MOVE = "move"
 
 #: The event kind a card's node falls back to when the projection names none.
@@ -278,7 +278,7 @@ REFUSED_NODE_NOT_DRAWN = "card_node_not_drawn"
 REFUSED_SUBJECT_UNRESOLVED = "card_subject_unresolved"
 REFUSED_NO_WORDS = "reply_has_no_words"
 REFUSED_SOURCE_UNREADABLE = "reply_source_unreadable"
-#: v361: a move conversation's reply that only agreed ("Yes") — nothing to file.
+#: v362: a move conversation's reply that only agreed ("Yes") — nothing to file.
 REFUSED_MOVE_CONFIRMED = "move_confirmed"
 REFUSALS = (
     REFUSED_NO_WORK_ITEM,
@@ -310,7 +310,7 @@ READINGS = (READING_DATE, READING_AGE, READING_GRADE, READING_RECENCY, READING_T
 
 def node_of_move_session(session_ref: object) -> str:
     """``conversation:cand:timeline:moved:node:<hex>`` → ``node:<hex>``, else
-    ``""`` (v361, :data:`A_MOVE_CORRECTION_IS_THE_MOVE`). A day-scoped sibling
+    ``""`` (v362, :data:`A_MOVE_CORRECTION_IS_THE_MOVE`). A day-scoped sibling
     (``…:2026-09-26``) is the same move."""
     text = collapsed_text(session_ref)
     if SESSION_MOVE_MARKER not in text:
@@ -321,11 +321,11 @@ def node_of_move_session(session_ref: object) -> str:
 
 def answers_a_card(session_ref: object) -> bool:
     """Does a promoted reply answer something this module places — a card's
-    work item, or the move a move conversation confirmed (v361)?"""
+    work item, or the move a move conversation confirmed (v362)?"""
     return bool(work_item_of_session(session_ref) or node_of_move_session(session_ref))
 
 
-#: v361: the replies a move conversation hears when the person simply agrees.
+#: v362: the replies a move conversation hears when the person simply agrees.
 #: A reply made ONLY of these words carries no correction, and files nothing —
 #: it is not a telling of the moment, and filing "yes" as one would be noise
 #: on the node he just moved.
@@ -344,7 +344,7 @@ def is_bare_confirmation(text: object) -> bool:
 
 def card_for_move(node_ref: object, *, projection: object,
                   redirects: object = None) -> tuple[dict | None, str]:
-    """The card-shaped target a move conversation's reply answers (v361).
+    """The card-shaped target a move conversation's reply answers (v362).
 
     Same keys as :func:`card_for_work_item`, built from the moved NODE itself —
     a move has no work item, and the node is exactly what the correction is
@@ -1258,7 +1258,7 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
         moved = node_of_move_session(row["session_ref"]) and not work_item_of_session(
             row["session_ref"])
         if moved and is_bare_confirmation(row["text"]):
-            # v361 :data:`A_MOVE_CORRECTION_IS_THE_MOVE`: "Yes" to "Moved X to
+            # v362 :data:`A_MOVE_CORRECTION_IS_THE_MOVE`: "Yes" to "Moved X to
             # June 1990. Right?" is the move standing — nothing to file.
             _refuse(report, row, REFUSED_MOVE_CONFIRMED, closed=closed)
             continue
@@ -1300,7 +1300,7 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
 
 def place_card_answer(vault_root: str | Path, *, session_ref: object, text: object,
                       publish: bool = True, now: object = None) -> dict:
-    """Place ONE answer on its card NOW — the on-change seat (v361,
+    """Place ONE answer on its card NOW — the on-change seat (v362,
     `timeline_interaction.AN_ANSWER_WITH_NOTHING_TO_RETIRE_IS_PLACED`).
 
     The same rule as :func:`place_answers`, for one reply, called by a host the

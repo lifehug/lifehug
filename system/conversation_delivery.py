@@ -1888,7 +1888,7 @@ def _file_work_item_resolution(target: object, placed: object, *,
         wanted = str(kwargs.pop("work_item_id"))
         root = vault_root if vault_root is not None else VAULT_ROOT
         if kwargs.get("correction_kind") == _ti.CORRECTION_KIND_PLACE:
-            # v361 `AN_ANSWER_WITH_NOTHING_TO_RETIRE_IS_PLACED`: a card with no
+            # v362 `AN_ANSWER_WITH_NOTHING_TO_RETIRE_IS_PLACED`: a card with no
             # rival readings is placed now, through the card seat — the same
             # call the hosted platform's `resolve-work-item` driver makes.
             import answer_placement  # noqa: PLC0415
@@ -1943,7 +1943,7 @@ def run_post_answer_turn(
 ) -> TurnOutcome:
     """Run ONE conversation turn for a durable answer, or degrade to today.
 
-    ``work_item`` makes this a CARD conversation (v234); ``card`` (v361) is the
+    ``work_item`` makes this a CARD conversation (v234); ``card`` (v362) is the
     host's own `timeline_interaction.card_view` of it when the host already
     read the projection — absent, it is read here from the published files.
 
@@ -2084,7 +2084,7 @@ def run_post_answer_turn(
         if work_item_row is not None:
             timeline_item = None
     if work_item_row is not None:
-        # v361 `timeline_interaction.A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB`:
+        # v362 `timeline_interaction.A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB`:
         # a conversation opened from a card is the CARD's — its stage is the
         # card rule (`card_stage_for_session`, never `MAX_PROBES`), a closing
         # reply may not carry a question at all (`action_question_allowed`
@@ -2285,14 +2285,14 @@ def run_post_answer_turn(
     if work_item_row is not None:
         # The quiet case is the common one and it writes nothing at all:
         # `work_item_resolution` returns None unless the person named one of
-        # the readings already on the table (§2.5), or (v361) dated a card
+        # the readings already on the table (§2.5), or (v362) dated a card
         # that has none.
         _file_work_item_resolution(
             work_item_row, placed_record, answer_text=answer_text,
             session_id=session_id, vault_root=vault_root,
         )
         if shape.timeline_stage == "close":
-            # v361: the card's last reply is sent — the conversation is done.
+            # v362: the card's last reply is sent — the conversation is done.
             try:
                 conversation.close_session(session_id, {"reason": "done"},
                                            vault_root=vault_root)

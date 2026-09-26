@@ -20,7 +20,7 @@ timeline_gates.one_per_conversation.compliance: 1.0
 # that configuration exactly, so the session never proposes a date and
 # asks for agreement. Shared verbatim with the landmarks lane.
 timeline_gates.never_proposes_a_date.compliance: 1.0
-# v361 (owner, 2026-09-26, `timeline_interaction
+# v362 (owner, 2026-09-26, `timeline_interaction
 # .A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB`): a conversation opened from a
 # Timeline action — a card's answer, a move — confirms and stops, or asks ONE
 # grounded related question; never a story beat, never why. And a moment about

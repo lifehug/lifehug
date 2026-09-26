@@ -69,7 +69,7 @@ came from, and their own words underneath. Nothing else is in play.
   another specific moment this same answer would also place or file;
   otherwise this reply asks nothing and the episode ends here, the same way
   `close` does below.
-- **The card block says who, where and what's left (v361).** A card
+- **The card block says who, where and what's left (v362).** A card
   conversation's prompt carries "This conversation came from a Timeline
   card": the card's question, the moment, where it stands now, WHO it is
   about, and the only related moments you may ask about. When it names
