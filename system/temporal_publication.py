@@ -880,8 +880,23 @@ def _with_relation_words(payloads: dict, *, roster_snapshot: object, index: obje
         return
 
 
+def _stated_folds(vault_root: object) -> list:
+    """v365 (owner, 2026-09-26): the owner's own folds by drag
+    (`timeline_combine.stated_folds`). ``[]`` on any problem — never takes a
+    publish down."""
+    if vault_root is None:
+        return []
+    try:
+        import timeline_combine  # noqa: PLC0415
+
+        return timeline_combine.stated_folds(vault_root)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _with_timeline_views(payloads: dict, *, roster_snapshot: object, index: object,
-                         landmark_entries: object, owner_names: object) -> None:
+                         landmark_entries: object, owner_names: object,
+                         stated_folds: object = ()) -> None:
     """`timeline_views.with_views` over the rendered projection, in place.
 
     v360 (owner, 2026-09-25) (the owner's Landmark and Cornerstone views): the
@@ -898,7 +913,7 @@ def _with_timeline_views(payloads: dict, *, roster_snapshot: object, index: obje
         timeline_views.with_views(
             payloads, projection_key=PROJECTION_FILE, index=index,
             landmark_entries=landmark_entries or (), roster=roster_snapshot,
-            owner_names=owner_names or (), claims=claims)
+            owner_names=owner_names or (), claims=claims, stated_folds=stated_folds or ())
     except Exception:  # noqa: BLE001
         return
 
@@ -1234,6 +1249,7 @@ def publish(
         told = rw.own_telling_texts(vault_root)
     except Exception:  # noqa: BLE001 - never takes a publish down
         told = {}
+    stated = _stated_folds(vault_root)
     fingerprint = derivation_fingerprint(
         index_digest=digest,
         derivation_inputs=derivation_inputs,
@@ -1246,6 +1262,7 @@ def publish(
         resolver_estimates=estimates,
         resolver_attempts=attempts,
         own_tellings=told,
+        stated_folds=stated,
     )
     if not full:
         standing = _standing_publication(
@@ -1313,7 +1330,7 @@ def publish(
     # labels and every card they added). Same seam, same rule.
     _with_timeline_views(payloads, roster_snapshot=roster_snapshot, index=index,
                          landmark_entries=derivation_inputs.get("landmark_entries"),
-                         owner_names=owner_names)
+                         owner_names=owner_names, stated_folds=stated)
 
     # THE SEMANTIC NO-OP (eras design §3.4). Age frames make the projection a
     # function of the clock as well as of the receipts, so "publish again"
@@ -1441,6 +1458,7 @@ def derivation_fingerprint(
     roster_snapshot: object, owner_names: object, birth_date: object,
     owner_ref: object, resolver_questions: dict, resolver_estimates: dict | None = None,
     resolver_attempts: dict | None = None, own_tellings: dict | None = None,
+    stated_folds: object = None,
 ) -> str | None:
     """A digest over EVERY argument `derive_calculated_timeline` is given.
 
@@ -1469,6 +1487,9 @@ def derivation_fingerprint(
             "resolver_attempts": resolver_attempts,
             **({"own_tellings": store.payload_sha256(_canonical(own_tellings))}
                if own_tellings else {}),
+            # v365 (owner, 2026-09-26): a fold he made by drag is an input of the
+            # landmarks view (absent when there is none: byte-identical).
+            **({"stated_folds": list(stated_folds)} if stated_folds else {}),
         }))
     except (TypeError, ValueError):
         return None
@@ -2026,7 +2047,7 @@ def verify(
     _with_timeline_views({PROJECTION_FILE: fresh}, roster_snapshot=roster_snapshot,
                          index=index,
                          landmark_entries=derivation_inputs.get("landmark_entries"),
-                         owner_names=owner_names)
+                         owner_names=owner_names, stated_folds=_stated_folds(vault_root))
     want, have = rebuild_signature(fresh), rebuild_signature(published)
     return {
         "published": True,

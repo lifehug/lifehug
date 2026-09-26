@@ -77,6 +77,8 @@ READ_ONLY_COMMANDS = frozenset({
     # episode plan from the bank and prints it — pure reads, no writer lock,
     # exactly like arc-card above.
     "arc-plan-target", "arc-walk-evals",
+    # v365 (owner, 2026-09-26): what a drop WOULD tighten to — decides, files nothing.
+    "timeline-move-decide",
     # timeline-chronology (v195, Design §D/§E): both are pure reads —
     # the seat gate scores committed goldens, and the timeline plan
     # recomputes unknowns from the vault and prints them.
@@ -227,6 +229,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # sources/corrections/ and republishes the calculated projection. Same
     # single-transaction vault mutation family as timeline-place.
     "timeline-move", "timeline-move-undo",
+    # v365 (owner, 2026-09-26) (`timeline_combine`): combine and fold by drag file a
+    # statement under sources/corrections/ (and, for a combine, event identity
+    # records) and republish — the same single-transaction family.
+    "timeline-combine", "timeline-combine-undo", "timeline-fold", "timeline-fold-undo",
     # E3 (eras §4.4): the ATOMIC era writer. One payload creates the
     # identity, names it, decides its kind, files and binds its claims, files
     # a `within` and publishes — in one act, every step idempotent. Same
@@ -961,7 +967,25 @@ def cmd_timeline_move(args: argparse.Namespace) -> int:
     import timeline  # noqa: PLC0415
     from temporal_claims import TemporalContractError  # noqa: PLC0415
 
+    import drag_tighten  # noqa: PLC0415
+    import temporal_publication  # noqa: PLC0415
+
     reason = "" if sys.stdin.isatty() else sys.stdin.read().strip()
+    # v365 (owner, 2026-09-26) (`drag_tighten.A_DROP_INSIDE_LANDMARKS_TIGHTENS_TO_THEIR_
+    # OVERLAP`): the projection the person was LOOKING AT when they dropped, read
+    # before anything is filed. The move below is filed exactly as it always was.
+    seen = temporal_publication.read_projection(REPO_DIR) or {}
+    # v365 (owner, 2026-09-26): a drop on a landmark boundary line names the stays
+    # that start or end there (`drag_tighten.A_DROP_AT_A_BOUNDARY_IS_INSIDE_
+    # WHAT_STARTS_OR_ENDS_THERE`). Additive: without it, nothing changes.
+    import landmark_fold  # noqa: PLC0415
+
+    boundaries = list(getattr(args, "boundary", None) or ())
+    bad = [b for b in boundaries if landmark_fold.parse_boundary_anchor(b) is None]
+    if bad:
+        print(f"Error: not a landmark boundary (landmark:<entry_id>:<stay>:start|end): {', '.join(bad)}",
+              file=sys.stderr)
+        return 1
     try:
         constraint = temporal_store.file_ordering_constraint(
             REPO_DIR,
@@ -969,7 +993,10 @@ def cmd_timeline_move(args: argparse.Namespace) -> int:
             subject_node_id=args.node,
             anchor_node_ids=args.anchor,
             reason=reason or None,
-            supersedes_constraint_id=args.supersedes,
+            # v365 (owner, 2026-09-26): a re-drop after an Undo re-files.
+            supersedes_constraint_id=temporal_store.redrop_supersedes(
+                REPO_DIR, relation=args.relation, subject_node_id=args.node,
+                anchor_node_ids=args.anchor, supersedes_constraint_id=args.supersedes),
             subject_label=args.label,
             anchor_labels=args.anchor_label,
             author=args.author,
@@ -977,12 +1004,142 @@ def cmd_timeline_move(args: argparse.Namespace) -> int:
     except TemporalContractError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    tightened = None
+    decision: dict = {}
+    if not getattr(args, "no_tighten", False):
+        decision = drag_tighten.decide(
+            seen, subject_node_id=args.node, relation=args.relation,
+            anchor_node_ids=args.anchor,
+            now_month=drag_tighten.month_of(seen.get("published_at")),
+            boundary_anchors=boundaries,
+        )
+        if decision["outcome"] in drag_tighten.FILING_OUTCOMES:
+            subject = next(n for n in seen.get("nodes") or () if n.get("node_id") == args.node)
+            tightened = drag_tighten.file_tightening(
+                REPO_DIR, constraint=constraint, decision=decision, subject=subject)
     summary = timeline.publish_calculated_timeline(REPO_DIR)
     print(f"✓ {constraint['reason']}")
     print(f"  constraint: {constraint['constraint_id']}")
     print(f"  source: {constraint['relative_path']}")
+    if tightened is not None:
+        words = drag_tighten.window_words(tightened["window"])
+        inside = ", ".join(f"{m['label']} ({m['family']})" for m in decision.get("landmarks") or ())
+        print(f"  tightened ({tightened['outcome']}): {words}, your statement"
+              + (f"; inside {inside}" if inside else ""))
+        print(f"  tighten claim: {tightened['claim_id']}")
+        if tightened["outcome"] == drag_tighten.OUTCOME_HIS_DATE_DISAGREES:
+            print("  it disagrees with a date you gave; a question will ask which is right")
+    elif decision:
+        print(f"  not tightened ({decision['outcome']}): {decision.get('why') or 'ordinary move'}")
+    if getattr(args, "json", False):
+        print(json.dumps({"constraint_id": constraint["constraint_id"],
+                          "source": constraint["relative_path"],
+                          "tighten": decision or None,
+                          "tighten_claim_id": (tightened or {}).get("claim_id"),
+                          "generation": summary["generation"]}, sort_keys=True))
     print(f"  projection generation {summary['generation']}")
     return 0
+
+
+def cmd_timeline_move_decide(args: argparse.Namespace) -> int:
+    """`timeline-move-decide` — READ-ONLY. One JSON line: what
+    `drag_tighten.decide_drop` says this drop would tighten to, against the
+    published projection (or ``--projection FILE``). Files nothing.
+
+    v365 (owner, 2026-09-26): the page shows a drop's window the moment it
+    lands; the `timeline-move` that follows decides again for itself."""
+    import json  # noqa: PLC0415
+
+    import drag_tighten  # noqa: PLC0415
+    import temporal_publication  # noqa: PLC0415
+
+    if args.projection:
+        try:
+            seen = json.loads(Path(args.projection).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print(f"Error: cannot read the projection: {exc}", file=sys.stderr)
+            return 1
+    else:
+        seen = temporal_publication.read_projection(REPO_DIR) or {}
+    decision = drag_tighten.decide_drop(seen, node=args.node, relation=args.relation,
+                                        anchors=args.anchor, boundaries=args.boundary)
+    print(json.dumps(decision, sort_keys=True, default=str))
+    return 0
+
+
+def _timeline_gesture(args: argparse.Namespace, act) -> int:
+    """Run one timeline gesture (combine, fold, or an undo), republish, report.
+
+    v365 (owner, 2026-09-26) (`timeline_combine`). The act files; the ONE publisher
+    republishes; the verb prints the statement id (``combine:<hex>`` /
+    ``fold:<hex>``) so the page's Undo can name it, and ``--json`` one line."""
+    import json  # noqa: PLC0415
+
+    import timeline  # noqa: PLC0415
+    from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    reason = "" if sys.stdin.isatty() else sys.stdin.read().strip()
+    try:
+        result = act(reason)
+    except TemporalContractError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    summary = timeline.publish_calculated_timeline(REPO_DIR)
+    for key in ("combine_id", "fold_id", "undo_id", "episode_id"):
+        if result.get(key):
+            print(f"  {key.replace('_', ' ')}: {result[key]}")
+    if getattr(args, "json", False):
+        print(json.dumps({**result, "generation": summary["generation"]}, sort_keys=True, default=str))
+    print(f"  projection generation {summary['generation']}")
+    return 0
+
+
+def cmd_timeline_combine(args: argparse.Namespace) -> int:
+    """`timeline-combine` — a row dropped ONTO a row: the same moment
+    (`timeline_combine.A_ROW_DROPPED_ON_A_ROW_IS_THE_SAME_MOMENT`)."""
+    import timeline_combine as tcm  # noqa: PLC0415
+
+    def act(reason: str) -> dict:
+        out = tcm.combine(REPO_DIR, subject_node_id=args.node, target_node_id=args.with_node,
+                          reason=reason, author=args.author)
+        print(f"✓ {out['subject_label']} and {out['target_label']} are one moment now, your statement")
+        return out
+    return _timeline_gesture(args, act)
+
+
+def cmd_timeline_combine_undo(args: argparse.Namespace) -> int:
+    import timeline_combine as tcm  # noqa: PLC0415
+
+    def act(reason: str) -> dict:
+        out = tcm.undo_combine(REPO_DIR, args.combine_id, reason=reason, author=args.author)
+        print(f"✓ Combine {args.combine_id} undone; its record remains" if out.get("undone")
+              else f"✓ Combine {args.combine_id} was already undone")
+        return out
+    return _timeline_gesture(args, act)
+
+
+def cmd_timeline_fold(args: argparse.Namespace) -> int:
+    """`timeline-fold` — a row dropped onto a landmark line folds into it
+    (`timeline_combine.A_ROW_DROPPED_ON_A_LANDMARK_FOLDS_INTO_IT`)."""
+    import timeline_combine as tcm  # noqa: PLC0415
+
+    def act(reason: str) -> dict:
+        out = tcm.fold_into_landmark(REPO_DIR, node_id=args.node, entry_id=args.landmark,
+                                     stay_index=args.stay, reason=reason, author=args.author)
+        print(f"✓ Folded into {out['landmark_label']}, your statement")
+        return out
+    return _timeline_gesture(args, act)
+
+
+def cmd_timeline_fold_undo(args: argparse.Namespace) -> int:
+    import timeline_combine as tcm  # noqa: PLC0415
+
+    def act(reason: str) -> dict:
+        out = tcm.undo_fold(REPO_DIR, args.fold_id, reason=reason, author=args.author)
+        print(f"✓ Fold {args.fold_id} undone; its record remains" if out.get("undone")
+              else f"✓ Fold {args.fold_id} was already undone")
+        return out
+    return _timeline_gesture(args, act)
 
 
 def cmd_timeline_move_undo(args: argparse.Namespace) -> int:
@@ -990,6 +1147,8 @@ def cmd_timeline_move_undo(args: argparse.Namespace) -> int:
     import temporal_store  # noqa: PLC0415
     import timeline  # noqa: PLC0415
     from temporal_claims import TemporalContractError  # noqa: PLC0415
+
+    import drag_tighten  # noqa: PLC0415
 
     reason = "" if sys.stdin.isatty() else sys.stdin.read().strip()
     try:
@@ -1002,9 +1161,18 @@ def cmd_timeline_move_undo(args: argparse.Namespace) -> int:
     except TemporalContractError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    # v365 (owner, 2026-09-26): a drop that tightened the moment is undone WITH it —
+    # its window claim is retracted by one more correction, and kept on disk.
+    moved = next((row for row in temporal_store.load_ordering_constraints(REPO_DIR)
+                  if row["constraint_id"] == args.constraint_id), None)
+    undone = (drag_tighten.undo_tightening(REPO_DIR, moved, reason=reason or "Undone on the timeline.",
+                                           author=args.author)
+              if moved is not None else [])
     summary = timeline.publish_calculated_timeline(REPO_DIR)
     print(f"✓ Move {args.constraint_id} undone; its record remains")
     print(f"  correction: {correction.relative_path}")
+    if undone:
+        print(f"  the drop's window is undone too: {', '.join(undone)}")
     print(f"  projection generation {summary['generation']}")
     return 0
 
@@ -3948,13 +4116,63 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Display name for an anchor, in --anchor order (prose only)")
     p.add_argument("--supersedes", help="Constraint id this move replaces (amendment or redo)")
     p.add_argument("--author", help="Who moved it (source_medium; default owner)")
+    p.add_argument("--no-tighten", dest="no_tighten", action="store_true",
+                   help="File the move only; never tighten its date from the brackets "
+                        "(drag_tighten.A_DROP_INSIDE_LANDMARKS_TIGHTENS_TO_THEIR_OVERLAP)")
+    p.add_argument("--json", action="store_true",
+                   help="Also print one JSON line: the constraint, the tightening decision")
+    p.add_argument("--boundary", action="append", default=[],
+                   help="A landmark boundary the drop sits at, landmark:<entry_id>:<stay>:start|end "
+                        "(repeatable; drag_tighten.A_DROP_AT_A_BOUNDARY_IS_INSIDE_WHAT_STARTS_OR_ENDS_THERE)")
     p.set_defaults(func=cmd_timeline_move)
+
+    p = sub.add_parser("timeline-move-decide",
+                       help="READ-ONLY: print (JSON) what a drop would tighten to; files nothing")
+    p.add_argument("node", help="The calculated node id being dropped")
+    p.add_argument("--relation", required=True, choices=["before", "after", "between", "within"])
+    p.add_argument("--anchor", action="append", default=[], help="Anchor node id (repeatable)")
+    p.add_argument("--boundary", action="append", default=[],
+                   help="A landmark boundary the drop sits at (as timeline-move --boundary)")
+    p.add_argument("--projection", help="Decide against this projection JSON instead of the vault's")
+    p.set_defaults(func=cmd_timeline_move_decide)
 
     p = sub.add_parser("timeline-move-undo",
                        help="Undo a filed move; its record and evidence remain (reason on stdin)")
     p.add_argument("constraint_id", help="The constraint id the move returned")
     p.add_argument("--author", help="Who undid it (source_medium; default owner)")
     p.set_defaults(func=cmd_timeline_move_undo)
+
+    # v365 (owner, 2026-09-26) (`timeline_combine`): combine and fold by drag.
+    p = sub.add_parser("timeline-combine",
+                       help="A row dropped onto another row: the same moment, both tellings kept "
+                            "(reason on stdin; undo with timeline-combine-undo)")
+    p.add_argument("node", help="The dragged row's node id")
+    p.add_argument("--with", dest="with_node", required=True, help="The row it was dropped onto")
+    p.add_argument("--author", help="Who combined them (source_medium; default owner)")
+    p.add_argument("--json", action="store_true", help="Also print one JSON line")
+    p.set_defaults(func=cmd_timeline_combine)
+
+    p = sub.add_parser("timeline-combine-undo", help="Undo a combine; its record remains")
+    p.add_argument("combine_id", help="combine:<24 hex>, as timeline-combine printed it")
+    p.add_argument("--author", help="Who undid it (source_medium; default owner)")
+    p.add_argument("--json", action="store_true", help="Also print one JSON line")
+    p.set_defaults(func=cmd_timeline_combine_undo)
+
+    p = sub.add_parser("timeline-fold",
+                       help="A row dropped onto a landmark line: fold it into that landmark "
+                            "(reason on stdin; undo with timeline-fold-undo)")
+    p.add_argument("node", help="The dragged row's node id")
+    p.add_argument("--landmark", required=True, help="The landmark's entry id (residences:hope)")
+    p.add_argument("--stay", type=int, default=0, help="Its stay index (default 0)")
+    p.add_argument("--author", help="Who folded it (source_medium; default owner)")
+    p.add_argument("--json", action="store_true", help="Also print one JSON line")
+    p.set_defaults(func=cmd_timeline_fold)
+
+    p = sub.add_parser("timeline-fold-undo", help="Undo a fold by drag; its record remains")
+    p.add_argument("fold_id", help="fold:<24 hex>, as timeline-fold printed it")
+    p.add_argument("--author", help="Who undid it (source_medium; default owner)")
+    p.add_argument("--json", action="store_true", help="Also print one JSON line")
+    p.set_defaults(func=cmd_timeline_fold_undo)
 
     p = sub.add_parser("era-record",
                        help="Create/name/date an era in ONE act (JSON payload on stdin)")
