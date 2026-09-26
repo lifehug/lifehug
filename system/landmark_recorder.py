@@ -70,7 +70,7 @@ import conversation_delivery
 import general_listener as gl
 import landmarks_interaction as li
 import temporal_claims as tc
-from lifehug_core import INTERACTIONS_DIR
+from lifehug_core import INTERACTIONS_DIR, fill_how_words_arrive
 
 RECORDER_PROMPT = "recorder.md"
 
@@ -175,9 +175,13 @@ def _prompt_path(framework_root: str | Path | None = None) -> Path:
 
 
 def load_recorder_leaf(framework_root: str | Path | None = None) -> str:
-    """The recorder leaf, verbatim. A host REPLAYs exactly this text."""
+    """The recorder leaf, verbatim but for the shared ``{how_words_arrive}``
+    block (`lifehug_core.fill_how_words_arrive`). A host REPLAYs exactly this
+    text, and the extractor version is taken over it, so an edit to the shared
+    block is a new extractor exactly as an edit to the leaf is."""
     try:
-        return _prompt_path(framework_root).read_text(encoding="utf-8")
+        return fill_how_words_arrive(
+            _prompt_path(framework_root).read_text(encoding="utf-8"), framework_root)
     except OSError as exc:
         raise LandmarkRecorderError(f"no recorder leaf: {exc}") from exc
 
@@ -592,6 +596,22 @@ def file_claims(vault_root, outcome: object, *, message_text: str,
                 "speaker": speaker, "channel": channel,
                 "occurred_at": occurred_at}
     metadata = {key: value for key, value in metadata.items() if value}
+    if drafts and card is None:
+        # A REPEATED TEXT IS LINKED TO ITS FIRST ARRIVAL (owner 2026-09-25,
+        # `temporal_store.A_REPEATED_TEXT_IS_LINKED_TO_ITS_FIRST_ARRIVAL`).
+        # The promotion records which source these exact words already are,
+        # so the binder can join its tellings to that source's. The reading
+        # still files: measured on his vault, a second reader of a repeated
+        # text heard moments the first did not, so suppressing it would lose
+        # them. An answer to a card is never a repeat.
+        from temporal_store import (  # noqa: PLC0415
+            REPEATS_SOURCE_KEY, conversation_source_relative_path,
+            promotion_digest, repeated_source)
+
+        itself = conversation_source_relative_path(promotion_digest(message_text, metadata))
+        earlier = repeated_source(vault_root, message_text, exclude=(itself,))
+        if earlier:
+            metadata[REPEATS_SOURCE_KEY] = earlier
     filed = None
     if drafts:
         filed = file_message_extraction(

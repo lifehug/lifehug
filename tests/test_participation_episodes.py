@@ -312,18 +312,23 @@ class TwoStaysAtOnePlace(ParticipationEpisodeCase):
         self.assertEqual(refused[0]["kind"], "place_ambiguous")
         self.assertEqual(len(refused[0]["episode_ids"]), 2)
 
-    def test_one_place_ambiguous_item_names_both_stretches(self):
+    def test_one_place_asks_no_which_time_card(self):
+        """v360 follow-up (owner, 2026-09-25) (`timeline-rules:23`,
+        `temporal_timeline.A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`, owner:
+        "place the story across both stays"). Until then this asked "Which time
+        in Cedarport was this — 1988–1990 or 1996–1999?"."""
         items = [row for row in self.timeline.work_items
                  if row["kind"] == "place_ambiguous"]
-        self.assertEqual(len(items), 1)
-        self.assertEqual(
-            items[0]["prompt_intent"],
-            "Which time in Cedarport was this — 1988–1990 or 1996–1999?",
-        )
+        self.assertEqual(items, [])
 
-    def test_the_member_is_left_unplaced_rather_than_guessed(self):
+    def test_the_member_spans_both_stays_rather_than_guessing_one(self):
+        """Not one stay guessed: every stay at the one place, minus the gap
+        between them — the containment rung still files nothing."""
         node = self.node_labelled("The zoo trip in Cedarport")
-        self.assertIsNone(node.get("best_temporal_value"))
+        best = node.get("best_temporal_value") or {}
+        self.assertEqual((best.get("earliest"), best.get("latest")), ("1988", "1999"))
+        self.assertIn({"rule": "place_anchor_gap"}.get("rule"),
+                      [row.get("rule") for row in best.get("provenance") or ()])
         self.assertIsNone(node.get("possible_temporal_value"))
 
 

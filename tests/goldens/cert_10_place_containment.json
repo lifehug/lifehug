@@ -1,5 +1,5 @@
 {
-  "calculation_rule_version": "timeline-rules:18",
+  "calculation_rule_version": "timeline-rules:25",
   "cases": {
     "no_episode": {
       "expected": {
@@ -62,9 +62,13 @@
     "two_episodes_same_place": {
       "expected": {
         "contained_nodes": 0,
-        "place_ambiguous_items": 1,
-        "prompt_intent": "Which time in San Diego was this — 1988–1990 or 1996–1999?",
+        "place_ambiguous_items": 0,
         "residence_episodes": 2,
+        "spans_the_stays": {
+          "earliest": "1988",
+          "gap": "1991/1995",
+          "latest": "1999"
+        },
         "work_item_kind": "place_ambiguous"
       },
       "moments": [

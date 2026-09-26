@@ -811,10 +811,10 @@ class CalculationRuleVersionTests(unittest.TestCase):
     def test_the_rule_version_moved(self):
         """Nodes, aliases AND cards change for a vault nobody edited, which is
         what this number is for."""
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
         result = derive([dad_graduated()], roster=ROSTER)
         for node in result.nodes:
-            self.assertEqual(node["calculation_rule_version"], "timeline-rules:18")
+            self.assertEqual(node["calculation_rule_version"], "timeline-rules:25")
 
     def test_the_three_rules_are_reachable_by_name(self):
         for module, name in ((eb, "A_COUPLE_IS_TWO_PEOPLE"),

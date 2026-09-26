@@ -106,8 +106,10 @@ RESOLVER_WINDOW = {"best": "1973-06/1976-06", "earliest": "1973-06",
                    "latest": "1976-06", "granularity": "range",
                    "basis": "anchor", "confidence": "inferred"}
 
-#: The day-exact window: ages 19 to 21 from 1954-06-04.
-MISSION_WINDOW = ("1973-06-04", "1976-06-03")
+#: Ages 19 to 21 from 1954-06-04 — day-exact 1973-06-04/1976-06-03 under
+#: v359, held at the birth MONTH since timeline-rules:19
+#: (`chronology.AGE_STATEMENT_GRAIN`).
+MISSION_WINDOW = ("1973-06", "1976-06")
 
 SNAKE_REPLY = ("This would have happened, probably when I was 4 or 5, when we "
                "lived at the Fiegers' house.")
@@ -340,21 +342,23 @@ class TheResolverClosedTheCardFirstTests(unittest.TestCase):
                          [("age", "person/james-taylor", self.node)])
 
     def test_the_answer_joins_the_placement_it_agrees_with(self):
-        """v345's ruling, unchanged: an age that agrees with a dated moment is
-        evidence ON the placement, not a rival — and the answer is now that
-        evidence, measured day-exact from the father's own birth."""
+        """v359 drew the resolver's reading here, with the answer as evidence
+        on it (v345's ruling). timeline-rules:19 amends that
+        (`temporal_timeline.AN_ANSWER_IS_THE_PLACEMENT`): the answer IS the
+        placement, month-grained, and the resolver's reading is the evidence;
+        `tests/test_v360_answer_is_the_placement.py` holds the rule."""
         ap.place_answers(self.vault.root, now=NOW)
         self.vault.publish()
         record = self.vault.best("Dad's mission")
         self.assertEqual((record["best"], record["basis"]),
-                         ("1973-06/1976-06", "anchor"))
+                         ("1973-06/1976-06", "age"))
         claim_id = self.vault.claims_from(self.promoted.source_path)[0]["claim_id"]
         self.assertIn(claim_id, {row.get("claim_id") for row in record["provenance"]})
         findings = [row for row in (pub.read_projection(self.vault.root) or {})
                     ["diagnostics"]["findings"]
-                    if row.get("finding") == tt.DIAGNOSTIC_AGE_CORROBORATES]
-        self.assertEqual([row["age_window"] for row in findings],
-                         ["/".join(MISSION_WINDOW)])
+                    if row.get("finding") == tt.DIAGNOSTIC_ANSWER_IS_THE_PLACEMENT]
+        self.assertEqual([(row["placed"], row["stood_aside_basis"]) for row in findings],
+                         [("/".join(MISSION_WINDOW), "anchor")])
 
     def test_the_placement_loses_nothing(self):
         ap.place_answers(self.vault.root, now=NOW)
@@ -405,7 +409,7 @@ class TheResolverClosedTheCardFirstTests(unittest.TestCase):
 
 class TheAnswerAlonePlacesTheMomentTests(unittest.TestCase):
     """When nothing else dated the node, the answer is what places it — 19–21
-    from 1954-06-04, day-exact, basis age."""
+    from 1954-06-04, month-grained since timeline-rules:19, basis age."""
 
     def setUp(self):
         self.vault = Vault(self)
@@ -526,7 +530,7 @@ class AFirstPersonAgeIsTheNarratorsTests(unittest.TestCase):
         record = self.vault.best("Dad wins pet snake at fair")
         self.assertEqual(record["basis"], "age")
         self.assertEqual((record["earliest"], record["latest"]),
-                         ("1985-07-11", "1986-07-10"))
+                         ("1985-07", "1986-07"))
 
     def test_without_the_rule_it_would_be_his_fathers_age(self):
         """The defect this guards, measured: the same age under the node's
@@ -568,7 +572,7 @@ class TheReleaseTests(unittest.TestCase):
     def test_the_fold_rule_version_does_not_move(self):
         """This release files CLAIMS an answer was owed; it changes no
         derivation, so a vault with no closed-card answer draws what it drew."""
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
         self.assertEqual(
             tt.derive_calculated_timeline(
                 index_of([]), now=NOW).calculation_rule_version,

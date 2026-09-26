@@ -1156,8 +1156,9 @@ class EraRecorderLeafTests(unittest.TestCase):
         for absent in ("## IDENTITY", "## BEHAVIOR", "## EXAMPLES", "## SESSION"):
             self.assertNotIn(absent, prompt)
         self.assertIn("You are not in the conversation", prompt)
-        # MEASURED, not guessed.
-        self.assertLess(len(prompt), 4200)
+        # MEASURED, not guessed. 2026-09-25 (v360): 4200 → 5400 for the
+        # shared `{how_words_arrive}` block (measured 5231).
+        self.assertLess(len(prompt), 5400)
 
     def test_the_leaf_teaches_the_two_bound_kinds_and_the_mention(self):
         text = ti.load_era_recorder_leaf()

@@ -474,8 +474,16 @@ class EndToEndIdentityCardsTests(unittest.TestCase):
         cards = [w for w in result.work_items if w.get("kind") == "identity_uncertain"]
         self.assertEqual(len(cards), 1)
         text = cards[0]["prompt_intent"]
-        self.assertIn("James Everett Taylor", text)
-        self.assertIn("Anthon James Taylor", text)
+        # v360 (owner, 2026-09-25): the card no longer joins full
+        # names ("Which Anthon James Taylor or James Everett Taylor... is
+        # 'James' here?" was the owner's own unreadable example) — each
+        # candidate reads in the owner's own terms instead, a nickname where
+        # one is known ("AJ" is how he calls Anthon James Taylor) and a
+        # relation word otherwise ("your child James"), which still tells the
+        # two candidates apart without repeating a name he never uses.
+        self.assertIn("AJ", text)
+        self.assertIn("your child James", text)
+        self.assertNotIn("Anthon James Taylor", text)
         self.assertNotIn("'James' is 'James'", text)
 
 
@@ -486,7 +494,7 @@ class EndToEndIdentityCardsTests(unittest.TestCase):
 
 class CalculationRuleVersionTests(unittest.TestCase):
     def test_the_rule_version_is_the_one_in_force(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
 
 
 if __name__ == "__main__":

@@ -1675,6 +1675,11 @@ def validate_temporal_work_item(value: object, *, now: object = None) -> dict:
         # reason is what turns a silent absence into an honest line on the
         # page. Absent on every item that HAS a question.
         ("withheld_reason", optional_text(value.get("withheld_reason"))),
+        # Owner ruling 2026-09-25 (`temporal_work_items.
+        # A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`). Additive and optional: the
+        # grain a date card asks for — `day` only for a cornerstone, never
+        # finer than `month` for anything else. Not an identity key.
+        ("requested_grain", optional_text(value.get("requested_grain"))),
     ):
         if cleaned:
             normalized[key] = cleaned

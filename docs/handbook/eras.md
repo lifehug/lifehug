@@ -386,8 +386,87 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:18 -->
-`timeline-rules:18` (v357) — a full name outranks a shared first name. The
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:25 -->
+`timeline-rules:25` — his records read as he gave them (v360, owner
+2026-09-25): a school tenure the ladder inferred from a stay ends at the
+graduation he stated (`landmark_projection.A_STATED_GRADUATION_ENDS_THE_SCHOOL`
+— Mountain View's 11th and 12th grade end June 1999, not when he left the
+Williams house), and two dated tellings of one school with different grades
+are two stays of it; an age said as a school grade (*"middle of sixth grade
+for James"*) is that person's school year on the US calendar
+(`chronology.A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR`); *"six to eight
+months ago"* is counted back from the day he said it; a span he told as
+running to the present (*"May 2022 - Present"*) is ongoing. Before it,
+`timeline-rules:24` — a death is dated by its date
+(`temporal_timeline.A_DEATH_IS_DATED_BY_ITS_DATE`, v360, owner
+2026-09-25): a death cornerstone his own stated date places has only another
+date he stated as a rival; an age or an anchor-worked window a telling of the
+death carries (*"what got him sick … when I was like 21"*, which dates the
+illness) is kept as a finding and never asked. The owner's third-person
+possessive is his "my" (`identity_resolution.AN_OWNERS_POSSESSIVE_IS_HIS_MY`):
+*"the narrator's father"* is his father. The binder reads the right couple and
+the right person (`episode_binder.A_GROUP_NEVER_TAKES_IN_ANOTHER_COUPLES_MILESTONE`,
+`episode_containers.A_BARE_NAME_IN_THE_BINDER_IS_WHO_HE_CALLS_BY_IT`): his
+parents' wedding is never absorbed into his, and a bare "James" is his son.
+Before it,
+`timeline-rules:23` — a place mention is an outer bound
+(`temporal_timeline.A_PLACE_MENTION_IS_AN_OUTER_BOUND`, v360 follow-up,
+owner 2026-09-25). *"In Arizona"* bounds a moment by his Arizona stays, and
+the other evidence on the same moment narrows it — the event its own handle
+names (*"earning Eagle Scout in Arizona"* is the Eagle Scout he earned, so the
+project is drawn at 1997–98, not 1982–2013), his age, a span, a related dated
+moment — taking the intersection; a window is clipped to the stays it still
+touches and never drawn across a gap between them, and evidence that falls
+wholly in a gap stands. A house he lived at more than once is, named bare,
+every stay there minus the gaps between them
+(`temporal_timeline.A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`, owner: *"place
+the story across both stays"*): one envelope with the gap in its provenance,
+narrowed to the stay other evidence fits, and no "which time?" card for one
+place. A handle titled as a cornerstone (*"after Dad's death"*) binds to that
+cornerstone (`temporal_timeline.A_HANDLE_NAMING_A_CORNERSTONE_BINDS_TO_IT`),
+and a cornerstone is titled by its own name
+(`cornerstones.A_CORNERSTONE_IS_TITLED_BY_ITS_OWN_NAME`) and asked in its own
+words (`temporal_timeline.A_CORNERSTONE_IS_ASKED_IN_ITS_OWN_WORDS`). Before it,
+`timeline-rules:22` — a marriage is a span
+(`temporal_timeline.A_MARRIAGE_IS_A_SPAN`, owner 2026-09-25, the
+[cornerstones](glossary.md#timeline) ruling: *"marriages should become spans
+and stay open while you're married"*). The owner's wedding stays a point — a
+cornerstone, held to the day — and the marriage it opens is drawn as its own
+episode, a range with no far end exactly as an ongoing stay is
+(`"2007-01-11/.."`), closing only at a divorce cornerstone or a death. The
+rest of that ruling moves no placement: a card asks for a DAY only about a
+cornerstone and never asks anything else below a month
+(`temporal_work_items.A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`), and a day worked
+out by arithmetic is DISPLAYED at its month while the stored interval keeps it
+(`chronology.A_WORKED_OUT_DAY_IS_SHOWN_AS_ITS_MONTH`). Before it, `timeline-rules:21` — one place, one landmark
+(`landmark_identity.ONE_PLACE_ONE_LANDMARK`, owner 2026-09-25: *"The mention
+must not become a new place. It should be tied to a landmark I've given."*). A
+landmark record that names an entry he already gave (same address, same street
+and city, a house name misheard by voice-to-text, the same school name core,
+the same employer, the same person) is a telling of that entry through a merge
+record and lands on its episode; a city or state named as a residence is a
+mention of his stays there; a place a telling names ("left Kristen", "while
+living in San Diego", "when I lived in Arizona") binds to his stays at the
+level he named it, month-grained at most. Before it, `timeline-rules:20` — what he calls them decides a bare name
+(`identity_resolution.WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`, owner 2026-09-25:
+*"When I talk about James, I'm talking about my son. My dad's name was James
+too, and so was his dad. I call my dad Dad and his dad Grandpa"*). A roster
+person his own tellings call by a relationship word or a nickname (*Dad*,
+*Grandpa*, *AJ*) does not compete for their first name, so a bare *James* is
+his son and is dated from his son's birth; a bare name still asks when two
+people he genuinely calls by it are left. Before it, `timeline-rules:19` — an answer is the placement, at the grain it was given
+(`temporal_timeline.AN_ANSWER_IS_THE_PLACEMENT`, owner 2026-09-25: *"if I say
+19 to 21 here, that is a placement because I set it"*). A moment the person
+dated in their own words — an answer to a card, or a stated date or age in a
+telling — is drawn where they put it; the resolver's inference and every other
+reading that fits become supporting evidence on that placement, nothing the
+system inferred narrows it, a finer statement of theirs that fits inside
+narrows it, and a reading that does not fit stays the rival the contradiction
+card names. An age is held at the birthday's month and a band as the stretch
+it names (`chronology.age_statement_record`), so his *"19-21 years old"*
+about his father (born 1954-06-04) draws *June 1973 – June 1976*, not
+1973-06-04/1976-06-03. Before it, `timeline-rules:18` (v357) — a full name
+outranks a shared first name. The
 fold's arithmetic is unchanged; what moved is WHO a claim is about. The owner's
 *"Father's mission to New Zealand"* carries the subject mention *"James Edwin
 Taylor"*, his father's full name, on a roster that spells his father `James

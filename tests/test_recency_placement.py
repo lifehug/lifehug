@@ -539,9 +539,21 @@ class StakelessCardsAtPublicationTests(unittest.TestCase):
             self.assertEqual(payload["counts"]["work_items"], 0)
 
     def test_a_wide_window_keeps_its_card(self):
-        payloads = self._payloads(window=("2019", "2026"))
+        payloads = self._payloads(window=("2019", "2021"))
         self.assertEqual(pub._without_stakeless_date_cards(payloads), [])  # noqa: SLF001
         self.assertEqual(len(payloads[pub.WORK_ITEMS_FILE]["work_items"]), 1)
+
+    def test_a_window_wider_than_five_years_is_asked_only_when_hot(self):
+        """v360 follow-up (owner, 2026-09-25)
+        (`temporal_publication.A_WIDE_ESTIMATE_IS_ASKED_ONLY_WHEN_HOT`): until
+        then 2019–2026 kept its card for being wide. Wider than about five
+        years it is asked only when the moment is hot."""
+        payloads = self._payloads(window=("2019", "2026"))
+        dropped = pub._without_stakeless_date_cards(payloads)  # noqa: SLF001
+        self.assertEqual([row["reason"] for row in dropped],
+                         [pub.A_WIDE_ESTIMATE_IS_ASKED_ONLY_WHEN_HOT])
+        hot = self._payloads(window=("2019", "2026"), resolves=["node:other"])
+        self.assertEqual(pub._without_stakeless_date_cards(hot), [])  # noqa: SLF001
 
     def test_a_life_event_keeps_its_card(self):
         payloads = self._payloads(event_kind="married")

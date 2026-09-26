@@ -205,7 +205,8 @@ class TheAgeAnchorSurvivesABindTests(unittest.TestCase):
         "the owner's birth", one of them at his son's birthday."""
         titles = [node["label"] for node in self.after.nodes
                   if node.get("event_kind") == "birth"]
-        self.assertEqual(titles.count("your birth"), 2)
+        # v360 (owner, 2026-09-25): a title is sentence-cased now.
+        self.assertEqual(titles.count("Your birth"), 2)
         son = [node for node in self.after.nodes
                if node.get("event_kind") == "birth"
                and "Wren Ashgrove" in (node.get("subject_refs") or ())]

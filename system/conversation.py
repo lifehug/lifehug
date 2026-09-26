@@ -87,6 +87,7 @@ from lifehug_core import (
     REPO_DIR,
     SYSTEM_DIR,
     _parse_simple_yaml,
+    load_how_words_arrive,
     now_utc,
     split_frontmatter,
 )
@@ -109,6 +110,7 @@ ASSEMBLE_CONTEXT_BLOCK_ORDER = (
     "identity",
     "behavior",
     "examples",
+    "how_words_arrive",
     "profile",
     "record",
     "asking_supply",
@@ -1082,7 +1084,7 @@ def assemble_context(
     vault_root: str | Path | None = None,
     blocks: dict[str, str] | None = None,
 ) -> str:
-    """Deterministic identity->behavior->examples->profile->record->asking_supply->session context."""
+    """Deterministic identity->behavior->examples->how_words_arrive->profile->record->asking_supply->session context."""
     root = _resolve_root(vault_root)
     blocks = blocks or {}
     manifest = _safe_manifest()
@@ -1090,6 +1092,11 @@ def assemble_context(
         "identity": _read_framework_text("prompt", "identity.md"),
         "behavior": _read_framework_text("prompt", "behavior.md"),
         "examples": _read_framework_text("prompt", "examples.md"),
+        # 2026-09-25 (owner): the one shared "how the person's words arrive"
+        # block — conversational telling, voice-to-text transcription. Stable
+        # and framework-owned, so it sits with the cached prefix; every child
+        # interaction's turn rides this same context and inherits it.
+        "how_words_arrive": load_how_words_arrive(),
         "profile": blocks.get("profile") if "profile" in blocks else _assemble_profile_block(root),
         "record": blocks.get("record") if "record" in blocks else _assemble_record_block(session, root),
         # issue #168 / ADR 0016: the platform seam — the pinned

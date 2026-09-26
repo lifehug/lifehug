@@ -422,6 +422,40 @@ A_COUPLE_IS_TWO_PEOPLE = (
 #: than WHAT ("Father fell ill after wedding") is not the telling's own event.
 MILESTONE_OF_EVENT_NOUN = {"wedding": "married"}
 
+#: Owner ruling, 2026-09-25 (the cornerstones ruling): *"A telling of the
+#: owner's wedding to the same spouse IS that cornerstone."* Two readings the
+#: milestone rung could not make, and his vault held SEVEN nodes for one
+#: wedding because of them.
+#:
+#: * **"Marriage to Katie" is the wedding.** `marriage` stays out of
+#:   :data:`MILESTONE_OF_EVENT_NOUN` — "Marriage became hard" is the stretch,
+#:   not the day — but the noun followed by ``to`` and the person married is the
+#:   act of marrying them (:data:`MILESTONE_OF_EVENT_NOUN_PHRASE`). The owner's
+#:   ``answers/A15`` "Marriage to Katie" (*"Author married Katie when he was 26
+#:   and she was 20"*) was drawn at 2001-07/2008-07 from that age, beside the
+#:   stated 2007-01-11, as a node of its own.
+#: * **The owner's couple needs no second name.** v345's couple bucket was only
+#:   reached by a telling that ALSO named a non-owner person token, so "Married
+#:   Katie", "Getting married to Katie" and "Married Katie Ann Merrill" — whose
+#:   only subject is ``self``/``narrator``, and whose spouse the roster did not
+#:   resolve into a person token — were never bucketed at all. The couple key
+#:   (`identity_resolution.couple_key`, the owner's own subject naming the
+#:   owner's couple) is the discriminator; the person tokens are not asked for.
+#:
+#: The age such a telling carries then folds as evidence on the wedding —
+#: supporting when it contains the day, a contradiction card when it does not
+#: (`temporal_timeline.AN_ANSWER_IS_THE_PLACEMENT`) — never a separate node.
+A_TELLING_OF_HIS_WEDDING_IS_THE_CORNERSTONE = (
+    "a telling of the owner's wedding folds onto the wedding: \"marriage to "
+    "<someone>\" names the wedding, and the owner's couple key alone buckets a "
+    "telling for R2b without a second person token, so an age said about the "
+    "wedding is evidence on its day and never a node of its own"
+)
+
+#: ``(noun, next word)`` -> the milestone. "Marriage to Katie" is a wedding;
+#: "Marriage became hard" is not.
+MILESTONE_OF_EVENT_NOUN_PHRASE = {("marriage", "to"): "married"}
+
 #: A preposition immediately before a milestone noun makes it an ADJUNCT: the
 #: telling happened near that event and is not that event. "Father fell ill
 #: after wedding" is an illness; "Parents' wedding date" is a wedding.
@@ -837,6 +871,20 @@ class TellingView:
     #: contribute a retrieval signal (:data:`ONE_FACT_ONE_SIGNAL_TEXT`'s own
     #: reason, and `_mention_texts`').
     phrases: frozenset = frozenset()
+    #: lifehug#413 (`episode_containers.A_MISSION_CONTAINS_ITS_PLACES`). The
+    #: place-containing span kinds this telling names as its SETTING ("on my
+    #: mission"), and ``(kind, place ref)`` for every place it sets one in —
+    #: an area a telling of the mission names, or the stay R7 dated a mission
+    #: tenure from. Read by the containment rung and by nothing else.
+    settings: frozenset = frozenset()
+    setting_places: frozenset = frozenset()
+    #: The stretch this telling's own claims cover WHATEVER their basis
+    #: (`episode_containers.span_from_claims(require_stated=False)`), because a
+    #: stay's two ends intersect to nothing and a stay still has an interval.
+    stretch: object = None
+    #: A place-containing span's own landmark words (label, where, place,
+    #: city) — "Where did you serve?" — and nothing for any other telling.
+    landmark_words: tuple = ()
 
     def as_dict(self) -> dict:
         return {
@@ -862,6 +910,8 @@ class TellingView:
             "people": sorted(self.people),
             "subject_mentions": list(self.subject_mentions),
             "phrases": sorted(self.phrases),
+            "settings": sorted(self.settings),
+            "setting_places": sorted(self.setting_places),
             "eligible": self.eligible,
             "ineligible_reason": self.ineligible_reason,
         }
@@ -1309,7 +1359,9 @@ def person_tokens(mentions: object, participants: object = (),
     names nobody in particular here, so it contributes no token.
     """
     names: set[str] = set()
-    for ref in ec.resolve_entity_set(mentions, index) | ec.resolve_entity_set(participants, index):
+    # One read over both, so a name one of them gives a relationship word
+    # holds in the other (`episode_containers.A_RELATION_WORD_WITH_ANOTHER_NAME_IS_NOT_THEM`).
+    for ref in ec.resolve_entity_set(tuple(mentions or ()) + tuple(participants or ()), index):
         if collapsed_text(ref).startswith(PERSON_ENTITY_PREFIX):
             name = index.name_of(ref) if hasattr(index, "name_of") else ""
             names.add(collapsed_text(name) or collapsed_text(ref).split("/", 1)[1])
@@ -1367,12 +1419,24 @@ def milestone_of(view: "TellingView") -> str:
     if is_repeatable(kind):
         return ""
     tokens = label_tokens(view.label)
+    words = tuple(sorted(view.people)) + tuple(view.subject_mentions)
     for token in tokens:
         milestone = MILESTONE_OF_VERB_STEM.get(EVENT_VERB_STEMS.get(token, ""))
+        if milestone and token in MILESTONE_NOUNS_READ_STRICTLY:
+            # :data:`A_TELLING_TITLED_AS_A_MILESTONE_IS_THAT_MILESTONE`: the
+            # NOUN is the milestone only in a title that is nothing else.
+            import cornerstones as cs  # noqa: PLC0415 - avoids an import cycle
+
+            if MILESTONE_OF_CORNERSTONE.get(
+                    cs.milestone_of_label(view.label, subject_words=words)) != milestone:
+                continue
         if milestone:
             return milestone
     for index, token in enumerate(tokens):
         milestone = MILESTONE_OF_EVENT_NOUN.get(token)
+        if not milestone and index + 1 < len(tokens):
+            # :data:`A_TELLING_OF_HIS_WEDDING_IS_THE_CORNERSTONE`.
+            milestone = MILESTONE_OF_EVENT_NOUN_PHRASE.get((token, tokens[index + 1]), "")
         if not milestone:
             continue
         if index and tokens[index - 1] in MILESTONE_NOUN_IS_AN_ADJUNCT_AFTER:
@@ -1380,7 +1444,40 @@ def milestone_of(view: "TellingView") -> str:
         return milestone
     if _evidence_names_this_telling_a_birth(view):
         return "birth"
-    return ""
+    # :data:`A_TELLING_TITLED_AS_A_MILESTONE_IS_THAT_MILESTONE` — "Father
+    # dies of COVID", "Dottie's birth": a title the cornerstones' own strict
+    # reading calls a milestone (every word before it names who) is one.
+    import cornerstones as cs  # noqa: PLC0415 - avoids an import cycle
+
+    return MILESTONE_OF_CORNERSTONE.get(cs.milestone_of_label(view.label, subject_words=words), "")
+
+
+#: v360 follow-up (owner, 2026-09-25) (item 4). The owner's father's death sat as
+#: separate nodes — "Father dies of COVID" (2020) apart from "Father's death"
+#: (his "right before we started Etherfuse", 2022) — because the milestone
+#: rung's verb table knows "die"/"died" and not "dies", while it read the NOUN
+#: "death" anywhere in a label, so "Begins processing father's death years
+#: later" and "Father's death and marriage strain" were deaths and "Father dies
+#: of COVID" was not. Both now read through `cornerstones.milestone_of_label`,
+#: the one strict reading of a title that IS a milestone: one milestone word,
+#: no conjunction, no adjunct, and every word before it a name, a relation
+#: word or a possessive. R2b's own guards (the same people, dates that do not
+#: contradict) are untouched.
+A_TELLING_TITLED_AS_A_MILESTONE_IS_THAT_MILESTONE = (
+    "a telling whose title is nothing but a milestone and whose it is — "
+    "\"Father's death\", \"Dottie's birth\" — is that milestone for R2b, read "
+    "through the cornerstones' strict title reading"
+)
+
+#: `cornerstones` milestone words -> this rung's.
+MILESTONE_OF_CORNERSTONE = {"birth": "birth", "death": "death", "wedding": "married"}
+
+#: The two NOUNS `EVENT_VERB_STEMS` folds into a milestone verb. A verb says
+#: the milestone happened ("Father died of COVID"); the noun is as often the
+#: thing a telling is ABOUT something else near ("Begins processing father's
+#: death years later", "Father's death and marriage strain") — so the noun
+#: counts only in a title the strict reading calls the milestone itself.
+MILESTONE_NOUNS_READ_STRICTLY = frozenset({"death", "birth"})
 
 
 def _evidence_names_this_telling_a_birth(view: TellingView) -> bool:
@@ -1425,6 +1522,62 @@ def _bounds_of(claims: Sequence[object]) -> tuple[object, bool]:
     if not records:
         return None, False
     return chrono.intersect(*records), True
+
+
+#: The landmark fields a place-containing span names its places in.
+PLACE_SPAN_LANDMARK_FIELDS = ("where", "place", "city", "label", "name")
+
+
+def _place_span_landmark_words(landmark_entries: object) -> dict:
+    """``{telling ref: the entry's own place words}`` for every landmark entry
+    of a :data:`episode_containers.PLACE_CONTAINING_SPAN_KINDS` domain."""
+    domains = set(ec.PLACE_CONTAINING_SPAN_KINDS.values())
+    found: dict[str, tuple] = {}
+    for row in landmark_entries or ():
+        if not isinstance(row, dict) or collapsed_text(row.get("domain")) not in domains:
+            continue
+        record = row.get("record") if isinstance(row.get("record"), dict) else {}
+        source_id = collapsed_text(row.get("source_id"))
+        if not source_id:
+            continue
+        words = tuple(dict.fromkeys(
+            collapsed_text(record.get(name)) for name in PLACE_SPAN_LANDMARK_FIELDS
+            if collapsed_text(record.get(name))
+        ))
+        found[ei.landmark_telling_ref(source_id.partition(":")[2] or source_id)] = words
+    return found
+
+
+def _span_settings_of(rows: Sequence[object], mentions: Sequence[str],
+                      subject_mentions: Sequence[str], subject_entities: object,
+                      named: object, entity_index: object) -> tuple:
+    """``(settings, setting_places)`` for one telling — lifehug#413.
+
+    A telling that names a place-containing span as its setting (not by its
+    MTC) files a place it names IN ITS OWN WORDS as that span's place
+    ("Mission assignment to Solothurn" -> Solothurn, Switzerland) — never a
+    place the classifier attached from the rest of the source ("Went on his
+    mission" carries every town of the answer it came from). A telling v356's vocabulary says is OF the span, whose
+    dates R7 inherited from a stay, files that stay's place ("Missionary — …",
+    dated "from the dates of the Friedrichshafen, Germany stay"). The MTC is
+    a setting and not an area: "Residence at the MTC" names Provo, which the
+    mission does not cover.
+    """
+    settings, mtc = ec.span_settings(mentions, subject_mentions, subject_entities)
+    places: set = set()
+    named_places = {ref for ref in named or () if collapsed_text(ref).startswith("place/")}
+    said = " " + " ".join(normalized_mention_key(text) for text in mentions) + " "
+    in_words = {ref for ref in named_places
+                if ec.place_in_words(ref, said, entity_index)}
+    for kind in settings - mtc:
+        places |= {(kind, ref) for ref in in_words}
+    stays = ec.dated_from_stays(rows)
+    if stays and any("mission" in text.casefold() for text in mentions):
+        if not ec.about_someone_else(subject_mentions, subject_entities):
+            for kind in ec.names_span_kind(mentions):
+                places |= {(kind, ref) for ref in ec.resolve_entity_set(stays, entity_index)
+                           if ref.startswith("place/")}
+    return settings, frozenset(places)
 
 
 def telling_views(claims: object, *, manifest: object = None,
@@ -1499,6 +1652,8 @@ def telling_views(claims: object, *, manifest: object = None,
         if record is not None and collapsed_text(key):
             placed_by_telling[collapsed_text(key)] = record
 
+    words_by_telling = _place_span_landmark_words(landmark_entries)
+
     views: dict[str, TellingView] = {}
     for telling_ref in sorted(by_telling):
         rows_here = by_telling[telling_ref]
@@ -1512,6 +1667,9 @@ def telling_views(claims: object, *, manifest: object = None,
         subject_entities = ec.resolve_entity_set(subject_mentions, entity_index)
         place_entities = ec.resolve_entity_set(signature.get("place_set") or (), entity_index)
         span, span_open_ended = ec.span_from_claims(rows_here)
+        settings, setting_places = _span_settings_of(
+            rows_here, mentions, subject_mentions, subject_entities,
+            entities | place_entities, entity_index)
         about_an_era = ei.telling_is_about_an_era(rows_here)
         # §5.1 is claim-precise, and so is this. A telling ABOUT an era (C1's
         # own subject-side predicate) is never a binding target. A telling
@@ -1548,6 +1706,11 @@ def telling_views(claims: object, *, manifest: object = None,
             place_entities=place_entities,
             span=span,
             span_open_ended=span_open_ended,
+            settings=settings,
+            setting_places=setting_places,
+            stretch=(span if span is not None
+                     else ec.span_from_claims(rows_here, require_stated=False)[0]),
+            landmark_words=words_by_telling.get(telling_ref, ()),
             created_at=max(
                 (collapsed_text(row.get("created_at")) for row in rows_here), default=""
             ),
@@ -2729,7 +2892,45 @@ def derived_reading_links(views: Mapping[str, TellingView]) -> list:
     return rows
 
 
-def milestone_links(views: Mapping[str, TellingView]) -> list:
+#: v360 (owner, 2026-09-25), the right person. His message *"James, AJ, is nine years
+#: younger than me … He was born 03/20/1990"* is his BROTHER's birth, told by
+#: the name his son goes by; read through what he calls people it looked like
+#: his son's, and it joined his son's 2013 birth through the undated "James
+#: born" tellings. The roster knows both men's births. A birth telling whose own
+#: stated date contradicts the roster birth of every person it resolves to is
+#: not their birth when that date is ANOTHER roster person's birth: R2b never
+#: links it as theirs, and a group of that birth never takes it in.
+A_BIRTH_DATED_ELSEWHERE_IS_NOT_THEIRS = (
+    "a birth telling whose own stated date contradicts the roster's birth of "
+    "every person it resolves to and is another roster person's birth is not "
+    "theirs: R2b never links it as theirs and a birth group never takes it in"
+)
+
+
+def births_dated_elsewhere(views: Mapping[str, TellingView], index: object) -> frozenset:
+    """:data:`A_BIRTH_DATED_ELSEWHERE_IS_NOT_THEIRS` — the telling refs."""
+    born = getattr(index, "born", None) or {}
+    if not born:
+        return frozenset()
+    out: set[str] = set()
+    for telling_ref, view in views.items():
+        if view.bounds is None or milestone_of(view) != "birth":
+            continue
+        people = _roster_people(view)
+        known = [born[ref] for ref in people if ref in born]
+        if not known or len(known) != len(people) \
+                or any(_dates_agree(view.bounds, record) for record in known):
+            continue
+        # Dated ELSEWHERE: the date is another roster person's birth. A date
+        # that fits nobody is left to the ordinary rungs and the fold's card.
+        if any(_dates_agree(view.bounds, record)
+               for ref, record in born.items() if ref not in people):
+            out.add(telling_ref)
+    return frozenset(out)
+
+
+def milestone_links(views: Mapping[str, TellingView], *,
+                    not_theirs: object = frozenset()) -> list:
     """:data:`RULE_ID_MILESTONE` — one subject, one milestone, one episode.
 
     **v345** sweeps a second set of buckets beside the per-person ones
@@ -2758,10 +2959,16 @@ def milestone_links(views: Mapping[str, TellingView]) -> list:
         if not view.eligible:
             continue
         milestone = milestone_of(view)
-        if not milestone or not view.people:
+        if not milestone:
+            continue
+        if telling_ref in not_theirs:
+            # :data:`A_BIRTH_DATED_ELSEWHERE_IS_NOT_THEIRS`.
             continue
         for token in sorted(view.people):
             buckets.setdefault((milestone, token), []).append(telling_ref)
+        # :data:`A_TELLING_OF_HIS_WEDDING_IS_THE_CORNERSTONE`: the couple key
+        # is its own discriminator, and a telling naming no second person
+        # token is still a telling about that couple.
         if milestone in ONCE_PER_COUPLE_EVENT_KINDS:
             key = couple_key(view.subject_mentions)
             if key:
@@ -2778,6 +2985,8 @@ def milestone_links(views: Mapping[str, TellingView]) -> list:
                         continue
                     a, b = views[left], views[right]
                     if not by_couple and not _same_people(a.people, b.people):
+                        continue
+                    if not by_couple and _two_roster_people(a, b):
                         continue
                     if not kinds_compatible(a.event_kind, b.event_kind):
                         continue
@@ -2797,6 +3006,119 @@ def milestone_links(views: Mapping[str, TellingView]) -> list:
     _sweep(buckets, by_couple=False)
     _sweep(couples, by_couple=True)
     return rows
+
+
+#: v360 follow-up (owner, 2026-09-25) (item 4). Token nesting is how "Isaac" and
+#: "Isaac Saldana" are one person; it is also how "Grandfather's death at 66"
+#: (his grandfather, the roster's James Edwin Taylor Sr., plus a Beauchamp)
+#: nested over "Father dies of COVID" (James Taylor) — {james, taylor} inside
+#: {james, edwin, taylor, …} — and a grandfather's death joined his father's.
+#: When both tellings resolve to ROSTER people and no roster person is shared,
+#: they are two people's milestones, whatever their tokens share.
+A_MILESTONE_NEVER_JOINS_TWO_ROSTER_PEOPLE = (
+    "R2b never joins two tellings that each resolve to roster people and share "
+    "none of them: a father's death and a grandfather's death are two deaths "
+    "even when one name's words sit inside the other's"
+)
+
+
+#: v360 (owner, 2026-09-25), the right couple and the right person. The expansion
+#: step (:func:`exact_identity_groups`) takes a group into WHOLE existing
+#: episodes, and an episode an earlier rule over-merged took its mistake into
+#: every group that touched it. The owner's rig, twice:
+#:
+#: * his PARENTS' wedding (1976-06-25, "Mom married dad at 21", the family
+#:   landmark "Parents' wedding") had been bound, before v350, beside his own
+#:   "Wedding reception in mother-in-law's backyard"; the cornerstones rule
+#:   then joined that reception to his wedding and the expansion carried his
+#:   parents in with it, so his wedding read "11 January 2007 and 25 June 1976";
+#: * "Charlee and James arrive" (his children, 2010-12-21 to 2013-05-10) sat in
+#:   one episode with his brother AJ's roster birth, 1990-03-20.
+#:
+#: A group of one milestone takes an existing episode's member in only when that
+#: member could be the same milestone of the same people: a member telling the
+#: same milestone of ANOTHER couple (its own subjects' couple key) or of other
+#: roster people (none shared) stays where it is. A group that declined a member
+#: of the episode it sits in is filed as its own create, so the right tellings
+#: leave; the episode keeps its id and its other members, and is never
+#: redirected at the group that left it. When two such groups divide one
+#: episode, the one holding most of it is the one that stays.
+A_GROUP_NEVER_TAKES_IN_ANOTHER_COUPLES_MILESTONE = (
+    "a group of one milestone takes an existing episode's member in only when "
+    "it could be that milestone of the same people: a member telling it of "
+    "another couple or of other roster people stays where it is, the group "
+    "that declined it leaves as its own create, and the episode it left keeps "
+    "its id and is never redirected at it"
+)
+
+
+def _group_identity(tellings: set, views: Mapping[str, "TellingView"]) -> tuple:
+    """``(milestone, couples, roster people)`` a group's own tellings name, or
+    ``("", …)`` when they name no single milestone
+    (:data:`A_GROUP_NEVER_TAKES_IN_ANOTHER_COUPLES_MILESTONE`)."""
+    milestones: set[str] = set()
+    couples: set[str] = set()
+    people: set[str] = set()
+    for ref in tellings:
+        view = views.get(ref)
+        if view is None:
+            continue
+        milestone = milestone_of(view)
+        if milestone:
+            milestones.add(milestone)
+            if milestone in ONCE_PER_COUPLE_EVENT_KINDS:
+                key = couple_key(view.subject_mentions)
+                if key:
+                    couples.add(key)
+        people |= _roster_people(view)
+    if len(milestones) != 1:
+        return "", frozenset(), frozenset()
+    return next(iter(milestones)), frozenset(couples), frozenset(people)
+
+
+def _another_couples_milestone(view: "TellingView", identity: tuple) -> bool:
+    """Is this episode member the group's milestone of somebody else?"""
+    milestone, couples, people = identity
+    if not milestone or view is None or milestone_of(view) != milestone:
+        return False
+    if milestone in ONCE_PER_COUPLE_EVENT_KINDS and couples:
+        key = couple_key(view.subject_mentions)
+        if key and key not in couples:
+            return True
+    # Another person, or somebody besides the group's people
+    # (:data:`A_MILESTONE_OF_SEVERAL_PEOPLE_IS_NOBODYS_ALONE`).
+    theirs = _roster_people(view)
+    return bool(people) and bool(theirs) and not (theirs <= people)
+
+
+def _roster_people(view: "TellingView") -> frozenset:
+    return frozenset(ref for ref in (view.entities | view.subject_entities)
+                     if collapsed_text(ref).startswith(PERSON_ENTITY_PREFIX))
+
+
+def _two_roster_people(left: "TellingView", right: "TellingView") -> bool:
+    """:data:`A_MILESTONE_NEVER_JOINS_TWO_ROSTER_PEOPLE`, and
+    :data:`A_MILESTONE_OF_SEVERAL_PEOPLE_IS_NOBODYS_ALONE`."""
+    a, b = _roster_people(left), _roster_people(right)
+    if not a or not b:
+        return False
+    if not (a & b):
+        return True
+    return a != b and max(len(a), len(b)) > 1
+
+
+#: v360 (owner, 2026-09-25), the right person. A telling that resolves to SEVERAL
+#: roster people is not one person's milestone: the owner's message "AJ Taylor"
+#: (subjects AJ, James, "my dad", "around 1990") named his brother, his son and
+#: his father at once, and once a bare "James" read as his son it linked his
+#: brother's birth to his son's and his father's 1954 birth to his brother's.
+#: The per-person R2b rung joins such a telling only to one naming the same
+#: people.
+A_MILESTONE_OF_SEVERAL_PEOPLE_IS_NOBODYS_ALONE = (
+    "R2b joins a telling that resolves to several roster people only to a "
+    "telling that resolves to the same people: a birth told about a brother, "
+    "a son and a father at once is none of their births alone"
+)
 
 
 def same_label_links(views: Mapping[str, TellingView]) -> list:
@@ -2937,7 +3259,7 @@ def exact_identity_links(views: Mapping[str, TellingView], *,
     """Every R2 link, every rung, in :data:`EXACT_IDENTITY_RULE_IDS` order."""
     return [
         *derived_reading_links(views),
-        *milestone_links(views),
+        *milestone_links(views, not_theirs=births_dated_elsewhere(views, entity_index)),
         *same_label_links(views),
         *restatement_links(views, index=entity_index),
     ]
@@ -2977,7 +3299,8 @@ def link_refusal(link: ExactLink, units: Mapping[str, Candidate], *,
 def exact_identity_groups(links: Sequence[ExactLink], views: Mapping[str, TellingView],
                           units: Mapping[str, Candidate], *,
                           active: Mapping[str, tuple], entailed: Sequence[tuple],
-                          refused: list | None = None) -> list:
+                          refused: list | None = None,
+                          not_theirs: object = frozenset()) -> list:
     """The groups the accepted links make — and the shape is the whole rule.
 
     R1 refuses to group at all (:data:`NON_TRANSITIVE_RULE_TEXT`) because a
@@ -3087,39 +3410,71 @@ def exact_identity_groups(links: Sequence[ExactLink], views: Mapping[str, Tellin
     # are merged instead, and that is not the transitivity this function
     # otherwise refuses: what joins them is an episode SOMEBODY ALREADY DECIDED,
     # so the merge grows one existing decision rather than inventing a new one.
+    #
+    # :data:`A_GROUP_NEVER_TAKES_IN_ANOTHER_COUPLES_MILESTONE`: a member of an
+    # existing episode that tells the group's milestone of somebody else is
+    # DECLINED — left where it is, with its readings.
     expanded: list = []
     for tellings in groups_by_member:
         members = set(tellings)
+        declined: set[str] = set()
+        identity = _group_identity(tellings, views)
         for ref in tellings:
             unit = units.get(unit_of(ref, units))
-            if unit is not None:
-                members.update(unit.members)
+            if unit is None:
+                continue
+            for member in unit.members:
+                if member in tellings:
+                    continue
+                if _another_couples_milestone(views.get(member), identity) or (
+                        member in not_theirs and identity[0] == "birth"):
+                    declined.add(member)
+                    declined |= reading_group.get(find(member), set()) if member in parent else set()
+                else:
+                    members.add(member)
+        members -= declined - set(tellings)
         if len(members) >= 2:
-            expanded.append((set(tellings), members))
+            expanded.append((set(tellings), members, declined - members))
     coalesced: list = []
-    for tellings, members in expanded:
-        for position, (other_tellings, other_members) in enumerate(coalesced):
+    for tellings, members, declined in expanded:
+        for position, (other_tellings, other_members, other_declined) in enumerate(coalesced):
             if members & other_members:
-                coalesced[position] = (other_tellings | tellings, other_members | members)
+                coalesced[position] = (other_tellings | tellings, other_members | members,
+                                       (other_declined | declined) - (other_members | members))
                 break
         else:
-            coalesced.append((tellings, members))
+            coalesced.append((tellings, members, declined))
     merged = True
     while merged:
         merged = False
         for left in range(len(coalesced)):
             for right in range(left + 1, len(coalesced)):
                 if coalesced[left][1] & coalesced[right][1]:
-                    coalesced[left] = (coalesced[left][0] | coalesced[right][0],
-                                       coalesced[left][1] | coalesced[right][1])
+                    union = coalesced[left][1] | coalesced[right][1]
+                    coalesced[left] = (coalesced[left][0] | coalesced[right][0], union,
+                                       (coalesced[left][2] | coalesced[right][2]) - union)
                     del coalesced[right]
                     merged = True
                     break
             if merged:
                 break
 
+    def _episode(ref: str) -> str:
+        return collapsed_text((efc.grouping_binding(ref, active) or {}).get("episode_id"))
+
+    # Which group STAYS in an episode several groups divide: the one holding
+    # most of it (then the first in member order). It is the only one that may
+    # be skipped as already filed; every other group that declined a member of
+    # its own episode leaves it as a create.
+    share: dict[str, list] = {}
+    for position, (_tellings, members, declined) in enumerate(coalesced):
+        for episode_id in {_episode(ref) for ref in members | declined} - {""}:
+            count = sum(1 for ref in members if _episode(ref) == episode_id)
+            share.setdefault(episode_id, []).append((-count, tuple(sorted(members)), position))
+    stays = {episode_id: min(rows)[2] for episode_id, rows in share.items()}
+
     groups: list = []
-    for tellings, members in coalesced:
+    for position, (tellings, members, declined) in enumerate(coalesced):
         # CONVERGENCE. A group whose every member already sits in ONE episode is
         # a decision this family has already filed, and re-filing it is not a
         # no-op: the first create superseded each member's previous binding and
@@ -3127,22 +3482,39 @@ def exact_identity_groups(links: Sequence[ExactLink], views: Mapping[str, Tellin
         # by `supersedes` — which IS in the binding digest — and the fold refuses
         # the pair by name (`identity_conflict: … asserted by 2 active records`).
         # The clone earned this line the hard way, on the second leg of a run.
-        episodes = {collapsed_text((efc.grouping_binding(ref, active) or {}).get("episode_id"))
-                    for ref in members}
+        episodes = {_episode(ref) for ref in members}
+        left_behind = {_episode(ref) for ref in declined} - {""}
         if len(episodes) == 1 and "" not in episodes:
-            continue
+            episode_id = next(iter(episodes))
+            if episode_id not in left_behind:
+                continue
+            # A group that declined a member of its own episode is already
+            # filed only when it is the group that stays there and every member
+            # it declined is leaving with another group this run.
+            others = {ref for index, (_t, other, _d) in enumerate(coalesced)
+                      if index != position for ref in other}
+            if stays.get(episode_id) == position and \
+                    all(ref in others for ref in declined if _episode(ref) == episode_id):
+                continue
         rules: set[str] = set()
         reasons: list[str] = []
         for pair, ids in rule_of.items():
             if set(pair) <= set(tellings):
                 rules |= ids
                 reasons.append(reason_of[pair])
-        groups.append({
+        row = {
             "members": tuple(sorted(members)),
             "tellings": tuple(sorted(tellings)),
             "rule_ids": tuple(rule for rule in EXACT_IDENTITY_RULE_IDS if rule in rules),
             "reasons": tuple(sorted(set(reasons)))[:4],
-        })
+        }
+        if left_behind:
+            # :data:`A_GROUP_NEVER_TAKES_IN_ANOTHER_COUPLES_MILESTONE`: the
+            # episodes this group leaves members in keep their ids, so the
+            # create never names them in `aliases_created`.
+            row["declined"] = tuple(sorted(declined))
+            row["keeps_episodes"] = tuple(sorted(left_behind))
+        groups.append(row)
     groups.sort(key=lambda row: row["members"])
     return groups
 
@@ -3163,9 +3535,16 @@ def group_envelope(group: Mapping[str, object], *, views: Mapping[str, TellingVi
     members = tuple(group["members"])  # type: ignore[arg-type]
     rule_ids = tuple(group.get("rule_ids") or ())  # type: ignore[union-attr]
     rule_id = RULE_ID_EXACT
+    # :data:`A_GROUP_NEVER_TAKES_IN_ANOTHER_COUPLES_MILESTONE`: a group that
+    # leaves an episode names it as the episode it acted on. Without it a
+    # carve-out whose members are exactly an episode an earlier create made
+    # and a later one absorbed (his parents' wedding, on the owner's rig)
+    # digests to THAT old operation, and the store keeps the old record's
+    # bindings under the new one's name — `identity_envelope_incomplete`.
+    kept = {collapsed_text(value) for value in group.get("keeps_episodes") or ()} - {""}
     operation_id = ei.operation_digest(
         authority="deterministic", op="create", rule_version=RULE_VERSION,
-        member_refs=list(members),
+        member_refs=list(members), acted_on_episode_ids=sorted(kept),
     )
     episode_id = ei.episode_id_for(operation_id)
     superseded: dict[str, str] = {}
@@ -3177,7 +3556,10 @@ def group_envelope(group: Mapping[str, object], *, views: Mapping[str, TellingVi
         previous = collapsed_text(row.get("episode_id"))
         if previous and previous != episode_id:
             superseded[telling_ref] = collapsed_text(row.get("identity_id"))
-            aliases.add(previous)
+            if previous not in kept:
+                # :data:`A_GROUP_NEVER_TAKES_IN_ANOTHER_COUPLES_MILESTONE`: an
+                # episode that keeps members is still drawn, at its own id.
+                aliases.add(previous)
 
     reasons = list(group.get("reasons") or ())  # type: ignore[union-attr]
     # Member-determined, every one of them (:data:`RULE_ID_EXACT`).
@@ -3228,6 +3610,7 @@ def group_envelope(group: Mapping[str, object], *, views: Mapping[str, TellingVi
         "authority": "deterministic",
         "op": "create",
         "episode_id": episode_id,
+        "acted_on_episode_ids": sorted(kept),
         "members": list(members),
         "creates_binding_ids": binding_ids,
         "supersedes_binding_ids": sorted(superseded.values()),
@@ -3380,6 +3763,7 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
         group for group in exact_identity_groups(
             result.exact_links, views, units, active=active, entailed=entailed,
             refused=result.exact_refused,
+            not_theirs=births_dated_elsewhere(views, entity_index),
         )
         if not (set(group["members"]) & {ref for members in accepted for ref in members})
     ]
@@ -3416,7 +3800,8 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
     # reason — a container id minted from a unit whose identity moves in the
     # same run would orphan the records this run wrote.
     moving |= {ref for group in result.exact_groups for ref in group["members"]}
-    result.containers = ec.containers(views, units, excluded_refs=moving)
+    result.containers = ec.containers(views, units, excluded_refs=moving,
+                                      entity_index=entity_index)
     result.containment_ambiguities = []
     result.containment_negatives = []
     containment = ec.containment_rows(
@@ -4125,7 +4510,9 @@ def read_vault_inputs(vault_root: str | Path, *, now: object = None) -> dict:
         "episode_records": records,
         "frames": tuple(derivation.age_frames) if derivation is not None else (),
         "placed_windows": windows,
-        "entity_index": ec.load_entity_index(vault_root),
+        # `episode_containers.A_BARE_NAME_IN_THE_BINDER_IS_WHO_HE_CALLS_BY_IT`:
+        # the census of what he calls people, read from the same words the fold reads.
+        "entity_index": ec.load_entity_index(vault_root, texts=tt.telling_texts(claims)),
         "question_contexts": read_question_contexts(vault_root, claims),
         "landmark_entries": lp.load_landmark_sources(vault_root),
     }
@@ -4531,6 +4918,11 @@ __all__ = [
     "MAINTENANCE_STEP_IS_A_DRY_RUN",
     "MATURE_EPISODE_MEMBERS",
     "A_MERGE_NEVER_MOVES_A_DATED_MOMENT",
+    "A_TELLING_OF_HIS_WEDDING_IS_THE_CORNERSTONE",
+    "A_GROUP_NEVER_TAKES_IN_ANOTHER_COUPLES_MILESTONE",
+    "A_MILESTONE_OF_SEVERAL_PEOPLE_IS_NOBODYS_ALONE",
+    "A_BIRTH_DATED_ELSEWHERE_IS_NOT_THEIRS",
+    "births_dated_elsewhere",
     "A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT",
     "A_COUPLE_IS_TWO_PEOPLE",
     "NON_TRANSITIVE_RULE_TEXT",

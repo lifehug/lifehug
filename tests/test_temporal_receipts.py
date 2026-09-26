@@ -390,10 +390,12 @@ class MovingOneNodeTests(VaultTestCase):
         self.file_claims([self.birth, self.grad, self.later, self.unrelated, self.target])
         pub.publish(self.vault, now=NOW)
         ids = self.node_ids()
-        self.target_id = ids["the summer job"]
+        # v360 (owner, 2026-09-25): a title is sentence-cased now.
+        self.target_id = ids["The summer job"]
         self.grad_id = ids["graduation"]
-        self.later_id = ids["a later marker"]
-        self.unrelated_id = ids["an unrelated moment"]
+        # v360 (owner, 2026-09-25): a title is sentence-cased now.
+        self.later_id = ids["A later marker"]
+        self.unrelated_id = ids["An unrelated moment"]
 
     def test_moving_the_node_places_it_and_leaves_the_unrelated_node_out(self) -> None:
         ts.file_ordering_constraint(

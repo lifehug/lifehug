@@ -51,6 +51,7 @@ if str(_SYSTEM_DIR) not in sys.path:
 import chronology as chrono  # noqa: E402
 import classify_story  # noqa: E402
 import cross_dating  # noqa: E402
+import landmark_identity  # noqa: E402
 import landmark_projection  # noqa: E402
 import landmarks_interaction  # noqa: E402
 import temporal_projection  # noqa: E402
@@ -1161,7 +1162,8 @@ def flip_landmarks_if_needed() -> dict | None:
 
 def save_landmark(domain: str, record: object, *,
                   digest_override: str | None = None,
-                  findings: list | None = None) -> dict:
+                  findings: list | None = None,
+                  exact: bool = False) -> dict:
     """Add or replace ONE landmark entry, keyed by its identity in a domain.
 
     The signature, the return value and the MEANING are v214's. What changed in
@@ -1204,6 +1206,14 @@ def save_landmark(domain: str, record: object, *,
     which is what a host already renders. The record itself always files: the
     answer is the person's, and a rule that cannot decide what it retires is
     no reason to drop what they said.
+
+    ``exact`` (v360, owner 2026-09-25, `landmark_edit.OWNER_EDIT_IS_EXACT`) is the
+    owner's EDIT FORM: every field he typed, for the one stay he opened, after
+    `landmark_edit` has already retired what it replaces. It files the record
+    as given and nothing else — no one-place-one-landmark join into another
+    entry and no shape supersession of a sibling, because both are readings
+    of what somebody MEANT, and on a form he has said exactly what he means.
+    ``False`` (every other caller) is byte-identical to before.
     """
     if not isinstance(record, dict):
         raise ValueError("a landmark record must be an object")
@@ -1233,10 +1243,22 @@ def save_landmark(domain: str, record: object, *,
                              digest_override=digest_override,
                              findings=findings)
 
+    # ONE PLACE, ONE LANDMARK (owner ruling 2026-09-25,
+    # `landmark_identity.ONE_PLACE_ONE_LANDMARK`). A record that is the SAME
+    # thing as an entry he already gave is filed as a telling OF that entry
+    # (a merge record names it) and adds only what is new; one that adds
+    # nothing and states no date, one that names only a city or state he has
+    # stays in, and someone else's residence are not written at all.
+    joined = None if exact else _one_place_one_landmark(
+        root, key, record, row, digest_override=digest_override, findings=findings)
+    if joined is not None:
+        return joined
+
     entry_key = landmarks_interaction.landmark_entry_key(record, row)
-    others = [entry for entry in (load_landmarks().get(key) or ())
-              if isinstance(entry, dict)
-              and landmarks_interaction.landmark_entry_key(entry, row) != entry_key]
+    others = [] if exact else [
+        entry for entry in (load_landmarks().get(key) or ())
+        if isinstance(entry, dict)
+        and landmarks_interaction.landmark_entry_key(entry, row) != entry_key]
 
     # v349 rule 2: ONE ANSWER IS ONE ENTRY. A single substantive record that
     # would retire more than one prior entry by shape is refused out loud, and
@@ -1304,7 +1326,7 @@ def save_landmark(domain: str, record: object, *,
 
     filed = dict(record)
     filed.setdefault("domain", key)
-    landmark_projection.file_landmark_record(
+    landed = landmark_projection.file_landmark_record(
         root,
         key,
         filed,
@@ -1313,6 +1335,20 @@ def save_landmark(domain: str, record: object, *,
         digest=digest_override,
     )
     _retire_answered_timeline_candidates(key, filed)
+    # v360 (owner, 2026-09-25) (`landmark_projection.A_RECORD_IS_FILED_WHERE_IT_BELONGS`):
+    # a person filed as a school, an event as a job, a company as a partnership
+    # is refiled the moment it lands — the record stays his evidence, and it is
+    # never drawn as a landmark. The same function `landmark-refile` runs.
+    refiled = _refile_if_misfiled(root, landed["source_ref"].source_id)
+    if refiled is not None:
+        if findings is not None:
+            findings.append({"lint": "landmark_refiled", "domain": key,
+                             "detail": f"{key}/{entry_key}: {refiled['reason']} — "
+                                       f"refiled as {refiled['kind']}",
+                             "entry_keys": [entry_key], "count": 1})
+        redraw_landmarks()
+        return {**landmarks_interaction.merge_landmark_entry(None, record),
+                "not_written": refiled["reason"], "refiled_as": refiled["kind"]}
 
     drawn = redraw_landmarks()
     # The interval-aware key (E-L2b, design §3.2): one identity may now be
@@ -1329,6 +1365,92 @@ def save_landmark(domain: str, record: object, *,
     if same_key:
         return same_key[0]
     return landmarks_interaction.merge_landmark_entry(None, record)
+
+
+def _refile_if_misfiled(root: object, source_id: str) -> dict | None:
+    """Refile the record just filed when it is not an entry of its domain
+    (`landmark_projection.misfiled_landmark`); ``None`` otherwise."""
+    import temporal_store as _store  # noqa: PLC0415
+
+    sources = landmark_projection.load_landmark_sources(root)
+    own = [row for row in sources if row.get("source_id") == source_id]
+    if not own:
+        return None
+    people = landmark_projection.people_named_in(sources)
+    organizations = landmark_projection.organizations_named_in(sources)
+    if landmark_projection.misfiled_landmark(
+            own[0]["domain"], own[0].get("record"), people=people,
+            organizations=organizations) is None:
+        return None
+    index = _store.fold_active_index(root)
+    for step in landmark_projection.refile_plan(sources, index):
+        if step["source_id"] == source_id:
+            return landmark_projection.file_landmark_refile(root, step, active_index=index)
+    return None
+
+
+def _one_place_one_landmark(root: object, domain: str, record: dict, row: object, *,
+                            digest_override: str | None = None,
+                            findings: list | None = None) -> dict | None:
+    """`landmark_identity.ONE_PLACE_ONE_LANDMARK` at the write seat.
+
+    ``None`` is "not his already, file it as before". Otherwise the record
+    was either filed as a telling of the entry it names (a merge record
+    first, then the source, so a crash leaves an inert merge and never an
+    orphan entry) or not written at all, and the drawn entry it tied to is
+    returned. Either way a finding says so, in `lint_landmark_reply`'s shape.
+    """
+    drawn = load_landmarks()
+    entries = [entry for entry in (drawn.get(domain) or ()) if isinstance(entry, dict)]
+    decision = landmark_identity.decide(
+        domain, record, entries,
+        residences=drawn.get("residences") or (),
+        owner_names=landmark_projection.owner_names_for(root),
+        key_of=lambda entry: landmarks_interaction.landmark_entry_key(entry, row),
+    )
+    if decision["decision"] == landmark_identity.FILE_NEW:
+        return None
+    if findings is not None:
+        findings.append(landmark_identity.finding_for(domain, record, decision))
+    target = decision.get("target")
+    if decision["decision"] == landmark_identity.NOT_WRITTEN:
+        if isinstance(target, dict):
+            return {**target, "not_written": decision["reason"]}
+        return {"domain": domain, "not_written": decision["reason"],
+                "label": landmark_identity.entry_identity(record)}
+
+    target_key = landmarks_interaction.landmark_entry_key(target, row)
+    sources = landmark_projection.load_landmark_sources(root)
+    into = landmark_projection.stay_source_for(
+        sources, domain=domain, entry_key=target_key, target=target, record=record)
+    if not into:
+        return None
+    filed = dict(record)
+    filed.setdefault("domain", domain)
+    ordinal = landmark_projection.next_ordinal(root)
+    digest = digest_override or landmark_projection.entry_promotion_digest(
+        domain, filed, ordinal=ordinal)
+    source_id = f"landmark:entry-{digest[:24]}"
+    landmark_projection.file_landmark_merge(
+        root, domain=domain, merged_source_id=source_id,
+        kind=landmark_projection.MERGE_INTO_ENTRY,
+        into_entry_key=target_key, into_source_id=into,
+        reason=f"{decision['reason']}: {landmark_identity.ONE_PLACE_ONE_LANDMARK}",
+        pin_stay=bool(decision.get("pin", True)),
+    )
+    landmark_projection.file_landmark_record(
+        root, domain, filed, ordinal=ordinal,
+        extractor_version=landmark_projection.LIVE_EXTRACTOR,
+        digest=digest_override,
+    )
+    _retire_answered_timeline_candidates(domain, filed)
+    redrawn = redraw_landmarks()
+    same = [entry for entry in ((redrawn.get("domains") or {}).get(domain) or ())
+            if landmarks_interaction.landmark_entry_key(entry, row) == target_key]
+    for entry in same:
+        if landmarks_interaction.same_landmark_stay(entry, target, row):
+            return entry
+    return same[0] if same else target
 
 
 class BirthLandmarkNotOwner(ValueError):

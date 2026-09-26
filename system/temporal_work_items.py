@@ -660,6 +660,88 @@ def no_date_card_reason(item: object, **stakes) -> str | None:
     return None if date_card_changes_something(item, **stakes) else NO_STAKES_INSIDE_A_YEAR
 
 
+# --------------------------------------------------------------------------
+# A DAY IS ASKED ONLY OF A CORNERSTONE (owner ruling, 2026-09-25)
+# --------------------------------------------------------------------------
+
+#: The owner's ruling, in his words: *"I think the precision I give you is
+#: enough to make a placement. If the system realizes that higher precision for
+#: a certain card or question would place a lot of other things, that should
+#: raise its likelihood of being asked. We almost never need more than month
+#: precision except for extremely important dates like birth, death, wedding,
+#: divorce."* The set those dates are is `cornerstones.CORNERSTONES`.
+#:
+#: Three answers, and leverage is in none of them:
+#:
+#: * a CORNERSTONE (`cornerstones.CORNERSTONE`) — missing, or held coarser than
+#:   a day — is worth a card that asks for the DAY, and that card keeps its
+#:   stakes whatever the ~12-month gate above says (:func:`a_cornerstone_keeps_its_card`);
+#: * a cornerstone-TYPE event for somebody outside the set
+#:   (`cornerstones.OUTSIDE_THE_SET` — his sister's divorce, a friend's
+#:   wedding) is worth ONE card, whose answer is accepted at whatever grain he
+#:   gives: it asks to the year, and once placed at any grain it is never asked
+#:   again;
+#: * everything else is never asked below a MONTH. The table's own target
+#:   (`temporal_timeline.PRECISION_TARGETS`) still applies where it is coarser.
+#:
+#: *"The only time I would bring it up again is if it is hot."* Leverage (a
+#: node's `resolves`, a keystone's gain) raises a card's RANK — it is already
+#: its `system_value` — and never its GRAIN: a hot anecdote is asked sooner,
+#: never to the day. The ~12-month stakes gate above stays exactly as it is.
+A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE = (
+    "a card asks for a DAY only about a cornerstone (the owner's, his "
+    "children's, parents', siblings' and spouse's births; his weddings and "
+    "divorces; the deaths of his parents, spouse, siblings, children and "
+    "grandparents; his baptism once mentioned); a cornerstone-type event for "
+    "anyone else is asked once and accepted at any grain; nothing else is "
+    "asked below a month, however much leverage it has"
+)
+
+#: The key a date card carries its grain under. Additive and optional on a
+#: work item (`temporal_projection.validate_temporal_work_item`), never part of
+#: its identity: the same card at a new grain is the same card.
+REQUESTED_GRAIN_KEY = "requested_grain"
+
+
+def _coarser_grain(left: str, right: str) -> str:
+    order = chrono.GRANULARITIES  # coarse = later: day, month, season, year, …
+    ranked = [grain for grain in (left, right) if grain in order]
+    return max(ranked, key=order.index) if ranked else right
+
+
+def precision_card_grain(*, status: object, target: object = None) -> str:
+    """The grain a date card may ask for (:data:`A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`).
+
+    ``status`` is `cornerstones.node_status`' first answer; ``target`` is the
+    event kind's own precision target. Leverage is deliberately NOT an input.
+    """
+    import cornerstones as cs  # noqa: PLC0415 - avoids an import cycle
+
+    name = collapsed_text(status)
+    if name == cs.CORNERSTONE:
+        return cs.CORNERSTONE_GRAIN
+    if name == cs.OUTSIDE_THE_SET:
+        return cs.OUTSIDE_THE_SET_GRAIN
+    return _coarser_grain(collapsed_text(target) or cs.FINEST_GRAIN_FOR_EVERYTHING_ELSE,
+                          cs.FINEST_GRAIN_FOR_EVERYTHING_ELSE)
+
+
+def a_cornerstone_keeps_its_card(item: object) -> bool:
+    """A card asking a cornerstone for its day is never stakeless.
+
+    Read BEFORE :func:`date_card_changes_something` by both seats that apply
+    it (the fold and `temporal_publication._without_stakeless_date_cards`), so
+    that gate is untouched: *"Father dies of COVID"*, a `moment` held to three
+    months with nothing waiting on it, is exactly the anecdote the gate drops —
+    and it is his father's death.
+    """
+    import cornerstones as cs  # noqa: PLC0415
+
+    row = item if isinstance(item, dict) else {}
+    return (collapsed_text(row.get("kind")) in (PRECISION_GAP_KIND, BIRTH_ORIGIN_KIND)
+            and collapsed_text(row.get(REQUESTED_GRAIN_KEY)) == cs.CORNERSTONE_GRAIN)
+
+
 #: WHY AN ANCHOR CARD IS DANGLING (lifehug#365 item 4). A closed vocabulary,
 #: for the same reason every other refusal here is one.
 ANCHOR_WITHOUT_QUESTION = "question_withheld"
@@ -714,6 +796,7 @@ def dangling_anchor_reason(item: object) -> str | None:
 
 
 __all__ = [
+    "A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE",
     "ANCHOR_HANDLE_PREFIX",
     "ANCHOR_RESOLVES_NOTHING",
     "ANCHOR_WITHOUT_QUESTION",
@@ -733,12 +816,14 @@ __all__ = [
     "PRECISION_GAP_KIND",
     "PRECISION_STAKES_WINDOW_MONTHS",
     "REACH_SATURATION",
+    "REQUESTED_GRAIN_KEY",
     "REQUESTED_FIELD_BIRTH_DATE",
     "REQUESTED_FIELD_DATE",
     "REQUESTED_FIELD_ORDER",
     "REQUESTED_FIELD_START_DATE",
     "SCORE_FORMULA_VERSION",
     "UNRESOLVED_HANDLE_PREFIX",
+    "a_cornerstone_keeps_its_card",
     "anchor_handle_ref",
     "birth_origin_system_value",
     "birth_origin_work_item_id",
@@ -754,6 +839,7 @@ __all__ = [
     "legacy_work_item_ids",
     "no_date_card_reason",
     "node_claim_basis",
+    "precision_card_grain",
     "resolve_work_item_id",
     "resolve_work_item_ids",
     "work_item_aliases",

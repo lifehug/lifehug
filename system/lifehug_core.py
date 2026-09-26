@@ -1100,3 +1100,40 @@ def load_mission() -> str:
     if MISSION_FILE.exists():
         return MISSION_FILE.read_text(encoding="utf-8")
     return ""
+
+
+#: The one shared context block every model interaction that interprets the
+#: person's words reads (owner, 2026-09-25: "for most of this, I'm speaking
+#: voice-to-text, so often things are misspelled or maybe translated wrong
+#: ... Maybe we write that down for the model to understand too"). Stated
+#: ONCE, here, and injected by each prompt builder under the heading
+#: :data:`HOW_WORDS_ARRIVE_HEADING`: the conversation turn's context (so
+#: every child interaction too), the story classifier, the resolver, the
+#: landmark recorder / listener / reading / offer leaves and the timeline's
+#: era recorder. Framework-wide, not a profile setting: conversational
+#: telling is the product's premise, dictation is how most people talk to a
+#: phone, and the hosted runtime's prompt subprocesses never read a vault
+#: profile, so a per-person switch would make the two runtimes diverge.
+HOW_WORDS_ARRIVE_FILE_NAME = "how-words-arrive.md"
+HOW_WORDS_ARRIVE_HEADING = "How the person's words arrive"
+HOW_WORDS_ARRIVE_TOKEN = "{how_words_arrive}"
+
+
+def load_how_words_arrive(framework_root: str | Path | None = None) -> str:
+    """``interactions/how-words-arrive.md``, stripped; ``""`` when absent.
+
+    Absent degrades like :func:`load_mission` (an install that predates the
+    file), and ``tests/test_v360_how_words_arrive.py`` is what proves every
+    shipped builder actually carries it.
+    """
+    base = Path(framework_root) / "interactions" if framework_root else INTERACTIONS_DIR
+    path = Path(base) / HOW_WORDS_ARRIVE_FILE_NAME
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def fill_how_words_arrive(template: str, framework_root: str | Path | None = None) -> str:
+    """Substitute :data:`HOW_WORDS_ARRIVE_TOKEN` in a prompt leaf."""
+    return template.replace(HOW_WORDS_ARRIVE_TOKEN, load_how_words_arrive(framework_root))

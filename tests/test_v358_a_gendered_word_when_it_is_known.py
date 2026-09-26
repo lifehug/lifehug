@@ -563,7 +563,17 @@ class ThePublishedProjectionTests(unittest.TestCase):
                       ["work_items"] if r["kind"] == rw.RELATION_WORD_KIND]
         self.assertEqual(sorted(projection),
                          sorted(r["work_item_id"] for r in self.vault.cards().values()))
+        # v360 follow-up (owner, 2026-09-25): the grandparent-side card
+        # (`entity_roster.with_grandparent_side_cards`, same `relation_word`
+        # kind) is now published on this seam too. This fixture's one
+        # grandparent is still NOT asked: the owner's own words give his side
+        # ("my grandpa James Edwin Taylor Sr., my dad's dad" —
+        # `entity_roster.A_GRANDPARENT_SIDE_HE_SAID_IS_KNOWN`), so the count
+        # stays the two relation-gender cards (Harvey, James Everett Taylor).
         self.assertEqual(len(projection), 2)
+        sides = [r for r in pub.read_projection(self.vault.root)["work_items"]
+                 if r.get("requested_field") == "grandparent_side"]
+        self.assertEqual(sides, [])
 
     def test_the_rebuild_oracle_reproduces_it(self):
         self.assertTrue(pub.verify(self.vault.root, now=NOW)["identical"])

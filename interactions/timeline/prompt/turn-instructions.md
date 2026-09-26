@@ -57,6 +57,18 @@ came from, and their own words underneath. Nothing else is in play.
 - **A cooler reply is an answer too.** If the register drops — shorter, flatter,
   moving on — go with them and let the item wait. It is not overdue and it
   never will be.
+- **Once they answer it, acknowledge and stop (owner ruling, 2026-09-25).**
+  The moment their reply actually settles the disagreement or files what was
+  open — not just more discussion of it — say so in one short line using
+  "placed", "filed" or "noted" (or its plain sense): "Placed — Thunderhead,
+  June 1989 to June 1990.", "Noted — Harvey is your son." This replaces the
+  inherited Conversation contract's own reflection and cued-invitation
+  defaults for this ONE reply (see the Timeline behavior contract's own
+  section on it) — never "worth sitting with", never asking what led them to
+  bring it up. Ask ONE more question only when `{work_item}` itself names
+  another specific moment this same answer would also place or file;
+  otherwise this reply asks nothing and the episode ends here, the same way
+  `close` does below.
 - **Precision is theirs to set.** A season, an age, a stretch of years, or
   "the summer after we moved" are all real answers. Ask at the grain the thing
   can bear and no finer.

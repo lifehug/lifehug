@@ -659,7 +659,9 @@ class AnAgeAndADateCorroborateTests(unittest.TestCase):
                 if row.get("finding") == tt.DIAGNOSTIC_AGE_CORROBORATES]
         self.assertEqual(len(rows), 1, rows)
         self.assertEqual(rows[0]["placed"], WEDDING_DAY)
-        self.assertEqual(rows[0]["age_window"], "1976-06-19/1977-06-18")
+        # timeline-rules:19 (`chronology.AGE_STATEMENT_GRAIN`): an age is held
+        # at the birthday's MONTH — the owner's "I don't care that much about days".
+        self.assertEqual(rows[0]["age_window"], "1976-06/1977-06")
         self.assertNotIn(tt.DIAGNOSTIC_AGE_CONTRADICTS, findings(result))
 
     def test_the_age_never_places_a_moment_the_vault_already_dates(self):
@@ -861,7 +863,7 @@ class TheRulesAreNamedTests(unittest.TestCase):
         because the number is a monotonic marker that the rules moved and later
         releases move it again — v346 took ``:15``, v347 ``:16`` the same day,
         v350 ``:17`` and v357 ``:18``."""
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
 
     def test_the_binder_exports_its_new_tables(self):
         for name in ("A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT",

@@ -63,7 +63,7 @@ if str(_SYSTEM_DIR) not in sys.path:
 import chronology as chrono  # noqa: E402
 import general_listener as gl  # noqa: E402
 import landmarks_interaction as li  # noqa: E402
-from lifehug_core import INTERACTIONS_DIR  # noqa: E402
+from lifehug_core import INTERACTIONS_DIR, fill_how_words_arrive  # noqa: E402
 from temporal_claims import collapsed_text  # noqa: E402
 
 
@@ -239,9 +239,12 @@ def _leaf_path(framework_root: str | Path | None = None) -> Path:
 
 
 def load_reading_leaf(framework_root: str | Path | None = None) -> str:
-    """The reading leaf, verbatim. A host REPLAYs exactly this text."""
+    """The reading leaf, verbatim but for the shared ``{how_words_arrive}``
+    block (`lifehug_core.fill_how_words_arrive`). A host REPLAYs exactly this
+    text, and the extractor version is taken over it."""
     try:
-        return _leaf_path(framework_root).read_text(encoding="utf-8")
+        return fill_how_words_arrive(
+            _leaf_path(framework_root).read_text(encoding="utf-8"), framework_root)
     except OSError as exc:
         raise LandmarkReadingError(f"no reading leaf: {exc}") from exc
 

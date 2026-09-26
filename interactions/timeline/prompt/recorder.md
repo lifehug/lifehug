@@ -13,6 +13,8 @@ OTHER NAMES THEY USE FOR IT: {era_aliases}
 WHAT IS ALREADY KNOWN ABOUT IT: {era_known}
 THE QUESTION THEY WERE ASKED: {question_asked}
 
+{how_words_arrive}
+
 WHAT THEY SAID:
 {answer}
 

@@ -76,7 +76,7 @@ import cross_dating  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
 import landmarks_interaction as li  # noqa: E402
 import temporal_claims as tc  # noqa: E402
-from lifehug_core import INTERACTIONS_DIR  # noqa: E402
+from lifehug_core import INTERACTIONS_DIR, fill_how_words_arrive  # noqa: E402
 from recommend_focuses import TIME_PERIOD_PATTERNS  # noqa: E402
 
 LISTENER_PROMPT = "listener.md"
@@ -662,9 +662,12 @@ def _prompt_path(framework_root: str | Path | None = None) -> Path:
 
 
 def load_listener_leaf(framework_root: str | Path | None = None) -> str:
-    """The listener leaf, verbatim. A host REPLAYs exactly this text."""
+    """The listener leaf, verbatim but for the shared ``{how_words_arrive}``
+    block (`lifehug_core.fill_how_words_arrive`). A host REPLAYs exactly this
+    text, and the extractor version is taken over it."""
     try:
-        return _prompt_path(framework_root).read_text(encoding="utf-8")
+        return fill_how_words_arrive(
+            _prompt_path(framework_root).read_text(encoding="utf-8"), framework_root)
     except OSError as exc:
         raise GeneralListenerError(f"no listener leaf: {exc}") from exc
 

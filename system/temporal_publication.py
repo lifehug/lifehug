@@ -503,6 +503,149 @@ def resolver_estimates(vault_root: str | Path) -> dict[str, dict]:
     return found
 
 
+def resolver_attempts(vault_root: str | Path) -> dict[str, dict] | None:
+    """``node_id -> {"status", "question"}`` for every moment the resolver has
+    looked at (v360, :data:`NEVER_ASK_WHAT_WAS_NOT_LOOKED_AT`), or ``None``
+    when this vault has no resolver ledger at all — the look-first step has
+    never run here (a keyless install), and the gate stands aside rather than
+    leaving the vault with no date card ever.
+
+    Read, never folded — the same rule as :func:`resolver_questions`: it
+    decides which date cards are DRAWN, never where anything is placed.
+    """
+    path = Path(vault_root) / RESOLVER_LEDGER
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    rows = raw.get("nodes") if isinstance(raw, dict) else None
+    found: dict[str, dict] = {}
+    for node_id, row in (rows or {}).items():
+        if not isinstance(row, dict) or not node_id:
+            continue
+        found[str(node_id)] = {
+            "status": str(row.get("status") or ""),
+            "question": " ".join(str(row.get("question") or "").split()),
+        }
+    return found
+
+
+#: v360 (owner, 2026-09-25): *"For each of these questions … if I ask you
+#: directly right now, I bet you could answer them, so I'm wondering why
+#: they're not getting answered."* A DATE CARD — a `precision_gap` on a node
+#: with no placement, or a `missing_anchor` naming a handle — is published only
+#: when the resolver has LOOKED at that moment (its ledger holds an outcome)
+#: and came back `unknown` with a real question. Until then the moment is "not
+#: yet looked at": no card, and the resolver's own plan (which takes every
+#: target with no ledger row) is its queue. A moment the resolver can never
+#: plan by design is no card either. The birthday card is not a date card in
+#: this sense — it is the coordinate system — and is never gated here.
+NEVER_ASK_WHAT_WAS_NOT_LOOKED_AT = (
+    "a date card is drawn only for a moment the resolver has looked at and "
+    "could not answer, with the question it asked; a moment it has not yet "
+    "looked at, or can never plan, is queued or left alone, never asked"
+)
+
+#: Why a date card was withheld — a closed vocabulary, like every refusal.
+NOT_YET_LOOKED_AT = "not_yet_looked_at"
+LOOKED_AT_WITHOUT_A_QUESTION = "looked_at_without_a_question"
+NEVER_PLANNABLE = "never_plannable"
+
+
+def _plannable_node_ids(vault_root: str | Path, projection: dict, index: object) -> set[str] | None:
+    """Every node the resolver's planner would take, or ``None`` when that
+    cannot be said (the reason on a withheld card is then the plain
+    :data:`NOT_YET_LOOKED_AT`)."""
+    try:
+        import resolver  # noqa: PLC0415
+
+        by_source = resolver.targets(Path(vault_root), projection,
+                                     index if isinstance(index, dict) else {"claims": list(index or ())})
+    except Exception:  # noqa: BLE001 - a diagnostic, never a reason to fail a publish
+        return None
+    return {row["node_id"] for rows in by_source.values() for row in rows}
+
+
+def _without_unlooked_date_cards(payloads: dict, attempts: dict[str, dict] | None, *,
+                                 vault_root: str | Path, index: object) -> list[dict]:
+    """:data:`NEVER_ASK_WHAT_WAS_NOT_LOOKED_AT`, in place over the rendered pair.
+
+    Returns one row per withheld card (``work_item_id``, ``node_ref``,
+    ``label``, ``reason``), for the summary — a refusal the owner cannot read
+    is one he cannot check. A display decision over the same generation, like
+    the stakes gate beside it: nothing is re-derived and
+    ``calculation_rule_version`` does not move.
+
+    ``attempts`` of ``None`` (no resolver ledger on this vault) withholds
+    nothing: where no look-first step runs, there is nothing to wait for.
+    """
+    if attempts is None:
+        return []
+    projection = payloads.get(PROJECTION_FILE) or {}
+    nodes = {str(node.get("node_id") or ""): node
+             for node in (projection.get("nodes") or ()) if isinstance(node, dict)}
+
+    def asked(node_id: str) -> bool:
+        row = attempts.get(node_id) or {}
+        return row.get("status") == "unknown" and bool(row.get("question"))
+
+    withheld: dict[str, dict] = {}
+    plannable: list = []
+
+    def reason_for(node_ids: list[str]) -> str:
+        if any(attempts.get(n) for n in node_ids):
+            return LOOKED_AT_WITHOUT_A_QUESTION
+        if not plannable:
+            plannable.append(_plannable_node_ids(vault_root, projection, index))
+        known = plannable[0]
+        if known is not None and node_ids and not any(n in known for n in node_ids):
+            return NEVER_PLANNABLE
+        return NOT_YET_LOOKED_AT
+
+    for payload in payloads.values():
+        rows = payload.get("work_items")
+        if not isinstance(rows, list):
+            continue
+        kept: list = []
+        for row in rows:
+            if not isinstance(row, dict):
+                kept.append(row)
+                continue
+            kind = str(row.get("kind") or "")
+            node_ref = str(row.get("node_ref") or "")
+            looked: list[str] = []
+            if kind == twi.PRECISION_GAP_KIND and node_ref \
+                    and not tpl.has_usable_placement(nodes.get(node_ref) or {}):
+                looked = [node_ref]
+            elif kind == twi.BIRTH_ORIGIN_KIND and not node_ref \
+                    and str(row.get("requested_field") or "") != twi.REQUESTED_FIELD_BIRTH_DATE:
+                looked = [str(ref) for ref in row.get("resolves") or () if str(ref)]
+            else:
+                kept.append(row)
+                continue
+            if any(asked(node_id) for node_id in looked):
+                kept.append(row)
+                continue
+            work_item_id = str(row.get("work_item_id") or "")
+            if work_item_id not in withheld:
+                withheld[work_item_id] = {
+                    "work_item_id": work_item_id,
+                    "kind": kind,
+                    "node_ref": node_ref,
+                    "resolves": looked if not node_ref else [],
+                    "label": str((nodes.get(node_ref) or {}).get("label") or row.get("subject_ref") or ""),
+                    "reason": reason_for(looked),
+                }
+        if len(kept) != len(rows):
+            payload["work_items"] = kept
+            counts = payload.get("counts")
+            if isinstance(counts, dict) and "work_items" in counts:
+                counts["work_items"] = len(kept)
+    return [withheld[key] for key in sorted(withheld)]
+
+
 def _with_resolver_estimates(payloads: dict, estimates: dict[str, dict]) -> None:
     """Put the resolver's probable window on the node and on its work item.
 
@@ -563,6 +706,21 @@ def _with_resolver_questions(payloads: dict, questions: dict[str, str]) -> None:
         ]
 
 
+#: v360 follow-up (owner, 2026-09-25) (item 1). An estimate wider than about five
+#: years stays the moment's probable window
+#: (`resolver.AN_ESTIMATE_WIDER_THAN_FIVE_YEARS_STAYS_A_WINDOW`), and the owner's
+#: standing ruling decides whether that window is worth a question: *"The only
+#: time I would bring it up again is if it is hot. Its higher fidelity impacts
+#: the placement of a lot of other things."* So a precision card over such a
+#: window is kept only for a keystone or a moment other placements wait on
+#: (``resolves``) — and, as every gate here, never taken off a cornerstone.
+A_WIDE_ESTIMATE_IS_ASKED_ONLY_WHEN_HOT = (
+    "a precision card over a probable window wider than about five years is "
+    "asked only when the moment is hot — a keystone, or a moment other "
+    "placements wait on; a cornerstone keeps its card"
+)
+
+
 def _without_stakeless_date_cards(payloads: dict) -> list[dict]:
     """Drop every date card the resolver's OWN window shows buys nothing.
 
@@ -612,6 +770,13 @@ def _without_stakeless_date_cards(payloads: dict) -> list[dict]:
         for row in (projection.get("memberships") or ())
         if isinstance(row, dict) and str(row.get("relation") or "") == "overlaps"
     }
+    import resolver  # noqa: PLC0415 - the cap is the resolver's own constant
+
+    keystone_ids = {
+        str(row.get("work_item_id") or "")
+        for row in (projection.get("keystones") or ())
+        if isinstance(row, dict)
+    }
     for payload in payloads.values():
         rows = payload.get("work_items")
         if not isinstance(rows, list):
@@ -623,13 +788,30 @@ def _without_stakeless_date_cards(payloads: dict) -> list[dict]:
                 continue
             window = row.get("probable_window")
             node = nodes.get(str(row.get("node_ref") or "")) or {}
-            if not isinstance(window, dict) or tpl.has_usable_placement(node):
+            if (not isinstance(window, dict) or tpl.has_usable_placement(node)
+                    or twi.a_cornerstone_keeps_its_card(row)):
                 kept.append(row)
                 continue
             months = chrono.span_months({
                 "earliest": str(window.get("earliest") or "") or None,
                 "latest": str(window.get("latest") or "") or None,
             })
+            if (str(row.get("kind") or "") == "precision_gap"
+                    and (months is None or months > resolver.MAX_PLACING_ESTIMATE_MONTHS)
+                    and not row.get("resolves")
+                    and str(row.get("work_item_id") or "") not in keystone_ids):
+                # :data:`A_WIDE_ESTIMATE_IS_ASKED_ONLY_WHEN_HOT`.
+                work_item_id = str(row.get("work_item_id") or "")
+                dropped[work_item_id] = {
+                    "work_item_id": work_item_id,
+                    "node_ref": str(row.get("node_ref") or ""),
+                    "event_kind": str(row.get("event_kind") or ""),
+                    "label": str(node.get("label") or ""),
+                    "window": f"{window.get('earliest')}..{window.get('latest')}",
+                    "months": months,
+                    "reason": A_WIDE_ESTIMATE_IS_ASKED_ONLY_WHEN_HOT,
+                }
+                continue
             low = chrono.year_of({"earliest": window.get("earliest")})
             high = chrono.year_of({"latest": window.get("latest")}, end=True)
             straddles = bool(
@@ -665,19 +847,58 @@ def _without_stakeless_date_cards(payloads: dict) -> list[dict]:
 
 def _with_relation_words(payloads: dict, *, roster_snapshot: object, index: object,
                          landmark_entries: object, owner_names: object,
-                         now: object) -> None:
+                         now: object, vault_root: object = None,
+                         told: object = None) -> None:
     """`relation_words.with_relation_words` over the rendered pair, in place.
 
     Guarded like the placement score: a problem reading relation words must
     never take a publish down — it costs the words and the cards, and nothing
     the fold derived.
+
+    v360 follow-up (owner, 2026-09-25): the reader also hears the owner's own
+    tellings word for word (`relation_words.own_telling_texts`) — "I have my
+    beautiful daughter Charlee" is in answers/E27 and in no claim — and the
+    grandparent-side card (`entity_roster.with_grandparent_side_cards`) rides
+    the same seam, after the relation-word cards, under its own guard.
     """
+    claims = store.active_claims(index) if isinstance(index, dict) else ()
     try:
-        claims = store.active_claims(index) if isinstance(index, dict) else ()
+        if told is None:
+            told = rw.own_telling_texts(vault_root) if vault_root is not None else {}
         rw.with_relation_words(
             payloads, projection_key=PROJECTION_FILE, roster=roster_snapshot,
             claims=claims, landmark_entries=landmark_entries or (),
-            owner_names=owner_names or (), now=now)
+            owner_names=owner_names or (), now=now, told=told)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import entity_roster  # noqa: PLC0415 - the roster module reads config at import
+
+        entity_roster.with_grandparent_side_cards(
+            payloads, roster=roster_snapshot, now=now, claims=claims)
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _with_timeline_views(payloads: dict, *, roster_snapshot: object, index: object,
+                         landmark_entries: object, owner_names: object) -> None:
+    """`timeline_views.with_views` over the rendered projection, in place.
+
+    v360 (owner, 2026-09-25) (the owner's Landmark and Cornerstone views): the
+    ``landmarks_view`` and ``cornerstones_view`` keys, read from the landmark
+    sources, the roster and the nodes and work items this fold already
+    rendered — a display decision over the SAME generation, so
+    `calculation_rule_version` does not move. Guarded like the relation words:
+    a problem drawing a view costs the view, never the publish.
+    """
+    claims = store.active_claims(index) if isinstance(index, dict) else ()
+    try:
+        import timeline_views  # noqa: PLC0415
+
+        timeline_views.with_views(
+            payloads, projection_key=PROJECTION_FILE, index=index,
+            landmark_entries=landmark_entries or (), roster=roster_snapshot,
+            owner_names=owner_names or (), claims=claims)
     except Exception:  # noqa: BLE001
         return
 
@@ -996,6 +1217,7 @@ def publish(
     published_at = normalized_timestamp(now, error=TemporalPublicationError)
     questions = resolver_questions(vault_root)
     estimates = resolver_estimates(vault_root)
+    attempts = resolver_attempts(vault_root)
     digest = store.payload_sha256(_canonical(index if isinstance(index, dict) else list(index)))
 
     # v318. The derivation's inputs are all read by now; if they digest to what
@@ -1004,6 +1226,14 @@ def publish(
     # SAME no-op the block below reaches by comparing rendered payloads — taken
     # earlier, from the inputs, so a compile on an unchanged vault stops paying
     # for the answer it already has.
+    # v360 follow-up (`relation_words.HIS_OWN_TELLINGS_ARE_READ_BY_A_NAME_HE_USES`):
+    # his tellings word for word are an input of the relation words, so they
+    # are an input of the fingerprint — a new answer with no claim in it still
+    # re-derives.
+    try:
+        told = rw.own_telling_texts(vault_root)
+    except Exception:  # noqa: BLE001 - never takes a publish down
+        told = {}
     fingerprint = derivation_fingerprint(
         index_digest=digest,
         derivation_inputs=derivation_inputs,
@@ -1014,6 +1244,8 @@ def publish(
         owner_ref=owner_ref,
         resolver_questions=questions,
         resolver_estimates=estimates,
+        resolver_attempts=attempts,
+        own_tellings=told,
     )
     if not full:
         standing = _standing_publication(
@@ -1062,6 +1294,11 @@ def publish(
     # Owner ruling 2 (2026-09-23): and now that the window IS on the card, the
     # cards that the window shows buy nothing come off. Same seam, same rule.
     stakeless_cards = _without_stakeless_date_cards(payloads)
+    # v360 (owner, 2026-09-25) (:data:`NEVER_ASK_WHAT_WAS_NOT_LOOKED_AT`): and a date
+    # card the resolver has not looked at yet — or can never plan — comes off
+    # too. Same seam, same rule: read, never folded.
+    unlooked_cards = _without_unlooked_date_cards(payloads, attempts,
+                                                  vault_root=vault_root, index=index)
     # v358 (owner ruling 2026-09-25, `relation_words`): the word each roster
     # person is spoken of by, and at most one card per person whose word is not
     # yet known. Read from the roster and the claims this fold already holds —
@@ -1069,7 +1306,14 @@ def publish(
     # does not move.
     _with_relation_words(payloads, roster_snapshot=roster_snapshot, index=index,
                          landmark_entries=derivation_inputs.get("landmark_entries"),
-                         owner_names=owner_names, now=published_at)
+                         owner_names=owner_names, now=published_at,
+                         vault_root=vault_root, told=told)
+    # v360 (owner, 2026-09-25) (`timeline_views`): the Landmarks and Cornerstones
+    # views, after the relation words (the cornerstones view reads their
+    # labels and every card they added). Same seam, same rule.
+    _with_timeline_views(payloads, roster_snapshot=roster_snapshot, index=index,
+                         landmark_entries=derivation_inputs.get("landmark_entries"),
+                         owner_names=owner_names)
 
     # THE SEMANTIC NO-OP (eras design §3.4). Age frames make the projection a
     # function of the clock as well as of the receipts, so "publish again"
@@ -1095,7 +1339,8 @@ def publish(
                         digest=digest, timings=timings,
                         paths=[str(store.store_path(vault_root, name))
                                for name in PUBLICATION_ORDER],
-                        stakeless_cards=stakeless_cards)
+                        stakeless_cards=stakeless_cards,
+                        unlooked_cards=unlooked_cards)
 
     # Serialize BOTH before writing EITHER: a payload that cannot be rendered
     # must fail with nothing on disk changed, not halfway through the pair.
@@ -1132,7 +1377,8 @@ def publish(
     return _summary(result, generation=generation, unchanged=False,
                     published_at=published_at, digest=digest, timings=timings,
                     paths=written, receipt=receipt,
-                    stakeless_cards=stakeless_cards)
+                    stakeless_cards=stakeless_cards,
+                    unlooked_cards=unlooked_cards)
 
 
 def _work_item_identities(payload: object) -> set:
@@ -1194,6 +1440,7 @@ def derivation_fingerprint(
     *, index_digest: str, derivation_inputs: dict, resolution_records: object,
     roster_snapshot: object, owner_names: object, birth_date: object,
     owner_ref: object, resolver_questions: dict, resolver_estimates: dict | None = None,
+    resolver_attempts: dict | None = None, own_tellings: dict | None = None,
 ) -> str | None:
     """A digest over EVERY argument `derive_calculated_timeline` is given.
 
@@ -1219,6 +1466,9 @@ def derivation_fingerprint(
             "owner_ref": owner_ref,
             "resolver_questions": resolver_questions,
             "resolver_estimates": resolver_estimates or {},
+            "resolver_attempts": resolver_attempts,
+            **({"own_tellings": store.payload_sha256(_canonical(own_tellings))}
+               if own_tellings else {}),
         }))
     except (TypeError, ValueError):
         return None
@@ -1366,8 +1616,10 @@ def _unchanged_generation(vault_root: str | Path, payloads: dict) -> int | None:
 
 def _summary(result: tt.CalculatedTimeline, *, generation: int, unchanged: bool,
              published_at: str, digest: str, timings: dict, paths: list,
-             receipt: dict | None = None, stakeless_cards: object = ()) -> dict:
+             receipt: dict | None = None, stakeless_cards: object = (),
+             unlooked_cards: object = ()) -> dict:
     dropped = [dict(row) for row in (stakeless_cards or ()) if isinstance(row, dict)]
+    unlooked = [dict(row) for row in (unlooked_cards or ()) if isinstance(row, dict)]
     return {
         "generation": generation,
         "unchanged": unchanged,
@@ -1381,7 +1633,7 @@ def _summary(result: tt.CalculatedTimeline, *, generation: int, unchanged: bool,
         "receipt": receipt,
         "claims": int((result.diagnostics or {}).get("claims") or 0),
         "nodes": len(result.nodes),
-        "work_items": len(result.work_items) - len(dropped),
+        "work_items": len(result.work_items) - len(dropped) - len(unlooked),
         "unplaced": len((result.diagnostics or {}).get("unplaced") or ()),
         # Owner ruling 2 (2026-09-23): the date cards this publish declined to
         # draw because narrowing them would change nothing, each with the label
@@ -1389,6 +1641,10 @@ def _summary(result: tt.CalculatedTimeline, *, generation: int, unchanged: bool,
         # counted, because a refusal the owner cannot read is a refusal he
         # cannot check.
         "stakeless_date_cards": dropped,
+        # v360 (:data:`NEVER_ASK_WHAT_WAS_NOT_LOOKED_AT`): the date cards
+        # withheld because the resolver has not looked at the moment yet, looked
+        # and had no question, or can never plan it — each with its reason.
+        "unlooked_date_cards": unlooked,
         "timings": {key: round(float(value), 9) for key, value in sorted(timings.items())},
     }
 
@@ -1468,6 +1724,12 @@ EMPTY_VIEW = {
     # relationship — the neutral word, the gendered word when the owner has
     # said it, and the neutral plural. Empty is "no roster relationships".
     "relation_words": (),
+    # v360 (owner, 2026-09-25) (`timeline_views`). SERVED, because they are what the
+    # Timeline's Landmarks and Cornerstones views render. `None` is "this
+    # projection carries no view" — a vault with no landmarks, or a
+    # projection published before the views existed.
+    "landmarks_view": None,
+    "cornerstones_view": None,
     "reached_frame_epoch": {"count": 0, "current": None},
     "counts": {"nodes": 0, "work_items": 0, "memberships": 0, "claims": 0,
                "unplaced": 0},
@@ -1646,6 +1908,12 @@ def calculated_view(vault_root: str | Path) -> dict:
         # Tolerant by construction: a projection published before v358 (or a
         # vault with no roster relationships) carries none.
         "relation_words": tuple(payload.get("relation_words") or ()),
+        # Tolerant by construction: a projection published before the views
+        # (or a vault with nothing to show in one) carries none.
+        "landmarks_view": (dict(payload["landmarks_view"])
+                           if isinstance(payload.get("landmarks_view"), dict) else None),
+        "cornerstones_view": (dict(payload["cornerstones_view"])
+                              if isinstance(payload.get("cornerstones_view"), dict) else None),
         "reached_frame_epoch": dict(epoch) if isinstance(epoch, dict) else {
             "count": 0, "current": None
         },
@@ -1753,7 +2021,12 @@ def verify(
                          index=index,
                          landmark_entries=derivation_inputs.get("landmark_entries"),
                          owner_names=owner_names,
-                         now=str(published.get("published_at") or ""))
+                         now=str(published.get("published_at") or ""),
+                         vault_root=vault_root)
+    _with_timeline_views({PROJECTION_FILE: fresh}, roster_snapshot=roster_snapshot,
+                         index=index,
+                         landmark_entries=derivation_inputs.get("landmark_entries"),
+                         owner_names=owner_names)
     want, have = rebuild_signature(fresh), rebuild_signature(published)
     return {
         "published": True,

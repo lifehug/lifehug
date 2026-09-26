@@ -628,7 +628,9 @@ class PackageTests(unittest.TestCase):
                 # being cut off mid-file, evals/lints.yaml gains the
                 # no_repetition lint, and evals/goldens/ gains the
                 # deliberately-broken chat-becoming-repetition-loop-bad-01.json.
-                "8410820a79477dc1ddfe8bf4e3d0610974af35021430024e72afecb70273beb4"
+                # 2026-09-25 (v360): interaction.yaml and context/manifest.md
+                # gain the shared how_words_arrive block (load order + budget).
+                "356097eb15859e4e93199f4437aad1b1c60972c07aa6e37073a304d1e10d2e2f"
             ),
             "question_candidate": (
                 "f549af401b4765166cc8d3618439d2b367ab799f16f43f3a1a3c5dae764786f5"

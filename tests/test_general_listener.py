@@ -389,7 +389,9 @@ class ListenerPromptTests(unittest.TestCase):
         The listener must be able to FILE a mission the person mentions,
         because that mention is what opens the ladder; 12163 measured.
         """
-        self.assertLess(len(self._prompt()), 12200)
+        # 2026-09-25 (v360): 12200 → 13700, the shared `{how_words_arrive}`
+        # block (~1300 characters; measured 13498).
+        self.assertLess(len(self._prompt()), 13700)
 
     def test_the_digest_is_nine_lines_and_not_nine_ladders(self):
         digest = gl.render_domain_digest()

@@ -90,6 +90,17 @@ node of that kind. `landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION` decides
 which ladders are live; never offer either ladder by hand to a vault that has
 not raised it.
 
+**Cornerstones (v360, owner 2026-09-25, ADR 0038).** Beside landmarks (the
+skeleton) and keystones (the computed highest-leverage gap) sits a FIXED set of
+dates asked to the day: the owner's birth; his children's, parents', siblings'
+and spouse's births; his weddings and divorces; the deaths of his parents,
+spouse, siblings, children and grandparents; his baptism once mentioned
+(`system/cornerstones.py`). Nothing else is ever asked below a month, however
+much it would place (`temporal_work_items.A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`);
+a cornerstone-type event about anyone else is asked once and accepted at any
+grain. When you talk to the owner about a date, show a day only if he or a
+document gave it; a day you worked out is its month.
+
 ## First Session: Setup
 
 If there are no project-specific categories in `system/question-bank.md` (only A-E), this is a new user. Run the setup flow:

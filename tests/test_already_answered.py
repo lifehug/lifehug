@@ -65,11 +65,21 @@ class TheHandleIsLookedUp(unittest.TestCase):
             index_of(james_birth(), something_after_it()),
             roster_snapshot=ONE_JAMES, now=NOW)
         self.assertEqual(items(result, "missing_anchor"), [])
+        # v360 follow-up (owner, 2026-09-25) (`timeline-rules:23`,
+        # `temporal_timeline.A_HANDLE_NAMING_A_CORNERSTONE_BINDS_TO_IT`): a
+        # handle titled as a milestone of one roster person now binds while the
+        # edges are built — earlier than the late lookup this test was written
+        # for — so the reunion is PLACED after the birth rather than only
+        # spared its card. Either way no date card, and the handle names him.
         rows = [row for row in result.diagnostics["findings"]
                 if row.get("finding") == "anchor_resolved_late"]
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["anchor"], "James's birth")
-        self.assertEqual(rows[0]["subject_ref"], "person/james-taylor")
+        reunion = next(node for node in result.nodes
+                       if node.get("event_kind") == "transition")
+        if rows:
+            self.assertEqual(rows[0]["anchor"], "James's birth")
+            self.assertEqual(rows[0]["subject_ref"], "person/james-taylor")
+        else:
+            self.assertEqual(reunion["best_temporal_value"]["earliest"], "1990-03-20")
 
     def test_two_candidates_mint_identity_not_date(self):
         result = tt.derive_calculated_timeline(
@@ -77,8 +87,14 @@ class TheHandleIsLookedUp(unittest.TestCase):
         self.assertEqual(items(result, "missing_anchor"), [])
         identity = items(result, "identity_uncertain")
         self.assertEqual(len(identity), 1)
+        # v360 (owner, 2026-09-25): the identity card reads in the
+        # owner's own terms now — see `compose_identity_uncertain_question`.
+        # Neither candidate here has a roster `relationship`, so the reword
+        # falls back to their plain names, sentence-cased mention, and a
+        # trailing "someone else" option.
         self.assertEqual(identity[0]["prompt_intent"],
-                         "Which James is this: James Taylor or James Rowe?")
+                         'Who is "James" here — James Taylor or James Rowe, '
+                         'or someone else?')
         self.assertTrue(ident.is_unresolved_ref(identity[0]["subject_ref"]))
 
     def test_a_name_nobody_knows_still_asks_for_a_date(self):

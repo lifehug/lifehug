@@ -116,6 +116,8 @@ class VocabularyTests(unittest.TestCase):
                 # distinguishing token that answers a shared given name; a
                 # shared given name with no such token answers nobody.
                 "relationship_qualified_name",
+                # v360 (owner 2026-09-25): what he calls them decides a bare name.
+                "what_he_calls_them",
                 "shared_name_token",
                 "ambiguous_candidates",
                 "no_candidate",

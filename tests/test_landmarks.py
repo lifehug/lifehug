@@ -2779,12 +2779,18 @@ class LandmarkRecorderTests(unittest.TestCase):
         # with a year), the bracket-estimate convention, and one `span`
         # example. Measured range across all nine domains with an empty
         # already-filed block: 8974–9086. Re-measured, not rounded up.
-        self.assertLess(len(prompt), 9200)
+        #
+        # 2026-09-25 (v360) moved it 9200 → 10500 by the shared
+        # `{how_words_arrive}` block (interactions/how-words-arrive.md, ~1300
+        # characters): the recorder reads the person's dictated words and must
+        # know "1921" can be "19 to 21". Measured range across the domains'
+        # own asks: 10329–10441.
+        self.assertLess(len(prompt), 10600)
         for row in li.load_questions():
             with self.subTest(domain=row["domain"]):
                 self.assertLess(len(self._prompt(domain=row["domain"],
                                                  question_asked=row["ask"])),
-                                9200)
+                                10600)
 
     def test_the_prompt_carries_the_domains_own_ladder_and_none_rule(self):
         military = self._prompt()

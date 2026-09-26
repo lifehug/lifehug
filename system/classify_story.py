@@ -62,6 +62,7 @@ from lifehug_core import (
     answer_body,
     correction_role_marks_stale,
     load_config,
+    load_how_words_arrive,
     load_mission,
     now_utc,
     parse_categories,
@@ -833,6 +834,8 @@ def _build_timeline_prompt(
     timeline_context = _timeline_prompt_context(context_snapshot)
     return f"""You are refreshing only the timeline evidence in an existing Lifehug story classification.
 
+{load_how_words_arrive()}
+
 ## Source File
 Path: {_relative_path(source_path)}
 Title: {fm.get('title', '(untitled)')}
@@ -937,6 +940,8 @@ def build_prompt(
 ## Lifehug Mission
 {mission}
 
+{load_how_words_arrive()}
+
 {judgment_section}
 
 ---
@@ -1038,6 +1043,11 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   leave `date` itself null when they said none of it. The system does the
   arithmetic from there — an age against a birthday, a relation against a dated
   landmark — so a guessed year is worse than no year at all.
+- A transcription repair (How the person's words arrive, above) is recorded as the
+  reading, in digits — "at 1921" about a mission is `age: "19 to 21"`, never
+  `stated: "1921"` — with `source_grounding` null, because the words that arrived
+  no longer prove it. A repair you are not sure of is not recorded as a date at
+  all: keep the words in `when_hint` and leave `date` null.
 - Echo `_classification_snapshot` byte-for-byte as shown. It binds this response
   to the source and context seen in this prompt; never substitute newer values.
 - `events[].title`: a noun phrase of at most seven words naming the thing, not the

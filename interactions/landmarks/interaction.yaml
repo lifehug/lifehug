@@ -95,4 +95,7 @@ budget.listener: 2400
 # estimation conventions — plus the two things neither had: the relation rule
 # and two whole worked readings. tests/test_landmark_reading.py measures the
 # ceiling rather than rounding it up.
-budget.reading: 2600
+# 2026-09-25 (v360): +400 for the shared {how_words_arrive} block the
+# reading leaf now carries (interactions/how-words-arrive.md); measured 11700
+# characters.
+budget.reading: 3000

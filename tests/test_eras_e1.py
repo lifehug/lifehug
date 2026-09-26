@@ -472,15 +472,17 @@ class LifeViewTests(VaultTestCase):
     def test_an_event_after_as_of_is_a_future_plan(self) -> None:
         self.file_claims([owner_birth(), dated("the reunion", "2030-06-01")])
         result = self.fold()
+        # v360 (owner, 2026-09-25): a title is sentence-cased, so
+        # the fixture's own lowercase mention is no longer the node's label.
         row = next(node for node in result.nodes
-                   if node.get("label", "").startswith("the reunion"))
+                   if node.get("label", "").startswith("The reunion"))
         self.assertEqual(row["life_view"], "future_plan")
 
     def test_an_event_before_as_of_is_lived(self) -> None:
         self.file_claims([owner_birth(), dated("the wedding", "2007-01-11")])
         result = self.fold()
         row = next(node for node in result.nodes
-                   if node.get("label", "").startswith("the wedding"))
+                   if node.get("label", "").startswith("The wedding"))
         self.assertEqual(row["life_view"], "lived")
 
     def test_e1_assigns_exactly_two_life_views(self) -> None:
@@ -504,7 +506,7 @@ class RuleVersionAndFingerprintTests(VaultTestCase):
         layer; the slot this test guards is that the version MOVES with the
         rules, so it tracks the current one rather than pinning a retired
         number."""
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
 
     def test_a_fingerprint_without_an_epoch_is_byte_identical_to_v1s(self) -> None:
         self.assertEqual(

@@ -195,14 +195,17 @@ class ClaimsPerEventTests(unittest.TestCase):
         report = _run(self.root, publish=False)
         self.assertEqual(report["events"], 3)
         self.assertEqual(report["claims"], 3)
+        # v360 (owner, 2026-09-25): "sixth grade" is a school grade
+        # (`chronology.A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR`), read
+        # as an age on the school calendar, so the third event is an age too.
         self.assertEqual(
             report["claims_by_type"],
-            {"date": 1, "age": 1, "relative_order": 0, "occurrence": 1},
+            {"date": 1, "age": 2, "relative_order": 0, "occurrence": 0},
         )
         rows = ts.active_claims(ts.fold_active_index(self.root))
         self.assertEqual(len(rows), 3)
         self.assertEqual(
-            sorted(row["claim_type"] for row in rows), ["age", "date", "occurrence"]
+            sorted(row["claim_type"] for row in rows), ["age", "age", "date"]
         )
 
     def test_every_claim_cites_its_interpretation_and_the_story(self):
@@ -247,7 +250,10 @@ class ClaimsPerEventTests(unittest.TestCase):
             if row.get("event_mention") == "Grandpa's two-page letter"
         ]
         self.assertEqual(len(letter), 1)
-        self.assertEqual(letter[0]["claim_type"], "occurrence")
+        # The ONE other exception beside recency (v360, owner 2026-09-25): a school
+        # grade is read by `chronology.school_grade_of`, never by parse_age.
+        self.assertEqual(letter[0]["claim_type"], "age")
+        self.assertEqual(letter[0]["temporal_value"]["grade"], 6)
         self.assertIn("sixth grade", letter[0]["evidence"][0]["quote"])
 
     def test_a_year_in_the_age_field_is_not_an_age(self):
@@ -1232,7 +1238,9 @@ class RecorderRecordRestatementTests(unittest.TestCase):
         ))
         report = _run(self.root, publish=False, sources=[relative])
         self.assertEqual(report["deduped_undated_recorder_records"], 0)
-        self.assertEqual(report["claims_by_type"]["occurrence"], 1)
+        # "fifth grade" is read as the grade it names (v360, owner 2026-09-25).
+        self.assertEqual(report["claims"], 1)
+        self.assertEqual(report["claims_by_type"]["age"], 1)
 
 
 if __name__ == "__main__":  # pragma: no cover

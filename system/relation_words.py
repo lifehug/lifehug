@@ -113,7 +113,11 @@ THE_FIELD_IS_SET_ONLY_BY_THE_OWNERS_OWN_WORDS = (
 #: `temporal_publication._rule_identity`, so a framework that changes what a
 #: projection says about relation words re-derives rather than reusing a
 #: standing generation that says less.
-RELATION_WORD_RULE_VERSION = "relation-words:1"
+#: relation-words:2 (v360 follow-up, owner 2026-09-25): his own tellings are read
+#: word for word and by the given name he uses
+#: (:data:`HIS_OWN_TELLINGS_ARE_READ_BY_A_NAME_HE_USES`), and the
+#: grandparent-side card rides the same seam.
+RELATION_WORD_RULE_VERSION = "relation-words:2"
 
 # --------------------------------------------------------------------------
 # The field
@@ -149,6 +153,19 @@ WORD_GENDER = {
 
 #: The neutral plural where English does not add an ``s``.
 IRREGULAR_PLURALS = {"child": "children"}
+
+#: A colloquial word for a child, gendered only for a ``child`` row — never a
+#: roster relationship (`identity_resolution.RELATIONSHIP_MENTION_WORDS` does
+#: not know either word), never a card, never an answer. It only ever feeds
+#: the "stated" basis (:func:`told_word_gender`), and only there: "my boy"
+#: never makes a spouse a husband, whatever row it is read against.
+INFORMAL_CHILD_WORDS = {"boy": MALE, "girl": FEMALE}
+
+#: A classification summary, or the owner's own telling written in the third
+#: person, names the owner "the author" rather than "my"/"our" — the one
+#: possessive `roster_relations.relationship_phrase_match` cannot read,
+#: because it is never one of the owner's own name spellings.
+AUTHOR_POSSESSIVE = "the author"
 
 # --------------------------------------------------------------------------
 # The card
@@ -368,6 +385,230 @@ def bare_relation_word(spelling: object) -> str:
     return relations[0]
 
 
+def told_word_gender(word: object, relationship: object) -> str:
+    """:func:`word_gender`, extended with :data:`INFORMAL_CHILD_WORDS`.
+
+    "Boy"/"girl" have no roster relationship seat, so they are never checked
+    against ``roster_relationship_for`` the way a vocabulary word is — they
+    decide the "stated" basis only when the row's own relationship IS
+    ``child``, exactly the same "belongs to this row's own relationship" guard
+    :func:`stated_words` already applies to every other word.
+    """
+    word = rr.collapsed_text_of(word).casefold()
+    gender = word_gender(word)
+    if gender:
+        return gender if rr.roster_relationship_for(word) == \
+            rr.collapsed_text_of(relationship).casefold() else ""
+    if rr.collapsed_text_of(relationship).casefold() == "child":
+        return INFORMAL_CHILD_WORDS.get(word, "")
+    return ""
+
+
+#: The vocabulary of :func:`told_phrase_match`'s POSSESSIVE-WORD-NAME and
+#: NAME-, POSSESSIVE-WORD patterns: every spoken word
+#: `roster_relations.relationship_phrase_match` already reads, plus the two
+#: informal child words it does not.
+_TOLD_WORDS = rr._relation_word_alternation() + "|boy|girl"  # noqa: SLF001
+
+#: The vocabulary of :func:`told_phrase_match`'s bare, third-person pattern —
+#: "Son Harvey born …" — restricted to the formal, capitalised words a
+#: classification summary actually writes; never the colloquial "Dad"/"Mom"/
+#: "Grandpa", and never "Boy"/"Girl", which no telling opens a clause with.
+_TOLD_BARE_WORDS = "|".join(
+    re.escape(word.capitalize()) for word in sorted(WORD_GENDER, key=len, reverse=True))
+
+
+#: v360 follow-up (owner, 2026-09-25) (item 9): *"I have my beautiful daughter
+#: Charlee"* (answers/E27) puts one or two plain words between the possessive
+#: and the relation word. At most two, each a plain lowercase-able word that is
+#: NOT itself a relation word and carries no possessive — so "my dad's friend's
+#: daughter" and "my uncle Bob's daughter" still never read as his daughter.
+_TOLD_ADJECTIVES = (r"(?:(?!(?:" + _TOLD_WORDS + r")\b)[a-z]+\s+){0,2}")
+
+
+def _told_possessives(owner_names: object) -> str:
+    """``"(?:my|our|the author's|<owner spelling>'s) "`` — the possessives a
+    telling or a classification summary uses for the owner himself."""
+    possessives = [re.escape(word) for word in rr.INTRODUCTION_POSSESSIVES]
+    possessives.append(re.escape(AUTHOR_POSSESSIVE) + r"['’]s")
+    for spelling in owner_names or ():
+        body = rr.collapsed_text_of(spelling)
+        if body:
+            possessives.append(re.escape(body) + r"['’]s")
+    return "(?:" + "|".join(possessives) + r")\s+"
+
+
+def _told_relationship_for(word: str) -> str:
+    """Like `roster_relations.roster_relationship_for`, but "boy"/"girl" name
+    ``child`` — the one relationship they are ever gendered for."""
+    if word in INFORMAL_CHILD_WORDS:
+        return "child"
+    return rr.roster_relationship_for(word)
+
+
+def told_phrase_match(name: object, texts: object, *, owner_names: object = (),
+                      given_only: bool = False) -> dict | None:
+    """``{"word", "clause"}`` for a gendered word the owner (or a
+    classification summary, of him in the third person) applied to ``name`` —
+    the shapes `roster_relations.relationship_phrase_match` cannot read:
+
+    * an informal ``"my boy Harvey"`` / ``"my girl <Name>"`` — colloquial, and
+      only ever :data:`INFORMAL_CHILD_WORDS`, on top of every spoken word that
+      module already reads ("dad", "mom", "son", …);
+    * the third person a classification summary writes the owner in —
+      ``"the author's son <Name>"``, the same shape as ``"my son <Name>"`` with
+      one more possessive;
+    * a bare, clause-opening ``"Son <Name> born …"`` — no possessive at all,
+      because a summary states it as a fact rather than the owner's speech,
+      read only at the clause's own start so it can never reach into the
+      middle of an unrelated sentence ("the reception was at my mother-in-law
+      Ruth's house" opens with "the reception", not a relation word).
+
+    Same clause discipline as v347/v350: read one :func:`introduction_clauses`
+    clause at a time, and a word possessing the next noun
+    (`roster_relations._NOT_A_POSSESSOR`) is never the name's own relation —
+    *"my dad's dad"* gives the clause no word for the dad in front of it. The
+    in-law suffix is the caller's own check, exactly as it already is for
+    `roster_relations.relationship_phrase_match`.
+    """
+    anchor_name = rr.collapsed_text_of(name)
+    if not anchor_name:
+        return None
+    anchor = re.escape(anchor_name)
+    if given_only:
+        # A GIVEN name alone (:func:`given_name_anchors`) is that person only
+        # when no further name follows it: "my beautiful daughter Charlee, and"
+        # is Charlee, while "married my dad Desiree Ann Taylor" (a lost comma)
+        # names somebody whose full name is longer than the word read.
+        anchor = anchor + r"(?!\w)(?-i:(?!\s+[A-Z][a-z]))"
+    possessive = _told_possessives(owner_names)
+    predicate = re.compile(
+        rf"(?<!\w){possessive}{_TOLD_ADJECTIVES}(?P<word>{_TOLD_WORDS}){rr._NOT_A_POSSESSOR}"  # noqa: SLF001
+        rf"\s+{anchor}(?!\w)", re.IGNORECASE)
+    apposition = re.compile(
+        rf"(?<!\w){anchor}\s*,\s*{possessive}(?P<word>{_TOLD_WORDS})"
+        rf"{rr._NOT_A_POSSESSOR}(?!\w)", re.IGNORECASE)  # noqa: SLF001
+    bare = re.compile(
+        rf"^(?P<word>{_TOLD_BARE_WORDS}){rr._NOT_A_POSSESSOR}\s+(?i:{anchor})(?!\w)")  # noqa: SLF001
+    for text in texts or ():
+        for clause in rr.introduction_clauses(text):
+            found: list[str] = []
+            for pattern in (predicate, apposition):
+                for match in pattern.finditer(clause):
+                    word = match.group("word").casefold()
+                    if word not in found:
+                        found.append(word)
+            bare_match = bare.match(clause)
+            if bare_match:
+                word = bare_match.group("word").casefold()
+                if word not in found:
+                    found.append(word)
+            if not found:
+                continue
+            if len({_told_relationship_for(word) for word in found}) > 1:
+                continue
+            return {"word": found[0], "clause": clause}
+    return None
+
+
+#: v360 follow-up (owner, 2026-09-25) (item 9). The owner's tellings reached this
+#: reader only through claims, and a telling the classifier drew no dated
+#: moment from files none: *"I have my young buddy Harvey, my beautiful
+#: daughter Charlee"* sits in answers/E27 and in no claim, so Charlee's card
+#: stayed open. And a full-name row ("Charlee Joy Taylor", from the children
+#: ladder) was read only by that full name, which he never says in passing.
+HIS_OWN_TELLINGS_ARE_READ_BY_A_NAME_HE_USES = (
+    "the relation word he used is read from his own tellings word for word — "
+    "his answers, his own stories and his own messages, never a question or "
+    "somebody else's record — and a person is found there by the given name he "
+    "says as well as the full name the roster holds, when no other identity on "
+    "the roster answers to that given name"
+)
+
+#: The frontmatter ``type`` of a source written in the owner's own words.
+OWN_TELLING_TYPES = frozenset({"prompted_answer", "unprompted_story", "opinion",
+                               "conversation_message"})
+#: Where they live (`vault_contract.json`'s own registered directories).
+OWN_TELLING_DIRS = ("answers", "sources/manual", "sources/conversations")
+
+#: Lines in an answer file that are the SYSTEM's words: the question heading,
+#: the asked/answered stamp and the follow-up questions it listed.
+_NOT_HIS_LINE_RE = re.compile(
+    r"^\s*(?:#|\*\*(?:Asked|Answered|Date)\b|[-*]\s*[A-Z]{1,2}\d+[a-z]?\s*:|>)")
+
+
+def own_telling_texts(vault_root: object) -> dict[str, list[str]]:
+    """``{source_path: [paragraph, …]}`` — the owner's own tellings, word for
+    word (:data:`HIS_OWN_TELLINGS_ARE_READ_BY_A_NAME_HE_USES`). A conversation
+    message counts only when the person spoke it. Unreadable files are
+    skipped, as every read path here degrades."""
+    import temporal_store as store  # noqa: PLC0415 - keeps this module import-light
+
+    out: dict[str, list[str]] = {}
+    if vault_root is None:
+        return out
+    root = Path(str(vault_root))
+    for folder in OWN_TELLING_DIRS:
+        base = root / folder
+        if not base.is_dir():
+            continue
+        for path in sorted(base.glob("*.md")):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                metadata, body = store.split_frontmatter(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                continue
+            if not metadata or str(metadata.get("type") or "") not in OWN_TELLING_TYPES:
+                continue
+            speaker = str(metadata.get("speaker") or "person")
+            if speaker not in ("person", "owner"):
+                continue
+            paragraphs = [line for line in (body or "").splitlines()
+                          if line.strip() and not _NOT_HIS_LINE_RE.match(line)]
+            if paragraphs:
+                out[path.relative_to(root).as_posix()] = paragraphs
+    return out
+
+
+def given_name_census(roster: object) -> dict[str, frozenset]:
+    """``{given name key: {identity refs}}`` — the first token of every identity
+    row's own name, and every one-word spelling it answers to."""
+    census: dict[str, set] = {}
+    for entity in rr.roster_entities(roster):
+        if is_alias_row(entity):
+            target = ir.entity_ref(
+                "person", rr.collapsed_text_of(entity.get(ir.ROSTER_MAPS_TO_FOCUS_KEY)))
+        else:
+            target = person_ref(entity)
+        if not target:
+            continue
+        for spelling in _spellings(entity):
+            name, _nicknames = rr.introduced_name(spelling)
+            tokens = ir.normalized_mention_key(name or spelling).split()
+            if tokens:
+                census.setdefault(tokens[0], set()).add(target)
+    return {key: frozenset(refs) for key, refs in census.items()}
+
+
+def given_name_anchors(entity: object, census: object) -> list[str]:
+    """The given name ("Charlee") of a multi-word row ("Charlee Joy Taylor"),
+    when no other identity answers to it; ``[]`` otherwise."""
+    if not isinstance(entity, dict):
+        return []
+    ref = person_ref(entity)
+    name = rr.collapsed_text_of(entity.get("name"))
+    parts = name.split()
+    if len(parts) < 2 or not ref:
+        return []
+    given = parts[0]
+    key = ir.normalized_mention_key(given)
+    if len(key) < 3 or key in ir.RELATIONSHIP_MENTION_WORDS:
+        return []
+    owners = (census or {}).get(key) or frozenset()
+    return [given] if owners == frozenset({ref}) else []
+
+
 def texts_by_source(claims: object) -> dict[str, list[str]]:
     """``{source_id: [text, …]}`` — the texts a mention is read against.
 
@@ -416,7 +657,8 @@ def _shared_spelling_keys(roster: object) -> frozenset[str]:
 
 def stated_words(entity: object, *, texts_by_source: object = None,
                  landmark_entries: object = (), owner_names: object = (),
-                 shared_keys: object = frozenset()) -> tuple[dict, ...]:
+                 shared_keys: object = frozenset(),
+                 given_names: object = None) -> tuple[dict, ...]:
     """Every gendered relationship word the owner used about this person.
 
     ``[{"word", "where", "spelling"}]``, where ``where`` is ``roster`` (a
@@ -435,7 +677,7 @@ def stated_words(entity: object, *, texts_by_source: object = None,
     shared = frozenset(shared_keys or ())
 
     def keep(word: str) -> bool:
-        return bool(word_gender(word)) and rr.roster_relationship_for(word) == relationship
+        return bool(told_word_gender(word, relationship))
 
     found: list[dict] = []
 
@@ -468,15 +710,28 @@ def stated_words(entity: object, *, texts_by_source: object = None,
         if not name or key in shared or name in anchors:
             continue
         anchors.append(name)
+    # :data:`HIS_OWN_TELLINGS_ARE_READ_BY_A_NAME_HE_USES`: the full-name row
+    # "Charlee Joy Taylor" is also read by the given name he actually says —
+    # "Charlee" — when no other identity on the roster answers to it.
+    given_anchors = [given for given in given_name_anchors(entity, given_names or {})
+                     if given not in anchors]
     sources = texts_by_source if isinstance(texts_by_source, dict) else {}
     for source_id in sorted(sources):
         texts = sources[source_id]
         for name in anchors:
-            match = rr.relationship_phrase_match(name, texts, owner_names=owner_names)
-            if match is None or ir.IN_LAW_RE.search(match["clause"]):
-                continue
-            if keep(match["word"]):
-                add(match["word"], source_id, name)
+            for match in (rr.relationship_phrase_match(name, texts, owner_names=owner_names),
+                         told_phrase_match(name, texts, owner_names=owner_names)):
+                if match is None or ir.IN_LAW_RE.search(match["clause"]):
+                    continue
+                if keep(match["word"]):
+                    add(match["word"], source_id, name)
+        for name in given_anchors:
+            for match in (told_phrase_match(name, texts, owner_names=owner_names,
+                                            given_only=True),):
+                if match is None or ir.IN_LAW_RE.search(match["clause"]):
+                    continue
+                if keep(match["word"]):
+                    add(match["word"], source_id, name)
     return tuple(found)
 
 
@@ -487,7 +742,9 @@ def stated_relation_gender(entity: object, **kwargs: object) -> dict | None:
     form. Two that disagree decide nothing, and the card asks.
     """
     words = stated_words(entity, **kwargs)
-    genders = {word_gender(row["word"]) for row in words}
+    relationship = rr.collapsed_text_of(entity.get("relationship")) \
+        if isinstance(entity, dict) else ""
+    genders = {told_word_gender(row["word"], relationship) for row in words}
     genders.discard("")
     if len(genders) != 1:
         return None
@@ -511,7 +768,7 @@ def answered_relation_gender(entity: object) -> str:
 
 def relation_word_rows(roster: object, *, claims: object = (),
                        landmark_entries: object = (),
-                       owner_names: object = ()) -> tuple[dict, ...]:
+                       owner_names: object = (), told: object = None) -> tuple[dict, ...]:
     """One published row per roster person who has a relationship.
 
     ``{"subject_ref", "name", "spellings", "relationship", "relation_gender",
@@ -526,7 +783,14 @@ def relation_word_rows(roster: object, *, claims: object = (),
     if not entities:
         return ()
     sources = texts_by_source(claims)
+    for source_id, texts in (told or {}).items() if isinstance(told, dict) else ():
+        bucket = sources.setdefault(f"told:{source_id}", [])
+        for text in texts or ():
+            body = rr.collapsed_text_of(text)
+            if body and body not in bucket:
+                bucket.append(body)
     shared = _shared_spelling_keys(roster)
+    given = given_name_census(roster)
     rows: dict[str, dict] = {}
     for entity in entities:
         ref = person_ref(entity)
@@ -539,7 +803,7 @@ def relation_word_rows(roster: object, *, claims: object = (),
         if not gender and not collective:
             stated = stated_relation_gender(
                 entity, texts_by_source=sources, landmark_entries=landmark_entries,
-                owner_names=owner_names, shared_keys=shared)
+                owner_names=owner_names, shared_keys=shared, given_names=given)
             if stated is not None:
                 gender, basis = stated["gender"], BASIS_STATED
         askable = bool(
@@ -641,7 +905,8 @@ def relation_word_cards(rows: object, *, now: object) -> tuple[dict, ...]:
 
 def with_relation_words(payloads: dict, *, projection_key: str, roster: object,
                         claims: object = (), landmark_entries: object = (),
-                        owner_names: object = (), now: object = None) -> dict:
+                        owner_names: object = (), now: object = None,
+                        told: object = None) -> dict:
     """Publish the words and the cards onto a rendered payload pair, in place.
 
     The projection carries ``relation_words`` (only when there is a row, so a
@@ -650,7 +915,7 @@ def with_relation_words(payloads: dict, *, projection_key: str, roster: object,
     (they rank lowest), and its ``counts``. Returns ``{"rows", "cards"}``.
     """
     rows = relation_word_rows(roster, claims=claims, landmark_entries=landmark_entries,
-                              owner_names=owner_names)
+                              owner_names=owner_names, told=told)
     projection = payloads.get(projection_key)
     if rows and isinstance(projection, dict):
         projection["relation_words"] = [dict(row) for row in rows]

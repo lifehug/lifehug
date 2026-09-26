@@ -128,6 +128,7 @@ Synthetic data only; this module NEVER references a real vault.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -278,7 +279,10 @@ READING_DATE = "stated_date"
 READING_AGE = "stated_age"
 READING_RECENCY = "recency_and_capture_date"
 READING_TELLING = "telling_only"
-READINGS = (READING_DATE, READING_AGE, READING_RECENCY, READING_TELLING)
+#: v360 (owner, 2026-09-25): a school grade said of a person ("middle of sixth grade
+#: for James", `chronology.A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR`).
+READING_GRADE = "stated_grade"
+READINGS = (READING_DATE, READING_AGE, READING_GRADE, READING_RECENCY, READING_TELLING)
 
 
 # --------------------------------------------------------------------------
@@ -300,22 +304,47 @@ def work_item_of_session(session_ref: object) -> str:
     return _SESSION_DAY_SUFFIX_RE.sub("", tail)
 
 
-def drawn_node_ref(projection: object, node_ref: object) -> str:
+def drawn_node_ref(projection: object, node_ref: object,
+                   redirects: object = None) -> str:
     """Where a node id is drawn NOW: the published ``node_aliases`` walked to
     its end (v359). An id no alias names is returned unchanged; chains are
     followed and cycles terminate, because a published map is data — the same
     walk `temporal_work_items.resolve_work_item_id` does over its own map, and
     the reason every reader of an old node id follows the alias rather than
-    only publishing it (v342)."""
+    only publishing it (v342).
+
+    v360 (`resolver.A_DUPLICATE_NAMES_ITS_SURVIVOR`): ``redirects`` —
+    `resolver.duplicate_redirects` — is a second map of the same kind, read
+    only for an id the projection no longer DRAWS: a moment the resolver
+    retired as a duplicate is followed onto the node it restates."""
     aliases = (projection or {}).get("node_aliases")
-    return twi.resolve_work_item_id(
-        node_ref, aliases=aliases if isinstance(aliases, dict) else {})
+    aliases = aliases if isinstance(aliases, dict) else {}
+    table = redirects if isinstance(redirects, dict) else {}
+    drawn = {collapsed_text(node.get("node_id")) for node in (projection or {}).get("nodes") or ()
+             if isinstance(node, dict)} if table else set()
+    current = twi.resolve_work_item_id(node_ref, aliases=aliases)
+    seen: set[str] = set()
+    while table and current not in drawn and current in table and current not in seen:
+        seen.add(current)
+        current = twi.resolve_work_item_id(table[current], aliases=aliases)
+    return current
 
 
-def _node_view(projection: object, node_ref: str) -> dict | None:
+def duplicate_redirects(vault_root: str | Path) -> dict[str, str]:
+    """The resolver's duplicate verdicts as redirects (v360,
+    `resolver.A_DUPLICATE_NAMES_ITS_SURVIVOR`); ``{}`` when there are none."""
+    try:
+        import resolver  # noqa: PLC0415 - resolver imports this module lazily too
+
+        return resolver.duplicate_redirects(Path(str(vault_root)))
+    except Exception:  # noqa: BLE001 - no ledger is no redirect
+        return {}
+
+
+def _node_view(projection: object, node_ref: str, redirects: object = None) -> dict | None:
     """The published node a card is about, or ``None``. An id the projection
     has redirected is read at the node it is drawn at now."""
-    wanted = collapsed_text(drawn_node_ref(projection, node_ref))
+    wanted = collapsed_text(drawn_node_ref(projection, node_ref, redirects))
     if not wanted:
         return None
     for node in (projection or {}).get("nodes") or ():
@@ -443,7 +472,8 @@ def _published_card(wanted: str, work_items: object) -> tuple[dict | None, str]:
 
 def card_for_work_item(work_item_id: object, *, work_items: object,
                        projection: object,
-                       closed: object = None) -> tuple[dict | None, str]:
+                       closed: object = None,
+                       redirects: object = None) -> tuple[dict | None, str]:
     """``(card, refusal)`` for one work id, from the two published files.
 
     The card is everything an answer needs and nothing else::
@@ -478,7 +508,7 @@ def card_for_work_item(work_item_id: object, *, work_items: object,
         return None, REFUSED_CARD_NOT_OPEN
     asked_node = (collapsed_text(found.get("node_ref"))
                   or collapsed_text(found.get("event_ref")))
-    node = _node_view(projection, asked_node)
+    node = _node_view(projection, asked_node, redirects)
     if node is None:
         return None, REFUSED_NODE_NOT_DRAWN
     subject = _node_subject(node, found.get("subject_ref"))
@@ -513,7 +543,8 @@ def read_claims(vault_root: str | Path) -> list[dict]:
 def card_for_answer(vault_root: str | Path, session_ref: object, *,
                     work_items: object = None,
                     projection: object = None,
-                    closed: object = None) -> tuple[dict | None, str]:
+                    closed: object = None,
+                    redirects: object = None) -> tuple[dict | None, str]:
     """:func:`card_for_work_item` for the card a ``session_ref`` names.
 
     ``work_items``/``projection``/``closed`` are accepted so a sweep reads the
@@ -531,8 +562,10 @@ def card_for_answer(vault_root: str | Path, session_ref: object, *,
     if closed is None and _published_card(wanted, work_items)[0] is None:
         closed = closed_cards((wanted,), projection=projection,
                               claims=read_claims(vault_root))
+    if redirects is None:
+        redirects = duplicate_redirects(vault_root)
     return card_for_work_item(wanted, work_items=work_items, projection=projection,
-                              closed=closed)
+                              closed=closed, redirects=redirects)
 
 
 # --------------------------------------------------------------------------
@@ -607,11 +640,9 @@ def age_phrase(text: object) -> str:
 #: is never rewritten onto somebody else. So the age is filed as the
 #: narrator's — subject ``self``, still on the card's node — and the fold
 #: measures it from the owner's own birth (v346: an age is measured from its
-#: own subject's birth). A closed vocabulary, like :data:`AGE_PHRASE_RES`.
-NARRATOR_AGE_RE = re.compile(
-    r"\b(?:i\s+was|i\s+am|i['’]m|we\s+were|we\s+are|we['’]re)\s+"
-    r"(?:about\s+|around\s+|maybe\s+|only\s+|just\s+)?" + _AGE_TEXT,
-    re.IGNORECASE)
+#: own subject's birth). ONE definition, `chronology.NARRATOR_AGE_RE`, which
+#: the classifier seat (`classifier_claims.age_subject`) asks too.
+NARRATOR_AGE_RE = chrono.NARRATOR_AGE_RE
 
 #: Whose age a first-person age is: the owner's, under the one owner ref.
 NARRATOR_SUBJECT_REF = twi.OWNER_SUBJECT_REF
@@ -623,8 +654,7 @@ def age_is_the_narrators(text: object, age: object) -> bool:
     wanted = collapsed_text(age)
     if not wanted:
         return False
-    return any(collapsed_text(match.group(1)) == wanted
-               for match in NARRATOR_AGE_RE.finditer(collapsed_text(text)))
+    return chrono.age_is_first_person(collapsed_text(text), wanted)
 
 
 def answer_reading(text: object, *, captured: object = None,
@@ -682,6 +712,9 @@ def answer_reading(text: object, *, captured: object = None,
             # v359: whose age it is, which the card's node never decides.
             reading["subject_ref"] = NARRATOR_SUBJECT_REF
         return reading
+    reading = grade_reading(body)
+    if reading is not None:
+        return reading
     recency = chrono.from_recency(captured, body, collapsed_text(question))
     if recency is not None:
         return {
@@ -692,6 +725,46 @@ def answer_reading(text: object, *, captured: object = None,
             "reading": READING_RECENCY,
         }
     return None
+
+
+def grade_reading(text: object) -> dict | None:
+    """A school grade said in a reply, as an ``age`` claim reading, or ``None``.
+
+    `chronology.school_grade_of` reads the grade and whose it is — the ONE
+    reader, which the classifier seat (`classifier_claims.temporal_reading`)
+    asks too — and the fold measures it on the school calendar against the
+    subject's birth. A first-person grade is the narrator's (v359's rule for an
+    age); a NAMED one (*"for James"*) is that person's, which
+    :func:`answer_claim` keeps on the card's subject when the name is the
+    card's own person.
+    """
+    import classifier_claims as ccl  # noqa: PLC0415 — avoids an import cycle
+
+    found = chrono.school_grade_of(text)
+    value = chrono.school_grade_quantity(found)
+    if value is None:
+        return None
+    reading = {
+        "claim_type": "age",
+        "temporal_value": value,
+        "basis": "explicit",
+        "confidence": ccl.AGE_CLAIM_CONFIDENCE,
+        "reading": READING_GRADE,
+    }
+    if found["speaker"] == "narrator":
+        reading["subject_ref"] = NARRATOR_SUBJECT_REF
+    elif found["speaker"] == "named" and collapsed_text(found["who"]):
+        reading["named_subject"] = collapsed_text(found["who"])
+    return reading
+
+
+def _names_the_card_subject(who: object, view: dict) -> bool:
+    """Is ``who`` (a name a reply gave) the card's own person? By words: every
+    word of the name is a word of the card's subject ref or its label."""
+    wanted = set(re.findall(r"[a-z0-9]+", collapsed_text(who).lower().removeprefix("my ")))
+    have = set(re.findall(r"[a-z0-9]+", " ".join(
+        (collapsed_text(view.get("subject_ref")), collapsed_text(view.get("label")))).lower()))
+    return bool(wanted) and wanted <= have
 
 
 def telling_reading() -> dict:
@@ -799,7 +872,8 @@ def answer_telling_ref(source_id: object, node_ref: object) -> str:
 
 
 def answer_claim(card: object, reading: object, *, source_ref: object,
-                 quote: object, now: object = None) -> dict:
+                 quote: object, now: object = None,
+                 extractor_version: str = EXTRACTOR_VERSION) -> dict:
     """The ONE claim an answer files about its card. Validated, never invented.
 
     ``basis`` is the CLAIM's epistemic class and it is ``explicit`` because the
@@ -813,6 +887,9 @@ def answer_claim(card: object, reading: object, *, source_ref: object,
     """
     view = card if isinstance(card, dict) else {}
     row = reading if isinstance(reading, dict) else {}
+    named = collapsed_text(row.get("named_subject"))
+    if named and not _names_the_card_subject(named, view) and not row.get("subject_ref"):
+        row = {**row, "subject_ref": named}
     payload = {
         "source_ref": source_ref,
         "source_kind": "conversation",
@@ -827,12 +904,46 @@ def answer_claim(card: object, reading: object, *, source_ref: object,
         "evidence": [{"quote": tc.bounded_quote(collapsed_text(quote))}],
         "basis": collapsed_text(row.get("basis")) or "explicit",
         "confidence": row.get("confidence"),
-        "extractor_version": EXTRACTOR_VERSION,
+        "extractor_version": extractor_version,
     }
     label = collapsed_text(view.get("label"))
     if label:
         payload["event_mention"] = label[:tc.MAX_EVENT_MENTION_CHARS]
     return tc.validate_temporal_claim(payload, now=now)
+
+
+#: v360 (owner, 2026-09-25). A reply read again by a better rule (a grade, "six to
+#: eight months ago") reads differently from the receipt it already has, and
+#: that receipt is immutable. The new reading is filed as a LATER VERSION OF
+#: THE SAME READER — ``answer-placement/rule:1/reread:<digest of the new
+#: claim>`` — which the fold elects over the first
+#: (`temporal_store.A_READING_IS_ONLY_SUPERSEDED_BY_THE_SAME_READER`). Keyed on
+#: the new claim, so a re-run finds its own receipt and writes nothing; an
+#: answer whose reading did not change keeps its rule:1 receipt and its ids.
+A_CHANGED_READING_IS_A_LATER_VERSION_OF_THE_SAME_READER = (
+    "a reply whose reading changed is re-filed as a later version of the "
+    "answer-placement reader, keyed on the new claim, and supersedes the first"
+)
+
+
+def reread_version(claim: dict) -> str:
+    """The extractor version a changed reading of one reply is filed under."""
+    digest = store.payload_sha256(lp.canonical_json({
+        key: claim.get(key) for key in ("claim_type", "subject_mention", "event_ref",
+                                        "temporal_value", "event_kind")}))
+    return f"{EXTRACTOR_VERSION}/reread:{digest.split(':')[-1][:12]}"
+
+
+def _held_claim_ids(root: Path, source_ref: dict) -> set[str] | None:
+    """The claim ids this reply's rule:1 receipt holds, or ``None`` when it has
+    none yet."""
+    path = store.receipt_path(root, source_ref, EXTRACTOR_VERSION)
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return {collapsed_text(c.get("claim_id")) for c in stored.get("claims") or ()
+            if isinstance(c, dict)}
 
 
 def file_answer(vault_root: str | Path, *, source_path: object, card: object,
@@ -857,6 +968,13 @@ def file_answer(vault_root: str | Path, *, source_path: object, card: object,
     source_ref = {"source_id": ref.source_id, "revision": ref.revision,
                   "source_path": ref.source_path or relative}
     claim = answer_claim(card, reading, source_ref=source_ref, quote=text, now=now)
+    version = EXTRACTOR_VERSION
+    # :data:`A_CHANGED_READING_IS_A_LATER_VERSION_OF_THE_SAME_READER`.
+    held = _held_claim_ids(root, source_ref)
+    if held is not None and claim["claim_id"] not in held:
+        version = reread_version(claim)
+        claim = answer_claim(card, reading, source_ref=source_ref, quote=text,
+                             now=now, extractor_version=version)
     extractor = ei.declare_tellings(
         {"name": EXTRACTOR_NAME,
          "rule_version": EXTRACTOR_VERSION.rsplit(":", 1)[-1],
@@ -868,7 +986,7 @@ def file_answer(vault_root: str | Path, *, source_path: object, card: object,
     )
     path = store.write_receipt(root, {
         "source_ref": source_ref,
-        "extractor_version": EXTRACTOR_VERSION,
+        "extractor_version": version,
         "extractor": extractor,
         "claims": [claim],
     }, now=now)
@@ -991,6 +1109,7 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
     projection = pub.read_projection(root) or {}
     closed = _closed_cards_of(root, answers, work_items=work_items,
                               projection=projection)
+    redirects = duplicate_redirects(root)
     for row in answers:
         report["answers"] += 1
         relation = _relation_answer(root, row, work_items=work_items, dry_run=dry_run,
@@ -999,7 +1118,7 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
             continue
         card, refusal = card_for_answer(root, row["session_ref"],
                                         work_items=work_items, projection=projection,
-                                        closed=closed)
+                                        closed=closed, redirects=redirects)
         if card is None or not row["text"]:
             _refuse(report, row, refusal or REFUSED_NO_WORDS, closed=closed)
             continue

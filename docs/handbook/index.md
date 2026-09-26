@@ -27,6 +27,7 @@ planned:
 | [Decisions & Learning](decisions-and-learning.md) | the weekly rubric edit; how owner decisions teach the system |
 | [The Timeline & Chronology](timeline.md) | dates as intervals with a basis, bands, unknowns, keystones |
 | [Eras — Age Frames & Named Eras](eras.md) | the permanent calculated coordinate system, immutable named-era identity, membership as evidence |
+| [The Spine — Age Frames & Anchors](the-spine.md) | what a fresh vault starts with: birthday, age frames, required cornerstones and landmarks; how keystones and whispers fill it |
 
 Until a page exists, its territory is covered by the
 [README](https://github.com/lifehug/lifehug#readme) and the
