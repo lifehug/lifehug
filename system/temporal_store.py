@@ -1811,6 +1811,42 @@ def load_ordering_constraints(vault_root: str | Path) -> list[dict]:
     return resolved
 
 
+def redrop_supersedes(
+    vault_root: str | Path,
+    *,
+    relation: str,
+    subject_node_id: str,
+    anchor_node_ids: Iterable[str],
+    supersedes_constraint_id: str | None = None,
+) -> str | None:
+    """The constraint a re-drop must supersede so it FILES, or the one given.
+
+    v365 (owner, 2026-09-26): *"Re-dropping a row where it was before an undo
+    re-files."* A move's source is content-addressed (:func:`move_digest`), so
+    the same drop after its Undo found its own file — already retracted — and
+    filed nothing. This walks that move's chain: while the file the drop would
+    land on exists and is RETRACTED, the drop supersedes it instead, which is
+    a new, active statement (the retracted one keeps its bytes and its mark).
+    An active or never-filed move returns ``supersedes_constraint_id``
+    unchanged, so a resend while the move stands is still one record.
+    """
+    rows = {row["relative_path"]: row for row in load_ordering_constraints(vault_root)}
+    supersedes = collapsed_text(supersedes_constraint_id) or None
+    walked: set[str] = set()
+    while True:
+        digest = move_digest(
+            relation=relation,
+            subject_node_id=subject_node_id,
+            anchor_node_ids=anchor_node_ids,
+            supersedes_constraint_id=supersedes,
+        )
+        row = rows.get(constraint_relative_path(digest))
+        if row is None or row["status"] != "retracted" or row["constraint_id"] in walked:
+            return supersedes
+        walked.add(row["constraint_id"])
+        supersedes = row["constraint_id"]
+
+
 def active_ordering_constraints(vault_root: str | Path) -> list[dict]:
     """The moves a projection must honour — status ``active``, in id order."""
     return [row for row in load_ordering_constraints(vault_root) if row["status"] == "active"]

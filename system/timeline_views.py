@@ -1435,7 +1435,7 @@ def _others_section(held: dict, relations: object, landmark_domains: object) -> 
 
 def with_views(payloads: dict, *, projection_key: str, index: object,
                landmark_entries: object, roster: object, owner_names: object = (),
-               claims: object = ()) -> dict:
+               claims: object = (), stated_folds: object = ()) -> dict:
     """Publish both views onto the rendered projection, in place.
 
     Only when there is something to show, so a vault with no landmarks and
@@ -1476,6 +1476,15 @@ def with_views(payloads: dict, *, projection_key: str, index: object,
     landmarks = landmarks_view(domains, nodes=nodes, work_items=work_items,
                                cornerstones=view) if domains else None
     if landmarks and (landmarks["domains"] or landmarks["cornerstone_markers"]):
+        # v365 (owner, 2026-09-26): `landmark_fold.A_MOVE_MOMENT_FOLDS_INTO_ITS_
+        # LANDMARK` — a moment that IS a landmark's start or end is marked
+        # folded (kept in `nodes`) and its tellings ride the landmark.
+        import drag_tighten as dt  # noqa: PLC0415
+        import landmark_fold  # noqa: PLC0415
+
+        landmark_fold.apply_folds(nodes, landmarks, claims=claims,
+                                  now_month=dt.month_of(projection.get("published_at")),
+                                  stated=stated_folds or ())
         projection[LANDMARKS_VIEW_KEY] = landmarks
     else:
         landmarks = None

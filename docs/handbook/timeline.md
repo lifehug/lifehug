@@ -125,6 +125,176 @@ asks you for a year.
   has told is `not_owed`, never asked. Each person is shown by what you call
   them ("Dad", "Mom", "AJ"). A row that needs settling carries its Play: the
   open work item on it, else its landmarks ladder.
+- **Landmark brackets** (v365, owner 2026-09-26) — the thin lines left of
+  the Timeline's rows, one lane per kind (home, school, work, mission when
+  mentioned), ONE colour per kind: *"I want the bands to be continuous. This
+  will give the user a good way to use their memory to ask, 'Hey, was I in
+  school at this time?' … you can stick to one color."* Every row is a point
+  at its START month — rows sort by their start, so a loosely dated moment
+  sorts, and brackets, at its start — and a row's bracket in a lane is the
+  latest-starting stay whose months hold that month
+  (`drag_tighten.row_start` / `drawn_landmark`; the web draws the same rule).
+  A landmark is one continuous line through every row it covers and the gaps
+  between them, with rounded caps (╭ ╰) at its first and last row; the next
+  stay in the lane starts a new bracket, and a lane is blank where nothing
+  applies, which is what makes a moment out of order obvious. A closed frame
+  row (Childhood, 20s…) shows only what was true at the START of its range
+  and its click says so ("At Jul 1981": home, school, work, mission then);
+  opened, the brackets run beside every moment.
+- **Drag-to-tighten** (v365, owner 2026-09-26;
+  `drag_tighten.A_DROP_INSIDE_LANDMARKS_TIGHTENS_TO_THEIR_OVERLAP`) —
+  ADDITIVE to the drag: *"If it is a more narrow range, move it and add more
+  information. Yes the moments above and below it are also information. And
+  it counts as my statement. Conflict brings it up."* `timeline-move` files
+  its ordering constraint exactly as before; then, on the projection the
+  person was looking at, the drop's WINDOW is the overlap of every bracket
+  drawn through the drop gap (blank lanes add nothing) and the moments
+  directly above and below (after the upper one's start, before the lower
+  one's start; at a list's head or tail the brackets alone bound that side),
+  at month grain. When that window is narrower than where the moment sat, it
+  is filed through the same path as the person's own statement — one
+  `drag-tighten/rule:1` receipt citing the move's own correction source, one
+  `date` claim aimed at the moment, basis `explicit`, record basis `stated`,
+  its extractor naming the brackets and neighbours — and
+  `AN_ANSWER_IS_THE_PLACEMENT` places it. A window that misses a date the
+  person gave is filed all the same and the fold's contradiction card asks
+  which is right, never a silent move; one no narrower, or bounded on one
+  side only, is the ordinary move. Undo (`timeline-move-undo`) retracts the
+  window with the move; both records stay on disk. `--no-tighten` files the
+  move alone. *"Re-dropping a row where it was before an undo re-files"*
+  (`temporal_store.redrop_supersedes`): the same drop after its Undo files a
+  NEW move superseding the retracted one (a move's source is
+  content-addressed, so it used to land on its own retracted file and file
+  nothing); a resend while the move stands is still one record. What a drop
+  WOULD tighten to is readable before anything is filed —
+  `drag_tighten.decide_drop`, the read-only `timeline-move-decide` verb (one
+  JSON line; `--projection FILE` decides against a given projection) — so a
+  page can show the window the moment the row lands; every host calls that
+  one function.
+  <!-- parity: drag_tighten.DRAG_TIGHTEN_RULE_VERSION = drag-tighten:4 -->
+- **Landmark boundary lines** (v365, owner 2026-09-26, agreed after ASCII
+  rounds) — where landmarks end and start, the Timeline draws HAIRLINE
+  borders between rows, never rows, and only inside an EXPANDED age band (a
+  closed band shows none). At each month, one stack: a 1px line per landmark
+  that ENDS there on top, then one per landmark that STARTS there below,
+  touching, each in its kind's one colour (the brackets' tokens), so more
+  change at one month is a visibly thicker stack. Only starts are labelled —
+  their names joined by " · " and the month, small and quiet, the month
+  right-aligned ("Hope · Mountain View … Jun 1995", "Solothurn … Oct 2000");
+  an ending carries no words and no date. An end and a start in the same
+  month are one stack, and each stack sits exactly where the brackets'
+  rounded caps are: a move month belongs to the stay it starts, so a stay
+  that ends when the next in its lane begins is last drawn the month before.
+  Hover or focus names one line ("Crossridge · Jun 1994 – Jun 1995"); a click
+  opens that landmark's form. **Dropping at a boundary**
+  (`drag_tighten.A_DROP_AT_A_BOUNDARY_IS_INSIDE_WHAT_STARTS_OR_ENDS_THERE`):
+  just below a stack is "inside everything that starts here", just above one
+  "inside everything that ends here, up to its last month". The move names
+  those stays as extra anchors, `landmark:<entry_id>:<stay_index>:start|end`
+  (`timeline-move --boundary`, repeatable), and the drop's window is also
+  intersected with each named stay's span — read as a neighbour whose month
+  is that start or end. Additive: a move without one decides exactly as
+  before, and an anchor naming no drawn stay is recorded and bounds nothing.
+- **A move moment folds into its landmark** (v365, owner 2026-09-26;
+  `landmark_fold.A_MOVE_MOMENT_FOLDS_INTO_ITS_LANDMARK`) — a moment that IS a
+  landmark's own start or end is not drawn as a row: moving into or out of
+  that home ("Move to Figers House", "Moved in from Yucaipa Avenue F"),
+  starting or finishing that school or job, leaving on or returning from the
+  mission. Deterministic and conservative: one of his own moments whose title
+  OPENS with a boundary verb (move to/into/out of, left, started, start of,
+  departed on, graduated, returned from…), that NAMES the landmark (nickname, label, the
+  name before a comma, a parenthetical, a three-word name's acronym, its
+  street; "mission" names the mission as a whole), and whose date is at that
+  stay's start or end month (within a month; a year-only date holds it). A
+  name after "from"/"out of" is that landmark's end. The binder's own links
+  (`proposed_links` to the landmark's node) break a tie. A moment that only
+  mentions a move, or moves to a state or region ("Family moved to
+  Arizona"), stays a row. Nothing is deleted: the node stays published with
+  `folded_into_landmark` (its entry id) and `folded_boundary` (the same
+  anchor a boundary drop names); its tellings ride the landmark in
+  `landmarks_view` (`tellings`: each node, its boundary and his words) and
+  show in the landmark's form under "Your words about this"; `folds` lists
+  every fold so a false one can be caught. **No rows for landmark
+  information** (owner, same day: *"We no longer need a row for Longfellow
+  Elementary because the landmark contains that information"*;
+  `landmark_fold.A_LANDMARK_RESTATEMENT_FOLDS_INTO_IT`): the landmark's own
+  node, and any node whose title only RESTATES it ("Longfellow Elementary",
+  "Residence at Hope St.", "Residence at the MTC", "Mission to Switzerland at
+  19") dated inside its stay, folds the same way, as the stay (`folded_as:
+  restatement`, no boundary anchor). The test is what is LEFT of the title
+  once the landmark's name, its own place words and the words for a home, a
+  school, a job, a mission and the boundary verbs are taken out: anything
+  left ("Quitting janitor job over snowboarding", "Started Etherfuse to serve
+  non-US markets") is a story, and a row. Leaving a name that is not plainly
+  a home ("You leaves Kristen") may be leaving a person, so it stays a row.
+  "Brief", "assignment", "mission", "residence", "stay" and "time at" only
+  restate a stay too (owner, 2026-09-26), so "Brief residence in Solothurn"
+  and "Mission assignment to Solothurn" fold into Solothurn.
+  <!-- parity: landmark_fold.LANDMARK_FOLD_RULE_VERSION = landmark-fold:3 -->
+- **A landmark at a band's first month** (v365, owner 2026-09-26) — a
+  landmark that starts at the very beginning of an age band (Avenue F, Jul
+  1981, is Childhood's first month) is drawn like any other: its start line
+  under the band heading is labelled "Avenue F … Jul 1981" and its rail
+  curves down out of that line. The band heading never begins a rail with a
+  cap of its own; a closed band still shows, on its heading, what was true
+  at its start.
+- **The empty-landmark row** (v365, owner 2026-09-26;
+  `drag_tighten.A_DROP_ON_AN_EMPTY_LANDMARK_IS_INSIDE_IT`) — a landmark with no
+  rows between its start and its end (the MTC, Aug – Oct 2000, once its own
+  rows folded into it) is the ONE time a landmark takes a row: a slim row
+  whose start and end hairlines close around a centred label, its short name
+  and span ("MTC · Aug 2000 – Oct 2000"), in its kind's colour, with rounded
+  bracket corners. Two empty landmarks with the same span share one slim row.
+  Dragging a moment over the row's middle highlights it ("into MTC"); dropping
+  there places the moment INSIDE the stay: the move names the whole stay,
+  `landmark:<entry_id>:<stay_index>:stay` (`timeline-move --boundary`), and the
+  window is that stay's span intersected with the bands it sits in — the rows
+  either side are outside it and bound nothing. A moment already inside is
+  left as it is; one partly inside is narrowed to the part inside; one wholly
+  outside is placed inside, as the person's statement (a date he gave raises
+  the question, as every drop does). Once anything is inside it, the landmark
+  goes back to a start line and a rail. The slim row's two hairlines are
+  landmark lines like any other: dropping ON one folds (below).
+- **Three drops, three meanings** (v365, owner 2026-09-26) — the same drag
+  says three different things by where it lands, and each shows a different
+  highlight before it lands:
+  - BETWEEN rows (a gap, or the top or bottom quarter of a row) is PLACE: the
+    move plus drag-to-tighten, exactly as before. A dashed line in the gap,
+    with the move's sentence.
+  - ONTO the middle of a row is COMBINE
+    (`timeline_combine.A_ROW_DROPPED_ON_A_ROW_IS_THE_SAME_MOMENT`): "these are
+    the same moment". The row body is outlined and labelled "Combine with
+    …". The two become one moment carrying both tellings. It is the
+    person's statement and runs event identity's own machinery — the
+    `same_event` confirm (`identity_questions.resolve_same_event_answer`, the
+    `resolve-work-item --kind same_event --answer same` path) for the first
+    pair, a bind into the same episode for any further telling — with no
+    store of its own. `timeline-combine <node> --with <node>` files one
+    statement, `sources/corrections/combine-<24 hex>.md` (type
+    `timeline_combine`, the state it found: which telling was in which
+    episode), which every identity record it writes cites as its
+    `source_ref`. `timeline-combine-undo combine:<24 hex>` splits them apart
+    (`identity_questions.split_episode`): each telling goes back where it was
+    — standalone, or a side that was an episode of its own leaves together
+    into a new one (its node id is new; its rows, words and dates are as
+    before). Combining again after an undo is a new statement.
+  - ONTO a landmark line — a boundary hairline, or the lines closing an empty
+    landmark's slim row — is FOLD
+    (`timeline_combine.A_ROW_DROPPED_ON_A_LANDMARK_FOLDS_INTO_IT`): the line
+    thickens in its kind's colour, labelled "Fold into Solothurn". The row
+    stops being a row, and its telling shows in the landmark's form under
+    "Your words about this". `timeline-fold <node> --landmark <entry_id>
+    --stay N` files `sources/corrections/landmark-fold-<24 hex>.md` (type
+    `landmark_fold_statement`); the publisher reads every standing one
+    (`timeline_combine.stated_folds`, part of the publish fingerprint) and
+    `landmark_fold.apply_folds` applies it first
+    (`landmark_fold.A_STATED_FOLD_OUTRANKS_A_GUESSED_ONE`, `folded_as:
+    stated`, the node's `fold_id`), following the node by its tellings if its
+    id moves. `timeline-fold-undo fold:<24 hex>` gives the row back.
+  Every one is undone from the row's own Undo, like a move, and nothing is
+  deleted. The keyboard has all three in the row's Move menu: the move
+  sentences, then "Combine with…" (the other rows in that list) and "Fold
+  into landmark…" (the stays the moment's dates reach).
 - **Cross-dating** (v205) — the pass that spends the landmarks. For every
   still-undated moment it tries one derivation, strongest join first:
   **definitional** (the moment IS a landmark fact — a birth, a move, a

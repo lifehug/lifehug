@@ -101,6 +101,19 @@ a cornerstone-type event about anyone else is asked once and accepted at any
 grain. When you talk to the owner about a date, show a day only if he or a
 document gave it; a day you worked out is its month.
 
+**Timeline gestures (v365, owner 2026-09-26).** A drag on the Timeline says
+one of three things, and each is the person's own statement, undoable, with
+both records kept: dropped BETWEEN rows it is a move plus a tightened window
+(`timeline-move`, `drag_tighten`: the overlap of the landmark brackets, the
+bands and the neighbours, at month grain; `--boundary` for a drop at a
+landmark's start or end line); dropped ONTO a row it is the same moment
+(`timeline-combine` / `timeline-combine-undo`); dropped onto a landmark line
+or an empty-landmark row it folds into that landmark (`timeline-fold` /
+`timeline-fold-undo`). A move moment that IS a landmark's start or end, and a
+restatement of a landmark ("Brief residence in Solothurn"), fold into it by
+themselves (`landmark_fold`). `timeline-move-decide` is the read-only preview
+of a drop's window. A saved gesture needs no conversation.
+
 ## First Session: Setup
 
 If there are no project-specific categories in `system/question-bank.md` (only A-E), this is a new user. Run the setup flow:
