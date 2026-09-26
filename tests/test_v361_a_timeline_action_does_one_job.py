@@ -355,6 +355,19 @@ class TheLintTests(unittest.TestCase):
         self.assertIn("timeline_gates.right_person",
                       self.lints("Noted. What pulled you to it?", stage=ti.WORK_ITEM_STAGE))
 
+    def test_a_closing_confirmation_is_not_judged_by_the_cards_probe_rung(self):
+        """A precision card's probe is the `bounds` rung; its closing reply
+        confirms and asks nothing, so it is never an unoffered bounds probe."""
+        found = {row["lint"] for row in ti.lint_timeline_reply(
+            "Noted — Charlee switched to track in January 2026.", stage="close",
+            probe_step="bounds", known_years=("2026",), action="card",
+            subject=self.SUBJECT)}
+        self.assertEqual(found, set())
+        # Without the action the rung still judges it, exactly as before.
+        self.assertIn("timeline_gates.offers_bounds", {row["lint"] for row in
+                      ti.lint_timeline_reply("Noted — January 2026.", stage="close",
+                                             probe_step="bounds", known_years=("2026",))})
+
     def test_no_action_no_subject_no_new_findings(self):
         """Every caller that names neither sees exactly what it saw before."""
         self.assertEqual(ti.lint_timeline_reply(REAL_BAD_REPLIES[0], stage="place",

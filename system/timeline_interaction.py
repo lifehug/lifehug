@@ -2588,6 +2588,13 @@ def lint_timeline_reply(text: str, *, stage: str, probe_step: str | None = None,
     body = text or ""
     if stage not in VALID_TIMELINE_STAGES:
         stage = "place"
+    if action in ("card", "move") and not action_question_allowed(stage):
+        # v361: a Timeline action's closing reply CONFIRMS — it asks nothing,
+        # so the probe's rung (a card's `bounds` probe, say) no longer judges
+        # it: "Noted — January 2026" is not a bounds question that failed to
+        # offer bounds. It is scored as the rung that means "that's enough to
+        # place it".
+        probe_step = "convergence"
     findings: list[dict] = []
     findings += _one_job_findings(body, stage=stage, action=action)
     findings += _right_person_findings(body, subject=subject)
