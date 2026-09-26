@@ -45,6 +45,24 @@ precision is accepted, a calendar year is never demanded, and the answer files
 through `timeline-place`. Later kinds name their own agenda and inherit the
 three rules above.
 
+## How the person's words arrive
+
+`interactions/how-words-arrive.md` is the ONE framework-wide context block
+that every model call interpreting the person's words reads (owner,
+2026-09-25): most material is free-flowing telling, not testimony, so the
+precision is whatever they gave; much of it is dictated by voice-to-text, so
+"19 to 21" can arrive as "1921" and names arrive mangled; and a contradiction
+is a question, not an overwrite. It is stated once and injected by the
+builders — never pasted into a prompt file. Readers:
+`lifehug_core.load_how_words_arrive` for the Conversation context block
+`how_words_arrive` (so every child's turn), `classify_story.build_prompt`
+(both modes), `resolver.build_prompt`, and the `{how_words_arrive}` token in
+the landmarks `recorder.md` / `listener.md` / `reading.md` /
+`turn-instructions-offer.md` leaves and the timeline `recorder.md` leaf
+(`lifehug_core.fill_how_words_arrive`). A new model-facing builder that reads
+the person's words reads this file too; `tests/test_v360_how_words_arrive.py`
+lists every reader.
+
 ## The three-way split
 
 Every interaction separates three things that are easy to accidentally
@@ -119,7 +137,8 @@ first (stable, cacheable), turn instructions last (freshest, turn-specific)
 
 The exact per-turn assembly order is documented per-interaction (see
 `conversation/context/manifest.md` for the reference example: `identity →
-behavior → examples → profile → record → session → turn_instructions`).
+behavior → examples → how_words_arrive → profile → record → asking_supply →
+session → turn_instructions`).
 
 ## The new-interaction checklist
 

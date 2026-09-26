@@ -116,7 +116,14 @@ CARD = "work:2f5dec9f0e57ad5a31b9947a"
 #: His reply, verbatim, and the claim id it produces.
 REPLY = "This happened in the middle of sixth grade for James."
 CAPTURED = "2026-09-24T01:09:30Z"
-ANSWER_CLAIM = "claim:cb8c3d3dd46438ea6a76720d"
+ANSWER_CLAIM = "claim:37f3d64910077d7a37b2d0e9"
+#: v360 (owner, 2026-09-25): the same reply now reads as the school GRADE it names
+#: (`chronology.A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR`), an ``age``
+#: claim rather than v352's ``occurrence`` (``claim:cb8c3d…``). It still sorts
+#: ahead of the bound claim (``claim:37f3…`` < ``claim:d7232e…``) and is still
+#: bound to nothing, so the defect's two conditions hold unchanged. This
+#: fixture carries no birth for James, so the grade places nothing here and
+#: the card stays open; `test_v360_records_and_readings` places it.
 
 #: The revision of the classification the told claim comes from. A content hash
 #: of a document this fixture does not have, so it is a seed — and the seed is
@@ -312,14 +319,14 @@ class AnAnswerToAnEpisodesCardTests(unittest.TestCase):
 
     def test_the_reply_files_as_a_telling_of_the_episodes_node(self):
         self.assertEqual(self.report["answers"], 1)
-        self.assertEqual(self.report["tellings"], 1)
-        self.assertEqual(self.report["placed"], 0)
-        self.assertEqual(self.report["by_reading"][ap.READING_TELLING], 1)
+        self.assertEqual(self.report["tellings"], 0)
+        self.assertEqual(self.report["placed"], 1)
+        self.assertEqual(self.report["by_reading"][ap.READING_GRADE], 1)
         self.assertEqual(self.report["errors"], [])
         self.assertEqual(
             [(row["claim_id"], row["node_ref"], row["reading"])
              for row in self.report["filed"]],
-            [(ANSWER_CLAIM, EPISODE_NODE, ap.READING_TELLING)],
+            [(ANSWER_CLAIM, EPISODE_NODE, ap.READING_GRADE)],
         )
 
     def test_an_episode_target_is_not_refused(self):
@@ -337,7 +344,8 @@ class AnAnswerToAnEpisodesCardTests(unittest.TestCase):
         self.assertEqual(filed[0]["event_kind"], "moment")
         self.assertEqual(filed[0]["event_ref"], EPISODE_NODE)
         self.assertEqual(filed[0]["subject_mention"], SUBJECT)
-        self.assertEqual(filed[0]["claim_type"], tc.OCCURRENCE_CLAIM_TYPE)
+        self.assertEqual(filed[0]["claim_type"], "age")
+        self.assertEqual(filed[0]["temporal_value"]["grade"], 6)
 
     def test_the_answers_claim_id_really_does_sort_first(self):
         """The defect's own condition, asserted rather than assumed: the index is
@@ -603,7 +611,7 @@ class TheDrawingRuleDoesNotMoveTests(unittest.TestCase):
     moves."""
 
     def test_the_calculation_rule_version_is_unchanged(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
 
     def test_a_vault_nobody_answered_draws_exactly_what_it_drew(self):
         vault = EpisodeVault(self)

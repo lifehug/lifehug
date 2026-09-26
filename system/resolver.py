@@ -66,7 +66,7 @@ if str(SYSTEM_DIR) not in sys.path:
 import chronology as chrono  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_store as store  # noqa: E402
-from lifehug_core import split_frontmatter  # noqa: E402
+from lifehug_core import load_how_words_arrive, split_frontmatter  # noqa: E402
 from temporal_claims import collapsed_text  # noqa: E402
 from vault_paths import atomic_write_vault_text  # noqa: E402
 
@@ -121,6 +121,19 @@ NOT_AN_EVENT_KINDS = ("future", "meta", "fact_statement", "duplicate")
 #: was replaced by a better one".
 NOT_AN_EVENT_STATUS = "not_an_event"
 NOT_AN_EVENT_SCOPE = "resolver_not_an_event"
+
+#: v360 (owner, 2026-09-25). A `duplicate` verdict NAMES ITS SURVIVOR as a field, not
+#: only in prose: ``duplicate_of`` is the node the retired moment restates,
+#: verified to be a node the projection holds and not the moment itself. It is
+#: kept on the ledger row and in the retraction's reason, and
+#: :func:`duplicate_redirects` hands it to `answer_placement`, where it is a
+#: redirect like `node_aliases` — so an answer to the retired duplicate's card
+#: lands on the survivor (v359's `AN_ANSWER_OUTLIVES_ITS_CARD`).
+A_DUPLICATE_NAMES_ITS_SURVIVOR = (
+    "a duplicate verdict names the node it restates as `duplicate_of`, and an "
+    "answer to the retired duplicate's card follows it onto that survivor"
+)
+_NODE_ID_RE = re.compile(r"node:[0-9a-f]{24}")
 
 #: What a verdict RETRACTS: the claims that assert this moment happened and
 #: when. ``identity`` is deliberately absent — an identity claim says WHO, and
@@ -307,6 +320,9 @@ def spine(root: Path, projection: dict) -> dict:
         "points": sorted(set(points))[:40],
         "people": sorted(set(people))[:60],
         "ages": age_table(birth),
+        # v360 (owner, 2026-09-25): the owner's US school years, so "sophomore or junior year"
+        # and "in 2nd grade" are read off a table like an age is.
+        "grades": grade_table(birth),
     }
 
 
@@ -454,8 +470,15 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",),
     timeline?" has one answer everywhere.
 
     A `contextual_only` node — a relative's own milestone, family history from
-    before the owner's life — is never planned. Nothing in this vault dates
-    it, and the spine here belongs to one person.
+    before the owner's life — was never planned before v360's
+    :data:`A_FAMILY_MOMENT_IS_DATED_FROM_ITS_OWN_PERSON`: it IS planned now when
+    its subject is a roster person whose birth the vault records, and it is
+    dated from THAT person's birth, never the owner's. Where it is drawn is
+    still the fold's axis rule; this is about dating it.
+
+    :data:`LOOK_AT_EVERYTHING_THAT_CAN_BECOME_A_CARD`: a landmark entry with no
+    story behind it (a residence, a school the person named on a ladder) is
+    planned with the entry's own record as its story.
     """
     import classifier_claims as ccl  # noqa: PLC0415
     import event_identity as ei  # noqa: PLC0415
@@ -467,6 +490,7 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",),
     # v333 (:data:`RESTATEMENT_IS_NOT_A_QUESTION`). Worked out ONCE, before the
     # sweep, so asking is refused rather than asked and then withdrawn.
     restated = restated_placed_nodes(projection)
+    births = family_births(projection)
     by_source: dict[str, list[dict]] = collections.defaultdict(list)
     for node in projection.get("nodes") or ():
         if node.get("node_kind") == "period":
@@ -475,13 +499,20 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",),
             continue
         if node.get("node_id") in restated and node.get("node_id") not in include_placed:
             continue
+        family = _family_subject(node, births)
         if node.get("occurrence_subject_scope") not in scopes and \
-                collapsed_text(node.get("owner_timeline_relation")) not in tp.AXIS_RELATIONS:
+                collapsed_text(node.get("owner_timeline_relation")) not in tp.AXIS_RELATIONS \
+                and family is None:
             continue
-        if node.get("node_kind") == "episode" and collapsed_text(node.get("event_kind")) == "residence":
+        if node.get("node_kind") == "episode" and collapsed_text(node.get("event_kind")) == "residence" \
+                and not _is_landmark_entry_node(node, claims):
             # A residence is dated by the ladder in the person's own words or is
             # a duplicate of a stay that already is; a span guessed for it draws
             # the person living in two places at once. Identity, not dating.
+            # v360 (:data:`LOOK_AT_EVERYTHING_THAT_CAN_BECOME_A_CARD`): the
+            # ladder entry itself, undated, IS looked at — a verified, cited
+            # answer may date it, and an estimate never places a residence
+            # (:data:`AN_ESTIMATE_NEVER_PLACES_A_RESIDENCE`).
             continue
         handles: list[dict] = []
         story_path, event, subject, stem = "", None, "", ""
@@ -525,6 +556,11 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",),
             story_path = collapsed_text(ref.get("source_path"))
             label = collapsed_text(node.get("label"))
             event = {"title": label, "description": f"{label} ({collapsed_text(node.get('event_kind'))}); source {collapsed_text(ref.get('source_id'))}"}
+            record = _landmark_record_text(root, story_path)
+            if record:
+                # The entry's own record is its telling: every field the person
+                # gave on the ladder (city, address, grades, who) is evidence.
+                event["description"] = f"{event['description']}; the person's own ladder entry: {record}"
             telling_event_ref = collapsed_text(fallback_claim.get("event_ref")) or node["node_id"]
             telling_event_kind = collapsed_text(fallback_claim.get("event_kind")) or collapsed_text(node.get("event_kind"))
             subject = collapsed_text(fallback_claim.get("subject_mention")) or subject
@@ -558,6 +594,19 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",),
             "event_ref": telling_event_ref or node["node_id"],
             "event_kind": telling_event_kind or collapsed_text(node.get("event_kind")) or "moment",
             "subject": subject or "self", "event": event or {}, "handles": handles,
+            # v360 (:data:`A_FAMILY_MOMENT_IS_DATED_FROM_ITS_OWN_PERSON`): the
+            # roster person this moment is about and their recorded birth, when
+            # it is somebody other than the owner.
+            **({"subject_birth": family} if family is not None else {}),
+            "node_kind": collapsed_text(node.get("node_kind")),
+            "node_event_kind": collapsed_text(node.get("event_kind")),
+            # AN_ESTIMATE_PLACES_AS_THE_SYSTEMS_INFERENCE: a node the person
+            # dated in their own words is never placed by an estimate.
+            "person_dated": any(
+                collapsed_text((claims.get(c) or {}).get("basis")) == "explicit"
+                and collapsed_text((claims.get(c) or {}).get("claim_type"))
+                in (*tc.DATED_CLAIM_TYPES, "age")
+                for c in node.get("input_claim_refs") or ()),
             "resolution_status": node.get("timeline_resolution_status"),
             # The resolver's claim is ANOTHER READING OF THE SAME TELLING, so it
             # is declared under the classifier's telling ref and follows that
@@ -567,6 +616,131 @@ def targets(root: Path, projection: dict, index: dict, *, scopes=("owner",),
             "document_revision": revisions[story_path],
         })
     return dict(by_source)
+
+
+#: v360 (owner, 2026-09-25). The owner: *"For each of these questions … if I ask you
+#: directly right now, I bet you could answer them."* Everything that can
+#: become a date card is planned: a story's moments as before, and a node with
+#: no story telling — a landmark entry (a residence, a school), whose own
+#: record is handed to the model as its story, with the passages the index
+#: retrieves for it.
+LOOK_AT_EVERYTHING_THAT_CAN_BECOME_A_CARD = (
+    "every unplaced node that can become a date card is planned: a landmark "
+    "entry with no story is read from its own record plus retrieved passages"
+)
+
+#: v360 (owner, 2026-09-25). A family moment — his son's first baseball team, his
+#: grandfather's burial — is dated from THAT person's recorded birth: the
+#: model is handed their age and school-year tables, a bare age handle is
+#: arithmetic off their birthday, and nothing about them is ever measured off
+#: the owner's. Where the dated moment is DRAWN is the fold's axis rule and is
+#: untouched.
+A_FAMILY_MOMENT_IS_DATED_FROM_ITS_OWN_PERSON = (
+    "a moment about a roster person with a recorded birth is dated from that "
+    "person's own birth — their age and school-year tables, and their "
+    "birthday for a bare age — never from the owner's"
+)
+
+
+def family_births(projection: dict) -> dict[str, dict]:
+    """``person ref -> {"ref", "name", "birth"}`` for every NON-owner roster
+    person whose birth the projection places to a day or a month
+    (:data:`A_FAMILY_MOMENT_IS_DATED_FROM_ITS_OWN_PERSON`). A person with two
+    different recorded births is left out rather than guessed between."""
+    seen: dict[str, set] = collections.defaultdict(set)
+    names: dict[str, str] = {}
+    for node in projection.get("nodes") or ():
+        if collapsed_text(node.get("event_kind")) != "birth" or not node.get("usable_placement"):
+            continue
+        best = node.get("best_temporal_value") or {}
+        if best.get("granularity") not in ("day", "month") or not best.get("best"):
+            continue
+        refs = [collapsed_text(r) for r in node.get("subject_refs") or ()
+                if collapsed_text(r).startswith("person/")]
+        if len(set(refs)) != 1:
+            continue
+        ref = refs[0]
+        seen[ref].add(collapsed_text(best.get("best")))
+        label = collapsed_text(node.get("label"))
+        names.setdefault(ref, re.sub(r"['’]s birth$", "", label) or ref)
+    return {ref: {"ref": ref, "name": names[ref], "birth": next(iter(days))}
+            for ref, days in sorted(seen.items()) if len(days) == 1}
+
+
+def _family_subject(node: dict, births: dict) -> dict | None:
+    """The one roster person (``person/…``) other than the owner this node is
+    ABOUT, with their recorded birth when the vault has one, or ``None`` — the
+    owner's own moments never have one. A person with no recorded birth is
+    still planned: a related moment (their husband's death, a move) can date
+    it, only the age arithmetic needs the birth."""
+    if collapsed_text(node.get("occurrence_subject_scope")) == "owner":
+        return None
+    refs = {collapsed_text(r) for r in node.get("subject_refs") or ()
+            if collapsed_text(r).startswith("person/")}
+    if len(refs) != 1:
+        return None
+    ref = refs.pop()
+    return births.get(ref) or {"ref": ref, "name": ref.split("/", 1)[1].replace("-", " ").title(),
+                               "birth": None}
+
+
+def _is_landmark_entry_node(node: dict, claims: dict) -> bool:
+    """Is this node a landmark ladder entry — a claim filed from a `landmark:`
+    source, with no date claim of its own yet?"""
+    kinds = set()
+    landmark = False
+    for claim_id in node.get("input_claim_refs") or ():
+        claim = claims.get(claim_id) or {}
+        kinds.add(collapsed_text(claim.get("claim_type")))
+        if collapsed_text((claim.get("source_ref") or {}).get("source_id")).startswith("landmark:"):
+            landmark = True
+    return landmark and not (kinds & set(tc.DATED_CLAIM_TYPES))
+
+
+def _landmark_record_text(root: Path, source_path: str) -> str:
+    """A landmark entry file's record as one line of fields, or ``""``."""
+    if not source_path.startswith("sources/landmarks/"):
+        return ""
+    _meta, body = split_frontmatter(_read(root / source_path))
+    try:
+        record = json.loads(body.strip() or "{}")
+    except ValueError:
+        return ""
+    if not isinstance(record, dict):
+        return ""
+    return "; ".join(f"{key} {record[key]}" for key in sorted(record)
+                     if key != "domain" and collapsed_text(record[key]))[:MAX_PASSAGE_CHARS]
+
+
+def grade_table(birth: object) -> list[str]:
+    """``"2nd grade -> 2020-08 to 2021-06"`` lines for a US school career,
+    the convention the owner's places (San Diego, Mesa, Yucaipa) follow:
+    kindergarten starts the August after a child turns five on or before
+    1 September. Approximate by nature, and labelled so.
+
+    Read off `chronology.grade_table_lines` — the ONE school-year definition
+    (`chronology.A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR`), which the
+    card-answer seat, the classifier seat and the fold also use."""
+    if not re.fullmatch(r"(\d{4})-(\d{2})(?:-(\d{2}))?", collapsed_text(birth)):
+        return []
+    return chrono.grade_table_lines(collapsed_text(birth))
+
+
+def family_passage(person: dict) -> dict:
+    """The one passage that carries a family person's birth, age table and
+    school years, cited as ``family:<ref>`` — so a family answer is verified
+    against THEIR arithmetic exactly as the owner's is against the spine."""
+    birth = collapsed_text(person.get("birth"))
+    name = collapsed_text(person.get("name")) or collapsed_text(person.get("ref"))
+    lines = [f"{name} born {birth}"]
+    import datetime as dt  # noqa: PLC0415
+
+    this_year = dt.date.today().year
+    lines += [f"{name} age {line}" for line in age_table(birth, upto=80)
+              if int(line.split(" -> ", 1)[1][:4]) <= this_year]
+    lines += [f"{name} {line}" for line in grade_table(birth)]
+    return {"doc_id": f"family:{person['ref']}", "kind": "family", "path": "",
+            "title": name, "text": "\n".join(lines)}
 
 
 # --------------------------------------------------------------------------
@@ -583,6 +757,8 @@ residence stay or a tenure as a range when the story places itself inside one, a
 give a RANGE rather than nothing when the exact date is not stated. Never invent a
 date the evidence does not support; when the vault truly cannot tell, say so and
 propose the single question that would settle it.
+
+{how_words_arrive}
 
 ## The owner
 Name: {owner}. Born: {birth}.
@@ -604,6 +780,9 @@ own name all mean the owner.
 ### The owner's age table (copy from here; never compute ages yourself)
 {ages}
 
+### The owner's US school years (approximate; kindergarten the August after turning five)
+{grades}
+
 ## The story ({source_path})
 {story}
 
@@ -613,7 +792,7 @@ Each passage has an id you must cite exactly.
 
 ## Moments from this story that still have no date
 {events}
-
+{family}
 ## Open questions elsewhere in the vault this story may bear on
 Moments from OTHER stories the vault could not date yet. They are asked again on their
 own with this story among their passages; here they are so you can say when a moment
@@ -642,8 +821,10 @@ Each answer:
 The "estimate" is REQUIRED whenever "answer" is null and there is no "not_an_event": your
 best reading of the stretch this moment falls in, from the shape of the owner's life as the
 spine shows it — the residence or tenure the story sits in, the life stage, a related dated
-moment. It is an estimate and is drawn as one, never as a placement; give the honest widest
-stretch you actually believe, never a single year you do not. When a moment's unresolved
+moment. An estimate resting on a residence, tenure, life stage, related moment or spine fact
+is filed as the system's own inferred placement (month grain is plenty; it is always ranked
+below anything the owner said), so give the honest widest stretch you actually believe, never
+a single year you do not. When a moment's unresolved
 handle names something that IS in the passages or the open questions (a birth, a move, a
 death listed as a fact), return it in "handle_binds" — that is how the handle stops being a
 question — and still answer the moment itself. Omit "handle_binds" only when nothing here
@@ -658,12 +839,13 @@ asks the owner to split hairs over one story he has already told is a question t
 should not have been asked at all.
 Some listed moments are not moments at all. When that is so, set "answer" to null and
 add, instead of a question:
-  "not_an_event": {{"kind": "future" | "meta" | "fact_statement" | "duplicate", "reason": "<one sentence>"}}
+  "not_an_event": {{"kind": "future" | "meta" | "fact_statement" | "duplicate", "reason": "<one sentence>",
+                    "duplicate_of": "<for a duplicate ONLY: the node_id of the moment it restates, copied exactly>"}}
 Use "future" for an anticipated or hypothetical milestone that has not happened yet,
 "meta" for a conversation about the data itself (a correction or a clarification),
 "fact_statement" for a bare statement of a fact (a name, somebody else's birthday)
 rather than something that happened, and "duplicate" for a restatement of a moment
-already dated elsewhere — cite that node_id in the reason. Use this only when you are
+already dated elsewhere — put that node_id in "duplicate_of" and cite it in the reason. Use this only when you are
 sure; a moment you simply cannot date takes a question, not a verdict.
 Rules: "stated" means a passage or the story states the date; "derived" means arithmetic
 from a stated fact (cite the fact); "inferred" means you reasoned from ranges (cite them).
@@ -705,17 +887,54 @@ def _open_lines(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+FAMILY_SECTION = """
+## The people these moments are about
+Some moments above are about somebody other than the owner. Date each of those from
+THAT person's own birth, never from the owner's: their birth, age table and US school
+years are in the passage named here (cite it like any passage, quoting the exact line).
+"As a child", "at 4", "in 2nd grade", "baseball when he was 8" are arithmetic on that
+table; the owner's age table says nothing about anybody else.
+{lines}
+"""
+
+
+def _family_section(rows: list[dict]) -> str:
+    """The family people this item's moments are about (v360,
+    :data:`A_FAMILY_MOMENT_IS_DATED_FROM_ITS_OWN_PERSON`), or ``""``."""
+    people = {}
+    for row in rows:
+        person = row.get("subject_birth")
+        if isinstance(person, dict) and person.get("ref"):
+            people[person["ref"]] = person
+    if not people:
+        return ""
+    lines = "\n".join(
+        f"- {p['name']} ({ref}), born {p['birth']}: passage [family:{ref}]" if p.get("birth")
+        else f"- {p['name']} ({ref}): no birth recorded — date from the passages and related moments, never from an age"
+        for ref, p in sorted(people.items()))
+    return FAMILY_SECTION.format(lines=lines)
+
+
+def _passage_line(doc: dict) -> str:
+    # A family passage is a table; cutting it would cut the very line cited.
+    text = doc["text"] if doc.get("kind") == "family" else doc["text"][:MAX_PASSAGE_CHARS]
+    return f"[{doc['doc_id']}] ({doc['kind']}) {text}"
+
+
 def build_prompt(*, source_path: str, story: str, rows: list[dict], sp: dict, passages: list[dict],
                  open_rows: list[dict] | tuple = ()) -> str:
     return PROMPT.format(
+        family=_family_section(rows),
+        how_words_arrive=load_how_words_arrive(),
         owner=sp["owner_name"], birth=sp["birth"] or "unknown",
         stays="\n".join(sp["stays"]) or "- none recorded",
         tenures="\n".join(sp["tenures"]) or "- none recorded",
         points="\n".join(sp["points"]) or "- none recorded",
         people="\n".join(sp.get("people") or []) or "- none recorded",
         ages="\n".join(sp.get("ages") or []) or "- birth date unknown",
+        grades="\n".join(sp.get("grades") or []) or "- birth date unknown",
         source_path=source_path, story=story[:MAX_SOURCE_CHARS],
-        passages="\n".join(f"[{d['doc_id']}] ({d['kind']}) {d['text'][:MAX_PASSAGE_CHARS]}" for d in passages) or "(none)",
+        passages="\n".join(_passage_line(d) for d in passages) or "(none)",
         events=_event_lines(rows),
         open_questions=_open_lines(list(open_rows)) or "(none)",
     )
@@ -740,15 +959,63 @@ def _quote_in(quote: str, text: str) -> bool:
     return len(ql) >= 6 and ql in _letters(t)
 
 
-def _record(answer: dict):
+#: v360 follow-up (owner, 2026-09-25) (item 5), flagged by the look-before-asking
+#: author: the prompt's own contract says ``"latest": … or null for ongoing``,
+#: and this parser read a null end as a single point — "therapy throughout
+#: childhood" and "still going" drawn as one day at their start. A null end is
+#: ONGOING — an open span, the way a residence's ``ongoing`` is drawn
+#: (``<start>/..``) — whenever the shape of the moment is a span or a stretch:
+#: a span-shaped kind (a stay, a job, a school, a mission, a marriage), or the
+#: moment's own words saying it lasted ("ongoing", "throughout", "still",
+#: "since", "whole life"). An explicit ``".."``, "present", "now" or "ongoing"
+#: end is open whatever the shape. Anything else with no end is still the
+#: point it always was: a birth with ``latest: null`` is that day.
+AN_ANSWER_WITH_NO_END_IS_ONGOING = (
+    "an answer or estimate whose end is null reads as ongoing — an open span "
+    "from its start — when the moment is span-shaped (a stay, a job, a "
+    "school, a mission, a marriage, or words that say it lasted); an explicit "
+    "open end ('..', 'present', 'now', 'ongoing') is open whatever the shape"
+)
+
+#: The ends that say "still going", spelled as a model or a person writes them.
+OPEN_END_WORDS = frozenset({"..", "present", "now", "ongoing", "today", "current",
+                            "still", "to date", "continuing"})
+
+#: Kinds whose moment is a STRETCH (`temporal_claims.EVENT_KINDS`' span-like
+#: kinds and the participation domains' own kinds).
+SPAN_SHAPED_EVENT_KINDS = frozenset({"span", "started", "residence", "job", "school",
+                                     "mission", "military", "married", "dating_started",
+                                     "tenure", "named_era"})
+
+#: A moment's own words that say it LASTED rather than happened.
+_ONGOING_WORDS_RE = re.compile(
+    r"\b(?:ongoing|throughout|still|since|to this day|whole life|all (?:my|his|her|their) "
+    r"li(?:fe|ves)|continu\w*|every (?:year|week|day|summer)|for years|over the years)\b",
+    re.IGNORECASE)
+
+
+def answer_is_span_shaped(target: object) -> bool:
+    """Is the moment this answer is for a stretch (:data:`AN_ANSWER_WITH_NO_END_IS_ONGOING`)?"""
+    row = target if isinstance(target, dict) else {}
+    kinds = {collapsed_text(row.get(key)) for key in ("event_kind", "node_event_kind")}
+    if kinds & SPAN_SHAPED_EVENT_KINDS:
+        return True
+    return bool(_ONGOING_WORDS_RE.search(collapsed_text(row.get("label"))))
+
+
+def _record(answer: dict, *, target: object = None):
     earliest = collapsed_text(answer.get("earliest"))
     latest = answer.get("latest")
     latest = collapsed_text(latest) if latest is not None else None
     if not earliest:
         return None
+    if latest is not None and latest.casefold() in OPEN_END_WORDS:
+        # :data:`AN_ANSWER_WITH_NO_END_IS_ONGOING`: an explicit open end.
+        return chrono.parse_stated_date(f"{earliest}/..")
     text = earliest if latest in (None, "", earliest) else f"{earliest}/{latest}"
-    if latest is None and earliest:
-        text = f"{earliest}/.." if answer.get("open") else earliest
+    if latest in (None, "") and earliest:
+        ongoing = bool(answer.get("open")) or answer_is_span_shaped(target)
+        text = f"{earliest}/.." if ongoing else earliest
     record = chrono.parse_stated_date(text)
     if record is None and latest is None:
         record = chrono.parse_stated_date(earliest)
@@ -826,12 +1093,13 @@ def verify(item: dict, *, story: str, passages: dict[str, dict], sp: dict, story
     basis = collapsed_text(item.get("basis"))
     if basis not in BASES:
         return None, "basis_invalid"
-    record = _record(answer)
+    record = _record(answer, target=target)
     if record is None:
         return None, "date_unparseable"
     if record.earliest and record.latest and record.earliest > record.latest:
         return None, "range_reversed"
-    spine_text = "\n".join([f"Born: {sp['birth']}", *sp["stays"], *sp["tenures"], *sp["points"], *sp.get("people", []), *sp.get("ages", [])])
+    spine_text = "\n".join([f"Born: {sp['birth']}", *sp["stays"], *sp["tenures"], *sp["points"], *sp.get("people", []),
+                            *sp.get("ages", []), *sp.get("grades", [])])
     valid: list[dict] = []
     for citation in item.get("citations") or ():
         if not isinstance(citation, dict):
@@ -851,7 +1119,8 @@ def verify(item: dict, *, story: str, passages: dict[str, dict], sp: dict, story
             valid.append({"doc": doc, "quote": quote[:tc.MAX_EVIDENCE_QUOTE_CHARS]})
     if not valid:
         return None, "citations_unverified"
-    if basis == "derived" and sp["birth"] and not any(c["doc"] == "spine" or c["doc"].startswith("fact:") for c in valid):
+    if basis == "derived" and sp["birth"] and not any(
+            c["doc"] == "spine" or c["doc"].startswith(("fact:", "family:")) for c in valid):
         # arithmetic must name the fact it was done against
         valid.append({"doc": "spine", "quote": f"Born: {sp['birth']}"})
     if target is not None and not _subject_is_owner((target or {}).get("subject"), sp) \
@@ -882,8 +1151,10 @@ def verify_estimate(item: dict, *, sp: dict, subject: object = None) -> tuple[di
     MECHANICALLY like everything else here — parseable, ordered, closed at both
     ends, not before the owner was born (a stretch wholly before the birth is
     family history, not a guess about this life) — and never against a quote,
-    because it is not a claim. It is stored beside the question, published as
-    the dot's ``probable_window``, and files nothing.
+    because it is not a citation. It is stored beside the question and
+    published as the dot's ``probable_window``; since v360's
+    :data:`AN_ESTIMATE_PLACES_AS_THE_SYSTEMS_INFERENCE` a GROUNDED one is also
+    filed, by :func:`file_estimate`, as the system's inferred placement.
 
     v330: the pre-birth floor is the OWNER's. ``subject`` is the target's
     subject (:func:`_subject_is_owner`); a moment that happened to somebody
@@ -1001,7 +1272,18 @@ def verify_not_an_event(item: dict) -> tuple[dict | None, str]:
     kind = collapsed_text(verdict.get("kind"))
     if kind not in NOT_AN_EVENT_KINDS:
         return None, "verdict_kind_unknown"
-    return {"kind": kind, "reason": collapsed_text(verdict.get("reason"))[:400]}, "ok"
+    out = {"kind": kind, "reason": collapsed_text(verdict.get("reason"))[:400]}
+    if kind == "duplicate":
+        # :data:`A_DUPLICATE_NAMES_ITS_SURVIVOR`: the field first; a verdict
+        # written before the field existed names it in the reason, and exactly
+        # one node id there is still a name.
+        survivor = collapsed_text(verdict.get("duplicate_of"))
+        if not _NODE_ID_RE.fullmatch(survivor):
+            named = sorted(set(_NODE_ID_RE.findall(out["reason"])))
+            survivor = named[0] if len(named) == 1 else ""
+        if survivor:
+            out["duplicate_of"] = survivor
+    return out, "ok"
 
 
 # --------------------------------------------------------------------------
@@ -1033,8 +1315,12 @@ def reading_telling_ref(target: dict) -> str:
 
 
 def file_resolution(root: Path, target: dict, resolved: dict, *, story_path: str, model: str, now: str,
-                    prior: dict[str, list[str]] | None = None) -> dict:
-    """One receipt with one ``date`` claim on the event's own node; retire its raw handle."""
+                    prior: dict[str, list[str]] | None = None, retire_handles: bool = True) -> dict:
+    """One receipt with one ``date`` claim on the event's own node; retire its raw handle.
+
+    ``retire_handles=False`` is the estimate's filing
+    (:data:`AN_ESTIMATE_NEVER_RETIRES_HIS_WORDS`): the system's inference is
+    filed beside his words, never over them."""
     record = dict(resolved["record"])
     if resolved["basis"] != "stated":
         # The store's basis vocabulary: arithmetic from an age is `age`; a date
@@ -1081,7 +1367,7 @@ def file_resolution(root: Path, target: dict, resolved: dict, *, story_path: str
         "source_ref": source_ref, "extractor_version": EXTRACTOR_VERSION,
         "extractor": extractor, "claims": [claim],
     }, now=now)
-    handles = [h["claim_id"] for h in target["handles"] if h.get("claim_id")]
+    handles = [h["claim_id"] for h in target["handles"] if h.get("claim_id")] if retire_handles else []
     if handles:
         store.supersede_claims(
             root, handles,
@@ -1091,6 +1377,151 @@ def file_resolution(root: Path, target: dict, resolved: dict, *, story_path: str
             author="resolver", occurred_at=now,
         )
     return {"receipt_path": str(path), "claim_id": claim["claim_id"], "superseded": handles}
+
+
+#: v360 (owner, 2026-09-25): *"almost nothing needs precision of more than a
+#: month … Unless I specifically give it, I think the fidelity of a month is
+#: enough, or even less. That's what the list is for, so I can move things
+#: around later."* Until this rule an estimate was drawn as sky and filed
+#: nothing, so the moment stayed unplaced and carded. Now an estimate that
+#: passes :func:`verify_estimate` AND rests on at least one grounded line
+#: (:data:`PLACING_ESTIMATE_BASIS_KINDS`) is FILED as a claim — the same
+#: receipt a resolved answer files, under this resolver's rule, basis
+#: ``inferred`` and confidence ``conjectural`` — at month grain or coarser as
+#: its bounds say. It is the system's inference and reads as one (basis,
+#: confidence, ``fact_key: estimate``); it never overrides or narrows what the
+#: person said (`temporal_timeline.AN_ANSWER_IS_THE_PLACEMENT` ranks it below
+#: every statement, and a node the person dated is never estimated onto), and
+#: a reading of theirs it does not fit is the contradiction card the fold
+#: already mints. ADR 0037's "the ledger is not a derivation input" still
+#: holds: the CLAIM is the input, filed through the store like every answer.
+AN_ESTIMATE_PLACES_AS_THE_SYSTEMS_INFERENCE = (
+    "a verified estimate resting on a residence, tenure, life stage, related "
+    "moment or spine fact is filed as the system's inferred placement at month "
+    "grain or coarser; it never overrides or narrows what the person said"
+)
+
+#: The basis kinds that ground an estimate. ``story`` (the resolver's own
+#: reading, e.g. an unverified answer adopted as a window) and ``other`` do not.
+PLACING_ESTIMATE_BASIS_KINDS = ("residence", "tenure", "life_stage", "related_moment", "spine")
+
+#: A residence is never placed by an estimate: a guessed stay draws the person
+#: living in two places at once (the reason `targets` kept residences out).
+AN_ESTIMATE_NEVER_PLACES_A_RESIDENCE = (
+    "an estimate never places a residence; only a verified, cited answer does"
+)
+
+ESTIMATE_FACT_KEY = "estimate"
+
+#: v360 follow-up (owner, 2026-09-25) (item 1, owner agreed: "cap inferred estimates
+#: at about 5 years"). An estimate is the system's own reading, and a reading
+#: wider than about five years says where the moment is NOT more than where it
+#: is: filed as a placement it drew a dot over a decade and took the moment off
+#: the "needs placing" list as if it were known. So a verified, grounded
+#: estimate wider than :data:`MAX_PLACING_ESTIMATE_MONTHS` is NOT filed; it
+#: stays the dot's ``probable_window``, and a card is asked about it only when
+#: it is hot — a keystone, or a moment other placements wait on
+#: (`temporal_publication.A_WIDE_ESTIMATE_IS_ASKED_ONLY_WHEN_HOT`).
+MAX_PLACING_ESTIMATE_MONTHS = 60
+
+AN_ESTIMATE_WIDER_THAN_FIVE_YEARS_STAYS_A_WINDOW = (
+    "a verified estimate wider than about five years (60 months, both end "
+    "months counted) is never filed as a placement: it stays the moment's "
+    "probable window, and a card is asked about it only when it is hot"
+)
+
+
+def estimate_months(estimate: object) -> int | None:
+    """How many calendar months an estimate spans, both ends counted, at the
+    month grain it would be filed at (:func:`estimate_record`)."""
+    row = estimate if isinstance(estimate, dict) else {}
+    earliest = collapsed_text(row.get("earliest"))[:7]
+    latest = collapsed_text(row.get("latest"))[:7]
+    if not earliest or not latest:
+        return None
+    return chrono.span_months({"earliest": earliest, "latest": latest})
+
+
+def estimate_too_wide(estimate: object) -> bool:
+    """:data:`AN_ESTIMATE_WIDER_THAN_FIVE_YEARS_STAYS_A_WINDOW`."""
+    months = estimate_months(estimate)
+    return months is None or months > MAX_PLACING_ESTIMATE_MONTHS
+
+
+def estimate_places(estimate: object, target: object) -> bool:
+    """Does this verified estimate place its moment
+    (:data:`AN_ESTIMATE_PLACES_AS_THE_SYSTEMS_INFERENCE`)?"""
+    row = estimate if isinstance(estimate, dict) else {}
+    node = target if isinstance(target, dict) else {}
+    if not row.get("earliest") or not row.get("latest"):
+        return False
+    if node.get("person_dated"):
+        return False
+    if collapsed_text(node.get("node_event_kind")) == "residence" or \
+            collapsed_text(node.get("event_kind")) == "residence":
+        return False
+    if estimate_too_wide(row):
+        return False
+    return any(collapsed_text(b.get("kind")) in PLACING_ESTIMATE_BASIS_KINDS
+               for b in row.get("basis") or () if isinstance(b, dict))
+
+
+def estimate_record(estimate: dict) -> dict | None:
+    """The estimate as a date record at month grain or coarser."""
+    earliest = collapsed_text(estimate.get("earliest"))[:7]
+    latest = collapsed_text(estimate.get("latest"))[:7]
+    text = earliest if earliest == latest else f"{earliest}/{latest}"
+    record = chrono.parse_stated_date(text)
+    if record is None:
+        return None
+    out = record.to_dict()
+    out["confidence"] = "conjectural"
+    return out
+
+
+def file_estimate(root: Path, target: dict, estimate: dict, *, story_path: str, model: str,
+                  now: str, prior: dict | None = None) -> dict | None:
+    """File one verified, grounded estimate as the system's inferred placement.
+    ``None`` when its bounds will not make a record."""
+    record = estimate_record(estimate)
+    if record is None:
+        return None
+    lines = [b for b in estimate.get("basis") or () if isinstance(b, dict)]
+    resolved = {
+        "record": record, "basis": "inferred",
+        "confidence": min(float(estimate.get("confidence") or 0.4), 0.5),
+        "citations": [{"doc": f"estimate:{collapsed_text(b.get('kind'))}",
+                       "quote": collapsed_text(b.get("text"))[:tc.MAX_EVIDENCE_QUOTE_CHARS]}
+                      for b in lines],
+        "fact_key": ESTIMATE_FACT_KEY,
+        "reason": "the resolver's estimate: " + "; ".join(collapsed_text(b.get("text")) for b in lines)[:300],
+    }
+    return file_resolution(root, target, resolved, story_path=story_path, model=model, now=now,
+                           prior=prior or {}, retire_handles=False)
+
+
+#: v360 follow-up (owner, 2026-09-25) (found under item 1): an estimate filed through
+#: `file_resolution` also retired the moment's raw handle ("after the move to
+#: Cedarport") as if his words had been answered — so retiring a too-wide
+#: estimate later left a node with nothing at all, and the moment vanished
+#: from the timeline. The system's inference is filed BESIDE his words:
+#: an estimate never supersedes a claim of his, and retiring it leaves them.
+AN_ESTIMATE_NEVER_RETIRES_HIS_WORDS = (
+    "an estimate is filed beside the person's own words and never supersedes "
+    "them — his relative claim stays active under it, so retiring the "
+    "estimate leaves the moment exactly as he told it"
+)
+
+
+def _retire_estimate_claim(root: Path, row: object, *, now: str, why: str) -> list[str]:
+    """Supersede the estimate claim a ledger row says it filed, if any."""
+    placed = (row or {}).get("placed_by_estimate") if isinstance(row, dict) else None
+    claim_id = collapsed_text((placed or {}).get("claim_id")) if isinstance(placed, dict) else ""
+    if not claim_id:
+        return []
+    store.supersede_claims(root, [claim_id], reason=why, scope=SUPERSEDE_SCOPE,
+                           title="Resolver estimate replaced", author="resolver", occurred_at=now)
+    return [claim_id]
 
 
 def file_handle_bind(root: Path, target: dict, bind: dict, *, story_path: str, model: str, now: str) -> dict:
@@ -1166,6 +1597,8 @@ def file_not_an_event(root: Path, target: dict, verdict: dict, *, now: str) -> d
         return {"retracted": [], "correction_id": "", "correction_path": ""}
     reason = (f"Not an event ({verdict['kind']}) by {EXTRACTOR_VERSION}: "
               f"{verdict['reason'] or 'the moment is not something that happened'}")
+    if verdict.get("duplicate_of"):
+        reason += f" [duplicate_of {verdict['duplicate_of']}]"
     correction = store.retract_claims(
         root, claim_ids, reason=reason, scope=NOT_AN_EVENT_SCOPE,
         title="Moment retired as not an event", author="resolver", occurred_at=now,
@@ -1281,7 +1714,7 @@ def file_same_as(root: Path, *, now: str) -> dict:
     by_claim = ef.claim_telling_index(claims, ei.read_telling_manifest(root))
     nodes = {node["node_id"]: node for node in projection.get("nodes") or ()}
     views = eb.telling_views(
-        claims, entity_index=eb.ec.load_entity_index(root),
+        claims, entity_index=eb.ec.load_entity_index(root, texts=eb.tt.telling_texts(claims)),
         landmark_entries=eb.lp.load_landmark_sources(root),
     )
     records = ef.load_episode_records(root)
@@ -1336,6 +1769,21 @@ def save_ledger(root: Path, ledger: dict) -> None:
         json.dumps(ledger, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         vault_root=root,
     )
+
+
+def duplicate_redirects(source: object) -> dict[str, str]:
+    """``retired node id -> the node it duplicates`` from the ledger
+    (:data:`A_DUPLICATE_NAMES_ITS_SURVIVOR`). ``source`` is a vault root or a
+    ledger already read; unreadable reads as no redirects."""
+    ledger = source if isinstance(source, dict) else load_ledger(Path(str(source)))
+    out: dict[str, str] = {}
+    for node_id, row in (ledger.get("nodes") or {}).items():
+        if not isinstance(row, dict) or row.get("status") != NOT_AN_EVENT_STATUS:
+            continue
+        survivor = collapsed_text(row.get("duplicate_of"))
+        if row.get("kind") == "duplicate" and survivor and survivor != node_id:
+            out[collapsed_text(node_id)] = survivor
+    return out
 
 
 def open_questions(ledger: dict) -> list[dict]:
@@ -1538,8 +1986,10 @@ class _Read:
         self.prior = prior_resolver_claims(self.index)
         # v325. Placed moments the RESOLVER dated to a wide range are kept
         # reachable, so a story that carries the exact date can sharpen them.
+        # v360 (owner, 2026-09-25): a moment placed by the resolver's own ESTIMATE stays reachable
+        # the same way, so a story that carries its date replaces the estimate.
         wide = frozenset(node_id for node_id, row in (self.ledger.get("nodes") or {}).items()
-                         if _wide_resolution(row))
+                         if _wide_resolution(row) or isinstance(row.get("placed_by_estimate"), dict))
         if wide:
             for source_path, rows in targets(root, self.projection, self.index, include_placed=wide).items():
                 have = {t["node_id"] for t in self.targets.get(source_path, [])}
@@ -1794,7 +2244,6 @@ def _pending(read: _Read, *, only_sources=None, retry_failed: bool = False, forc
     The second list is the moments a bare age handle already answers: they need
     no model and no question, so they are counted apart and filed by arithmetic.
     """
-    birth = read.spine["birth"]
     pending: list[tuple[str, list[dict]]] = []
     deterministic: list[tuple[str, dict, tuple]] = []
     for source_path in sorted(read.targets):
@@ -1814,9 +2263,13 @@ def _pending(read: _Read, *, only_sources=None, retry_failed: bool = False, forc
             # The same rule `verify` applies, at the lane that never reaches
             # it: a bare age is arithmetic off the OWNER's birthday, so it is
             # arithmetic only when the moment is the owner's. Somebody else's
-            # "at 21" goes to the model with the rest of its story.
-            if aged and birth and _subject_is_owner(target.get("subject"), read.spine) \
-                    and len({a for a, _ in aged}) == 1 and age_range(birth, aged[0][0], aged[0][1]):
+            # "at 21" goes to the model with the rest of its story — unless
+            # (v360, :data:`A_FAMILY_MOMENT_IS_DATED_FROM_ITS_OWN_PERSON`)
+            # the vault records THAT person's birth, when it is arithmetic off
+            # theirs.
+            anchor = _age_anchor(target, read.spine)
+            if aged and anchor and len({a for a, _ in aged}) == 1 \
+                    and age_range(anchor, aged[0][0], aged[0][1]):
                 deterministic.append((source_path, target, aged[0]))
             else:
                 rows.append(target)
@@ -1994,6 +2447,9 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
         resolved, why = verify(item, story=story, passages=passages, sp=read.spine,
                                story_path=source_path, target=target)
         verdict, _verdict_why = verify_not_an_event(item)
+        if verdict is not None and verdict.get("duplicate_of") and (
+                verdict["duplicate_of"] == node_id or verdict["duplicate_of"] not in read.known_nodes):
+            verdict = {k: v for k, v in verdict.items() if k != "duplicate_of"}
         if previous.get("status") == "resolved":
             # v325: a wide reading re-asked to sharpen it. Only a NARROWER
             # verified answer replaces the one standing; anything else keeps
@@ -2019,6 +2475,10 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
                     prior=read.prior)})
                 report["filed"] += 1
                 report["bases"][resolved["basis"]] += 1
+                retired = _retire_estimate_claim(read.root, previous, now=now,
+                                                 why="Replaced by a verified resolver answer")
+                if retired:
+                    entry["estimate_retired"] = retired
             except Exception as exc:  # noqa: BLE001
                 entry.update({"status": "file_error", "error": type(exc).__name__, "detail": str(exc)[:200]})
                 report.setdefault("error_samples", []).append(f"{node_id}: {str(exc)[:160]}")
@@ -2029,6 +2489,8 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
             # milestone that has not happened. Both legs reach this branch:
             # `file_envelope` and the composed local run share this function.
             entry.update({"kind": verdict["kind"], "reason": verdict["reason"]})
+            if verdict.get("duplicate_of"):
+                entry["duplicate_of"] = verdict["duplicate_of"]
             try:
                 entry.update({"status": NOT_AN_EVENT_STATUS, **file_not_an_event(
                     read.root, target, verdict, now=now)})
@@ -2060,8 +2522,14 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
             if estimate is not None:
                 entry["estimate"] = estimate
                 report["estimates"] += 1
+                _place_estimate(read, report, entry, target, estimate, previous=previous,
+                                source_path=source_path, model=model, now=now)
             else:
                 entry["estimate_dropped"] = estimate_why
+                if isinstance(previous.get("placed_by_estimate"), dict):
+                    # No new estimate: the standing placement stays, as it was.
+                    entry["placed_by_estimate"] = previous["placed_by_estimate"]
+                    entry["estimate"] = previous.get("estimate")
         if resolved is None and verdict is None:
             # v325: a handle this answer could point at a node. A dated answer
             # already retired every handle; a verdict is retracting the moment.
@@ -2080,12 +2548,89 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
         read.ledger["nodes"][node_id] = entry
 
 
+def _age_anchor(target: dict, sp: dict) -> str:
+    """The birth a bare age on this moment is measured from: the owner's for
+    his own moments, the family person's own for theirs, else ``""``."""
+    if _subject_is_owner(target.get("subject"), sp):
+        return collapsed_text(sp.get("birth"))
+    person = target.get("subject_birth")
+    return collapsed_text(person.get("birth")) if isinstance(person, dict) else ""
+
+
+def _place_estimate(read: "_Read", report: dict, entry: dict, target: dict, estimate: dict, *,
+                    previous: dict, source_path: str, model: str, now: str) -> None:
+    """:data:`AN_ESTIMATE_PLACES_AS_THE_SYSTEMS_INFERENCE` for one ledger entry.
+
+    The same estimate as the one already filed files nothing; a different one
+    retires the old claim and files the new one."""
+    if not estimate_places(estimate, target):
+        entry["estimate_not_placed"] = ("residence" if collapsed_text(target.get("node_event_kind")) == "residence"
+                                        else "person_dated" if target.get("person_dated")
+                                        else "wider_than_five_years" if estimate_too_wide(estimate)
+                                        else "no_grounded_basis")
+        if isinstance(previous.get("placed_by_estimate"), dict):
+            _retire_estimate_claim(read.root, previous, now=now, why="The estimate no longer places")
+        return
+    standing = previous.get("placed_by_estimate") if isinstance(previous.get("placed_by_estimate"), dict) else None
+    if standing and standing.get("record") == estimate_record(estimate):
+        entry["placed_by_estimate"] = standing
+        return
+    try:
+        filed = file_estimate(read.root, target, estimate, story_path=source_path, model=model,
+                              now=now, prior=read.prior)
+    except Exception as exc:  # noqa: BLE001
+        entry["estimate_file_error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+        return
+    if filed is None:
+        entry["estimate_not_placed"] = "estimate_unrepresentable"
+        return
+    if standing:
+        _retire_estimate_claim(read.root, previous, now=now, why="Replaced by a newer resolver estimate")
+    entry["placed_by_estimate"] = {**filed, "record": estimate_record(estimate)}
+    report["placed_by_estimate"] = report.get("placed_by_estimate", 0) + 1
+
+
+def place_standing_estimates(read: "_Read", *, now: str) -> int:
+    """File every standing ledger estimate that places and has not been filed
+    (a v360 backfill, no model call). Returns how many were filed; the caller
+    saves the ledger and republishes."""
+    report: dict = {}
+    for node_id, row in (read.ledger.get("nodes") or {}).items():
+        if not isinstance(row, dict) or row.get("status") not in ("unknown", "unverified"):
+            continue
+        estimate = row.get("estimate")
+        if isinstance(estimate, dict) and isinstance(row.get("placed_by_estimate"), dict) \
+                and estimate_too_wide(estimate):
+            # :data:`AN_ESTIMATE_WIDER_THAN_FIVE_YEARS_STAYS_A_WINDOW`, for an
+            # estimate filed before the cap: its claim is retired and the
+            # window stays.
+            _retire_estimate_claim(read.root, row, now=now,
+                                   why="The estimate is wider than about five years")
+            row.pop("placed_by_estimate", None)
+            row["estimate_not_placed"] = "wider_than_five_years"
+            report["retired_wide"] = report.get("retired_wide", 0) + 1
+            continue
+        if not isinstance(estimate, dict) or isinstance(row.get("placed_by_estimate"), dict):
+            continue
+        found = read.by_node.get(node_id)
+        if found is None:
+            continue
+        source_path, target = found
+        _place_estimate(read, report, row, target, estimate, previous={}, source_path=source_path,
+                        model=collapsed_text(row.get("model")) or DEFAULT_MODEL, now=now)
+    read.standing_retired_wide = int(report.get("retired_wide") or 0)
+    return int(report.get("placed_by_estimate") or 0)
+
+
 def _file_deterministic(read: _Read, report: dict, deterministic: list, *, now: str) -> None:
     """A bare age where an anchor should be is arithmetic, not a question."""
-    birth = read.spine["birth"]
     for source_path, target, (age, relation) in deterministic:
+        birth = _age_anchor(target, read.spine)
+        person = target.get("subject_birth") if not _subject_is_owner(target.get("subject"), read.spine) else None
+        cite = ({"doc": f"family:{person['ref']}", "quote": f"{person['name']} born {birth}"}
+                if isinstance(person, dict) else {"doc": "spine", "quote": f"Born: {birth}"})
         resolved = {"record": age_range(birth, age, relation), "basis": "derived", "confidence": 0.9,
-                    "citations": [{"doc": "spine", "quote": f"Born: {birth}"}],
+                    "citations": [cite],
                     "fact_key": f"age_{age}",
                     "reason": f"The handle is the bare age {age} ({relation or 'within'}); computed from the birth date."}
         try:
@@ -2136,7 +2681,7 @@ def file_envelope(root: Path, envelope: object, *, now: str, model: str | None =
         raise ValueError("an envelope is an object with an `items` list")
     model = collapsed_text(model) or collapsed_text(envelope.get("model")) or DEFAULT_MODEL
     read = read or _Read(root, triggers=set(only_sources or ()) or _triggers_of(envelope))
-    report: dict = {"filed": 0, "retracted": 0, "bound": 0, "estimates": 0,
+    report: dict = {"filed": 0, "retracted": 0, "bound": 0, "estimates": 0, "placed_by_estimate": 0,
                     "outcomes": collections.Counter(),
                     "bases": collections.Counter(), "usage": collections.Counter(),
                     "refused_items": []}
@@ -2176,7 +2721,8 @@ def file_envelope(root: Path, envelope: object, *, now: str, model: str | None =
                 source_path=source_path, model=model, now=now, spine_changed=spine_changed)
     if finalize:
         save_ledger(root, read.ledger)
-        if report["filed"] or report["retracted"] or report["bound"] or report["estimates"]:
+        if report["filed"] or report["retracted"] or report["bound"] or report["estimates"] \
+                or report["placed_by_estimate"]:
             # A bind moves the vault as a filing does (an edge the fold can now
             # follow); an estimate moves the page (a dot that now floats where
             # it probably belongs). Both republish.
@@ -2249,12 +2795,18 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
     """
     read = _Read(root, triggers=only_sources)
     adopted = adopt_proposals_as_estimates(read, sp=read.spine) if estimate_missing else 0
+    # v360 (:data:`AN_ESTIMATE_PLACES_AS_THE_SYSTEMS_INFERENCE`): the ledger's
+    # standing grounded estimates become placements, no model call.
+    standing_placed = place_standing_estimates(read, now=now) if execute else 0
+    standing_retired = int(getattr(read, "standing_retired_wide", 0) or 0)
     plan = plan_items(root, limit=max(1, limit), only_sources=only_sources, retry_failed=retry_failed,
                       force=force, model=model, read=read, restrict=True, estimate_missing=estimate_missing)
     report: dict = {"model": model, "execute": execute, "sources_with_targets": len(read.targets),
                     "sources_pending": plan["pending_sources"], "events_pending": plan["pending_events"],
                     "deterministic_age_handles": plan["deterministic_pending"],
                     "revisits": len(read.revisit), "estimates_adopted": adopted,
+                    "standing_estimates_placed": standing_placed,
+                    "standing_estimates_retired_wide": standing_retired, "placed_by_estimate": 0,
                     "selected": min(limit, plan["pending_sources"]),
                     "outcomes": collections.Counter(), "usage": collections.Counter(),
                     "filed": 0, "retracted": 0, "bound": 0, "estimates": 0, "errors": 0,
@@ -2267,7 +2819,7 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
         return report
 
     if not execute:
-        if adopted:
+        if adopted or standing_placed or standing_retired:
             save_ledger(root, read.ledger)
             _republish(root)
         if plan["items"]:
@@ -2321,6 +2873,7 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
         report["retracted"] += sub.get("retracted") or 0
         report["bound"] += sub.get("bound") or 0
         report["estimates"] += sub.get("estimates") or 0
+        report["placed_by_estimate"] += sub.get("placed_by_estimate") or 0
         for name, value in sub["outcomes"].items():
             report["outcomes"][name] += value
         for name, value in sub["bases"].items():
@@ -2343,7 +2896,8 @@ def resolve_vault(root: Path, *, model: str, execute: bool, limit: int, concurre
         if again["items"]:
             file_round(again, deterministic=False)
     save_ledger(root, read.ledger)
-    if report["filed"] or report["retracted"] or report["bound"] or report["estimates"] or adopted:
+    if report["filed"] or report["retracted"] or report["bound"] or report["estimates"] or adopted \
+            or standing_placed or standing_retired or report["placed_by_estimate"]:
         _republish(root)
     report["open_questions"] = open_questions(read.ledger)[:25]
     return flatten()
@@ -2362,6 +2916,15 @@ def _retrieve(fts: Index, rows: list[dict], source_path: str, *, include_paths=(
     by the cap, matched passages where the query finds any, the opening
     paragraphs otherwise, so the new evidence is in front of the model."""
     seen: dict[str, dict] = {}
+    for row in rows:
+        # v360 (:data:`A_FAMILY_MOMENT_IS_DATED_FROM_ITS_OWN_PERSON`): the
+        # person's own tables ride first and outside the cap, so the line a
+        # family answer cites is always in front of the model and the verifier.
+        person = row.get("subject_birth")
+        if isinstance(person, dict) and person.get("ref") and person.get("birth"):
+            doc = family_passage(person)
+            seen.setdefault(doc["doc_id"], doc)
+    family = len(seen)
     for path in include_paths:
         if not path or path == source_path:
             continue
@@ -2375,9 +2938,9 @@ def _retrieve(fts: Index, rows: list[dict], source_path: str, *, include_paths=(
     for row in rows:
         for doc in fts.search(_query(row), exclude_path=source_path):
             seen.setdefault(doc["doc_id"], doc)
-        if len(seen) >= RETRIEVE_CAP:
+        if len(seen) >= RETRIEVE_CAP + family:
             break
-    return list(seen.values())[:RETRIEVE_CAP]
+    return list(seen.values())[:RETRIEVE_CAP + family]
 
 
 def answer_questions(root: Path, questions: list[dict], *, model: str) -> list[dict]:

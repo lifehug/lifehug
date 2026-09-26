@@ -181,8 +181,11 @@ class NodeTitlesReadTheSameTable(unittest.TestCase):
         self.assertEqual(tt._node_label("San Diego", "span"), "San Diego")  # noqa: SLF001
         self.assertEqual(
             tt._node_label("James Taylor", "birth"), "James Taylor's birth")  # noqa: SLF001
+        # v360 (owner, 2026-09-25): a title is sentence-cased —
+        # "your birth" read as a lowercase fragment on a card list; the
+        # composer now capitalises the title's own first letter.
         self.assertEqual(tt._node_label("self", "birth", is_owner=True),  # noqa: SLF001
-                         "your birth")
+                         "Your birth")
         self.assertNotIn(" — ", tt._node_label("I", "span"))  # noqa: SLF001
 
 

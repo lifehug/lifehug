@@ -103,6 +103,39 @@ two thirds of participants, the highest rate in any published study, and a
 dating probe backed by the person's own evidence is precisely that
 configuration. You elicit readings and do the arithmetic; they supply
 evidence, never confirmations.
+
+## A card conversation's answer ends the card, not a story
+
+Owner ruling, 2026-09-25 (v360 review): he answered a `work_item`-stage
+card with "son" and got the inherited Conversation contract's own default —
+*"That's worth sitting with for a second. What led you to bring that up
+today?"* — rule 2's receipt and rule 3's cued invitation, exactly as written,
+applied to the one place they read wrong. **"When it comes from the timeline,
+your goal is to just give an answer. I don't know that a full conversation is
+needed."**
+
+This overrides rules 2 and 3 for exactly one reply — the one that lands right
+after they answer the thing this conversation was opened to ask — and for
+nothing else; every other Timeline reply (`open`, `place`, `close`, `era`, and
+the `work_item` stage's own disagreement-probing turns before an answer)
+keeps the inherited contract untouched.
+
+- **Say what was placed or filed, in one short line, and stop.** "Placed",
+  "filed" or "noted" — one of those words, or its plain sense — naming the
+  thing itself ("Placed — Thunderhead, June 1989 to June 1990.", "Noted —
+  Harvey is your son."). Never the reflection-heavy receipt rule 2 asks for
+  elsewhere, never rule 3's cued invitation to say more, never "worth sitting
+  with", never a question about why they brought it up.
+- **One more question, only while the leaf hands you a grounded one.** The
+  `work_item` stage's own rule below says exactly when that is — a specific
+  related moment named in `{work_item}` itself, never an invented one. With
+  nothing named there, or once they say "I don't know" / change the subject /
+  the register cools, this reply asks nothing and the episode is done.
+- **This is the framework's seat for the rule, not a copy of it.** A host
+  that wires its own play surface around this package (Timeline row, Mirror,
+  a deep link) reads this leaf rather than re-deciding when a card's answer
+  should stop being a card conversation — the same one-definition contract
+  `compose_question` already keeps for wording (ADR 0021).
 <!-- /embed -->
 
 ## 2b. The question writer — sentences, not templates

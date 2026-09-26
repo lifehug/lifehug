@@ -2527,8 +2527,47 @@ def same_landmark_stay(existing: object, record: object, row: object = None) -> 
     right = entry_stay_interval(record)
     if left is None or right is None:
         return True
+    if different_grades(existing, record, overlap=chrono.overlap_months(left, right)):
+        # :data:`TWO_STATED_GRADE_STRETCHES_ARE_TWO_STAYS`.
+        return False
     gap = chrono.gap_months(left, right)
     return gap is None or gap <= SEQUENCE_ENTRY_ABUT_MONTHS
+
+
+#: v360 (owner, 2026-09-25). "9th and 10th grade" (1995-06 to 1997-06) and "11th and
+#: 12th" (1997-06 to 2000-08) at Mountain View abut, so the key folded them into
+#: ONE entry: the second record's grades overwrote the first's, its span became
+#: the first's alternate, and the landmarks view read "11th and 12th, 1995-06 to
+#: 1997-06". Two DATED tellings of one school that state DIFFERENT grades are
+#: two stretches of schooling — two stays of one landmark, exactly as
+#: Longfellow's "PK and 1st grade" and "2nd grade" already are — whatever the
+#: distance between them.
+TWO_STATED_GRADE_STRETCHES_ARE_TWO_STAYS = (
+    "two dated tellings of one school that state different grades are two stays "
+    "of that school, never one stay with the other's grades"
+)
+
+
+def _grade_words(entry: object) -> str:
+    text = entry.get("grades") if isinstance(entry, dict) else None
+    if not isinstance(text, str):
+        return ""
+    return " ".join(word for word in re.findall(r"[a-z0-9]+", text.lower())
+                    if word not in ("grade", "grades", "the", "and", "through", "to"))
+
+
+def different_grades(existing: object, record: object, *, overlap: int = 0) -> bool:
+    """Are these two DATED school tellings two stretches by their grades?
+
+    Both state grades, and different ones: always two. Only one states grades:
+    two when the stretches merely abut (share at most one month) — a telling
+    of "PK and 1st grade" from 1986-06 is not the 1982-08 to 1986-06 stretch
+    before it — and one when they genuinely overlap (the same years told once
+    with the grades and once without)."""
+    left, right = _grade_words(existing), _grade_words(record)
+    if left and right:
+        return left != right
+    return bool(left or right) and overlap <= 1
 
 
 #: v349, and the rule this release is named for.

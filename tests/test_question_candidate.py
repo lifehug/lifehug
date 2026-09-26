@@ -477,10 +477,14 @@ class StalenessCliAndParityTests(QuestionCandidateCase):
         # interaction.yaml's budgets, so what was written finally reaches the
         # model. The cost is real (~3k more tokens on every turn) and
         # deliberate; the rule set is the product.
-        self.assertEqual(len(turn), 28_443)
+        # 2026-09-25 (v360) — 28,443 -> 29,799: the shared
+        # `## HOW_WORDS_ARRIVE` block (interactions/how-words-arrive.md, the
+        # owner's "I'm speaking voice-to-text" ruling) joins the stable prefix
+        # between EXAMPLES and PROFILE. No definition file's own bytes moved.
+        self.assertEqual(len(turn), 29_799)
         self.assertEqual(
             hashlib.sha256(turn.encode()).hexdigest(),
-            "582bb53a6f80c0f506aa3119dc5f21e27c2e82a8b5b10b13761fe2b7db27da39",
+            "7d7132afabe75afbbadee689bfa289ab5d000e50c05a290b3fc82f7c5976cb50",
         )
         self.assertEqual(len(router), 9_673)
         self.assertEqual(
@@ -503,7 +507,9 @@ class StalenessCliAndParityTests(QuestionCandidateCase):
             "prompt/turn-instructions.md": "95f62c5a1682a1c2b12a06423e5694e2bed459557971348d4ad598d3a6cfb95a",
             # v201 (lifehug#206): the recipe now states that a trim is never a
             # bare cut and that the `session` block is budgeted BY TURN.
-            "context/manifest.md": "fa37a528b152a0ed02dbb5a8cecaa39fd22c533e52f4dd51789d09d4efd9aff6",
+            # 2026-09-25 (v360): the recipe names the shared
+            # how_words_arrive block (interactions/how-words-arrive.md).
+            "context/manifest.md": "2a165086626532de05764bba7d36de4f369d29f104170a3186fbb642562321c1",
             "router/deflection.md": "7e5804812e99affac6e71aa19a01e2c039ab38392e7e5697e9759e85fa9a38f1",
             "router/router.md": "35153bdd414b0d262912bed9bd81c3e5d0ecff1eeccf880c76cfe1c939639a0c",
             # v200 (place-no-stories arcs): the definition file names the

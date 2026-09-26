@@ -1224,3 +1224,193 @@ The father's mission now carries the answer's own `age` claim, measured
 month-grained 1973-06/1976-06, because v345's ruling makes an agreeing age
 evidence on a dated moment, never its rival. `CALCULATION_RULE_VERSION` does
 **not** move.
+
+## Amendment (v360, owner 2026-09-25, `timeline-rules:19`): an answer is the placement
+
+*"if I say 19 to 21 here, that is a placement because I set it"* … *"if I say it
+and get precision, any level of precision, that means I want it placed, given
+the precision I've given you. And later information that contradicts it is a
+question."* (owner, 2026-09-25). v359's paragraph above — *the drawn window
+stays this resolver's* — is amended.
+
+**THE RULE** (`temporal_timeline.AN_ANSWER_IS_THE_PLACEMENT`): a node the person
+dated in their own words (a claim whose basis is `explicit` and whose time is an
+age or a `stated` record — an answer to a card, a telling, or this resolver
+carrying their own stated date) is placed by what they said. Among their
+statements the best-supported one is taken and then NARROWED to the finest of
+theirs that fits wholly inside it. This resolver's inferences, and every other
+reading that fits, join that placement's provenance as supporting evidence;
+nothing inferred narrows it; a reading that does not fit stays the rival the
+contradiction card names. A node nobody dated in their own words reconciles
+exactly as before. The finding `answer_is_the_placement` names what stood aside.
+
+**THE GRAIN** (`chronology.age_statement_record`, `AGE_STATEMENT_GRAIN`): an age
+is held at the birthday's MONTH and a band reads as the stretch it names, so
+*"19-21 years old"* from 1954-06-04 draws 1973-06/1976-06, not
+1973-06-04/1976-06-03. A hedged age keeps its hedged point year.
+
+Measured on a scratch clone of the owner's vault (generation 193, 1265 nodes):
+the placement rule changes WHO places exactly one node — the father's mission,
+basis `anchor` → `age`, same window — because a stated date already outranked
+this resolver's `anchor`/`inferred` readings (`chronology.BASIS_WEIGHT`); only
+v345's agreeing-age path let an inference be drawn over the person's words.
+The grain rule re-draws 47 age-placed nodes (and three windows anchored on
+them) from day to month bounds. Cards 66 → 66 by kind; the v340/v342 audit is
+empty.
+
+## Amendment (v360, owner 2026-09-25, `timeline-rules:20`): look before asking
+
+*"For each of these questions … if I ask you directly right now, I bet you
+could answer them, so I'm wondering why they're not getting answered."*
+(owner, 2026-09-25). On a scratch clone of his vault (generation 192), every
+one of the 42 open `precision_gap` cards sat on a node with no placement, and
+this resolver had never looked at most of them. Five rules, one seat each:
+
+1. **Look at everything that can become a card**
+   (`resolver.LOOK_AT_EVERYTHING_THAT_CAN_BECOME_A_CARD`). An undated landmark
+   entry — a residence or school he named on a ladder — is planned with its own
+   record as the story (`_landmark_record_text`) and the passages the index
+   returns for it. The residence exclusion stays for everything else; a
+   residence is only ever dated by a verified, cited answer
+   (`AN_ESTIMATE_NEVER_PLACES_A_RESIDENCE`).
+2. **What he calls them decides a bare name**
+   (`identity_resolution.WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`,
+   `roster_relations.with_called_by`). *"When I talk about James, I'm talking
+   about my son … I call my dad Dad and his dad Grandpa."* A roster person his
+   own tellings call by a relationship word or nickname does not compete for
+   their first name. Replaces v335/v357's "bare James always asks" wherever the
+   census is read; `CALCULATION_RULE_VERSION` → `timeline-rules:20`.
+3. **A family moment is dated from its own person**
+   (`resolver.A_FAMILY_MOMENT_IS_DATED_FROM_ITS_OWN_PERSON`). A node about one
+   roster person other than the owner is planned; when the vault records that
+   person's birth, the prompt carries their age and US school-year tables as a
+   citable `family:<ref>` passage, and a bare age handle is arithmetic off their
+   birthday. `SUBJECT_AGE_NOT_OWNER` still refuses the owner's table for them.
+   The owner's own school years ride the spine too (`grade_table`). Where the
+   dated moment is DRAWN is still the fold's axis rule.
+4. **Never ask what was not looked at**
+   (`temporal_publication.NEVER_ASK_WHAT_WAS_NOT_LOOKED_AT`). A `precision_gap`
+   on an unplaced node, and an anchor-handle `missing_anchor`, are drawn only
+   when this ledger holds `unknown` with a question for the node (for an
+   anchor: for a node it would place). The summary lists every withheld card
+   as `not_yet_looked_at` (the resolver's plan is its queue),
+   `looked_at_without_a_question`, or `never_plannable`. A vault with no ledger
+   at all — no resolver has ever run there — is left alone. This is a display
+   decision at the v316 seam: the ledger is still read, never folded.
+5. **A grounded estimate places, as the system's inference**
+   (`resolver.AN_ESTIMATE_PLACES_AS_THE_SYSTEMS_INFERENCE`). *"almost nothing
+   needs precision of more than a month … That's what the list is for, so I can
+   move things around later."* v325's "an estimate is NEVER a claim" is
+   amended: an estimate that passes `verify_estimate` and rests on a
+   `residence` / `tenure` / `life_stage` / `related_moment` / `spine` line is
+   FILED through the store exactly as a resolved answer is — a `date` claim,
+   `basis: inferred`, record confidence `conjectural`, `fact_key: estimate`,
+   month grain or coarser. **The ledger is still not a derivation input:** the
+   claim is, filed and correctable like any other; the ledger only remembers
+   which claim it filed (`placed_by_estimate`) so a later verified answer or a
+   different estimate supersedes it. It never overrides or narrows what the
+   person said: a node they dated is never estimated onto, and
+   `temporal_timeline.AN_ANSWER_IS_THE_PLACEMENT` ranks it below every statement
+   of theirs, so a statement it does not fit is the contradiction card the fold
+   already mints. A placed-by-estimate moment stays reachable for revisits, as a
+   wide resolver reading does.
+6. **A duplicate names its survivor** (`resolver.A_DUPLICATE_NAMES_ITS_SURVIVOR`).
+   A `duplicate` verdict carries `duplicate_of: node:…` as a field (read from
+   the reason when exactly one node id is named there), verified to be a node
+   the projection holds and not the moment itself, kept on the ledger row and
+   in the retraction's reason. `resolver.duplicate_redirects` hands it to
+   `answer_placement.drawn_node_ref` as a second redirect map beside
+   `node_aliases`, read only for an id the projection no longer draws — so an
+   answer to the retired duplicate's card follows it onto the survivor
+   (v359's `AN_ANSWER_OUTLIVES_ITS_CARD`) instead of `card_node_not_drawn`.
+
+Measured on `/private/tmp/lifehug-rig-lookfirst` (lifehug/dave at `bee67821`,
+generation 192 → 196, 1265 nodes): one pass `resolver.py --execute
+--estimate-missing --limit 80 --concurrency 3` (19 items: 16 resolved, 9
+unknown of which 7 placed by estimate, 4 not an event, 1 handle bound; 11
+standing ledger estimates placed with no model call), then `place-answers`.
+Placed nodes 1220 → 1256. Cards 66 → 19: `precision_gap` 43 → 3,
+`missing_anchor` 6 → 0, `identity_uncertain` 1 → 0, `place_ambiguous` 2 → 1,
+`contradiction` 12 → 13 (the v359 pet-snake answer, below), `relation_word` 2.
+The v340/v342 audit: `lost` and `drawn_at_an_alias` empty; `moved` is the one
+node v359 already named, *"Dad wins pet snake at fair"*, placed by the owner's
+own answer through `place-answers`.
+
+## Amendment (v360, owner 2026-09-25, `timeline-rules:21`): one place, one landmark
+
+*"The mention must not become a new place. It should be tied to a landmark I've
+given. This also gives you the fidelity I care about. If I say Arizona, I really
+just care that it's in Arizona. If I say Kristen or BJ's house, I'm giving you
+the higher fidelity that I care about."* (owner, 2026-09-25).
+
+**THE WRITE SEAT** (`landmark_identity.ONE_PLACE_ONE_LANDMARK`,
+`timeline.save_landmark`): a record that is the same thing as an entry of its
+domain (residences: `place_ref`, normalised address, street + city, or a house
+name within one voice-to-text edit and the same Soundex; schools: the name core
+without generic words, or the one school at that level; work: the employer;
+people: the person) is filed as a telling OF that entry, a merge record in
+`sources/landmarks/merges/` naming its source, and adds only what is new. With
+no date and nothing new it is not written. A city or state he has stays in is
+never a residence, and someone else's residence is never his.
+
+**THE DRAW SEAT** (`landmark_projection.load_landmark_sources`): every merge is
+applied where every reader gets its entries, so the drawing, the participation
+episodes and the write seat agree. A merged telling joins the stay its merge
+names, its old episode id is published in `node_aliases`, and a reading that
+froze that id is carried onto the entry he gave.
+
+**THE FOLD** (`temporal_timeline._place_anchor_resolver`): an anchor handle no
+node answers to, or an undated telling's own words, that names one of his places
+binds to his stays at the level he named: a house is that stay, "left <house>"
+its end month, a city or state the union of his stays there. This resolver is
+the fallback, not the rule.
+
+`lifehug.py landmark-fold-duplicates` (dry run first) folds what landed before.
+
+## Amendment (v360 follow-up, owner 2026-09-25, `timeline-rules:23`)
+
+Five follow-ups to the day's rulings, each a named rule.
+
+1. **An estimate wider than about five years stays a window**
+   (`resolver.AN_ESTIMATE_WIDER_THAN_FIVE_YEARS_STAYS_A_WINDOW`,
+   `MAX_PLACING_ESTIMATE_MONTHS = 60`; owner agreed). Rule 5 above files a
+   grounded estimate as a placement; one wider than 60 months (both end months
+   counted) is not filed. It stays the node's `probable_window`, the ledger row
+   says `estimate_not_placed: wider_than_five_years`, a standing estimate filed
+   before the cap is retired by the no-model backfill, and a card over such a
+   window is kept only when the moment is hot — a keystone, or one other
+   placements wait on (`temporal_publication.A_WIDE_ESTIMATE_IS_ASKED_ONLY_WHEN_HOT`).
+2. **An estimate never retires his words**
+   (`resolver.AN_ESTIMATE_NEVER_RETIRES_HIS_WORDS`). Filing an estimate through
+   `file_resolution` also superseded the moment's raw handle, so retiring the
+   estimate left the node with nothing and it vanished. An estimate is filed
+   beside the handle (`retire_handles=False`); a verified answer still retires it.
+3. **An answer with no end is ongoing** (`resolver.AN_ANSWER_WITH_NO_END_IS_ONGOING`).
+   The prompt's contract says `"latest": … or null for ongoing`; `_record` read
+   a null end as a point. A null end is an open span (`<start>/..`, the way a
+   residence's `ongoing` is drawn) when the moment is span-shaped — a
+   span-like kind, or words that say it lasted — and `..`, "present", "now" or
+   "ongoing" is open whatever the shape.
+4. **A place mention is an outer bound**
+   (`temporal_timeline.A_PLACE_MENTION_IS_AN_OUTER_BOUND`). The fold's place
+   anchor bounds a moment by the stays it names; the other evidence on the node
+   narrows it (a handle's own event beside its place — "earning Eagle Scout in
+   Arizona" binds the Eagle Scout AND Arizona — an age, a span), and the
+   propagation clips a window to the stays it touches, never across a gap.
+   Evidence wholly inside a gap stands and is reported
+   (`place_mention_outside_stays`). A date he gave is never narrowed by a place.
+5. **A house lived in twice spans both stays**
+   (`temporal_timeline.A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`). A house with
+   several stays resolves to their union (one envelope, the gaps in its
+   provenance as `place_anchor_gap`); a bare mention of one place with several
+   stays is placed across them and asks no `place_ambiguous` card; a moment
+   that names the place only beside other evidence ("after the Williams
+   foreclosure") is left to that evidence.
+
+And at the write seat, a **relative place**
+(`landmark_identity.A_RELATION_WORDS_HOME_IS_A_RELATIVE_PLACE`): an undated
+residence record named by a relation word's possessive ("dad's house") is not
+written (`relative_place_reference`), an existing one folds as a MENTION
+through `landmark-fold-duplicates` (never into a stay he gave), and such words
+never resolve to a stay in the fold. A dated one keeps his dates.
+

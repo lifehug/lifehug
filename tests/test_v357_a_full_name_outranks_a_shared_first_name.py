@@ -40,6 +40,16 @@ Three rules, each guarded here and each SEEN failing with its guard removed:
 And v335's protection is unmoved: a bare *James* still binds nobody and still
 asks — and it may not start borrowing the brother's birthday now that the alias
 row no longer happens to stand beside him.
+
+AMENDED (v360, owner 2026-09-25, `timeline-rules:22`): *"When I talk about
+James, I'm talking about my son. My dad's name was James too, and so was his
+dad. I call my dad Dad and his dad Grandpa, so when I'm talking about James,
+I'm talking about my son."* His brother Anthon James goes by AJ. Where the
+fold has read what he calls each person (`roster_relations.with_called_by`),
+a bare *James* is his son (`identity_resolution
+.WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`); the ask below still stands for a
+roster whose census was never read, and for tellings that call none of them
+anything else.
 """
 
 from __future__ import annotations
@@ -343,9 +353,52 @@ class AnAliasRowIsNeverACandidateTests(unittest.TestCase):
 # --------------------------------------------------------------------------
 
 
+#: What his own tellings say about the four Jameses, verbatim in shape: he
+#: calls his father Dad, his grandfather Grandpa and his brother AJ.
+HIS_TELLINGS = ("My dad drove us to the lake.", "Grandpa taught me to fish.",
+                "AJ and I built the ramps.", "my son James loves baseball")
+
+
+def with_his_words(snapshot: dict) -> dict:
+    return rr.with_called_by(snapshot, HIS_TELLINGS)
+
+
 class ABareFirstNameStillBindsNobodyTests(unittest.TestCase):
+    """v335's census, as amended by the owner's ruling of 2026-09-25 — *"when
+    I'm talking about James, I'm talking about my son"*. The asks pinned here
+    are the rosters whose census of what he calls people was never read."""
+
+    def test_bare_james_is_his_son_by_what_he_calls_the_others(self):
+        """The ruling itself: "I call my dad Dad and his dad Grandpa", and his
+        brother goes by AJ — so of the four who answer to James, only the son
+        is somebody he calls James."""
+        record = resolve("James", with_his_words(the_roster()))
+        self.assertEqual(record.resolution, "same")
+        self.assertEqual(record.resolved_ref, SON_REF)
+        self.assertEqual(record.reason, ir.WHAT_HE_CALLS_THEM_REASON)
+
+    def test_the_census_is_read_from_his_words_not_the_roster_alone(self):
+        census = rr.called_by_census(the_roster(), HIS_TELLINGS)
+        self.assertEqual(census[FATHER_REF], ("dad", "my dad"))
+        self.assertEqual(census[GRANDFATHER_REF], ("grandpa",))
+        self.assertEqual(census[BROTHER_REF], ("AJ",))
+        self.assertEqual(census[SON_REF], ())
+        # Words he never used decide nothing: the rule stands aside.
+        silent = resolve("James", rr.with_called_by(the_roster(), ("James went fishing.",)))
+        self.assertEqual(silent.reason, ir.SHARED_NAME_TOKEN_REASON)
+
+    def test_two_people_he_genuinely_calls_james_still_ask(self):
+        """"A bare name still asks only when two people he genuinely calls by
+        that name both fit": call the brother nothing else, and the question is
+        between the brother and the son — never the father or grandfather."""
+        record = resolve("James", rr.with_called_by(
+            the_roster(), ("My dad drove us.", "Grandpa taught me.")))
+        self.assertEqual(record.resolution, "uncertain")
+        self.assertEqual(record.reason, ir.SHARED_NAME_TOKEN_REASON)
+        self.assertEqual(sorted(refs_of(record)), sorted([BROTHER_REF, SON_REF]))
 
     def test_bare_james_asks_about_the_four_real_people_and_never_the_pointer(self):
+        # A roster with no census read: v335's ask, unchanged.
         record = resolve("James")
         self.assertEqual(record.resolution, "uncertain")
         self.assertEqual(record.reason, ir.SHARED_NAME_TOKEN_REASON)
@@ -367,13 +420,34 @@ class ABareFirstNameStillBindsNobodyTests(unittest.TestCase):
     def test_a_bare_james_does_not_borrow_the_brothers_birthday(self):
         """Once the pointer row stopped standing beside him, the brother alone
         held the key "james" — and a story the card is still asking about took
-        his 1990 birth. The census is what keeps that key ambiguous."""
+        his 1990 birth. The census is what keeps that key ambiguous — on a
+        vault whose tellings call none of the Jameses anything else."""
         _, ambiguous = tt._person_key_index(the_roster())
         self.assertIn("james", ambiguous)
         result = derive([ducks_age()])
         node = node_labelled(result, "James's duck-chasing rowboat antics")
         self.assertIsNone(node.get("best_temporal_value"))
         self.assertIn(ducks_age()["claim_id"], age_findings(result))
+
+    def test_with_his_words_the_ducks_are_his_sons_at_two(self):
+        """The owner's ruling in the fold: his tellings call the father Dad,
+        the grandfather Grandpa and the brother AJ, so the bare "James" of the
+        rowboat is his son — measured from the son's 2013-05-10, never the
+        brother's 1990 birth."""
+        words = [claim(claim_type="occurrence", subject_mention="self", event_kind="moment",
+                       source=f"classification:answers-z{n}#{n:012x}", event_mention=f"telling {n}",
+                       quote=text)
+                 for n, text in enumerate(HIS_TELLINGS[:3], start=1)]
+        key_index, ambiguous = tt._person_key_index(with_his_words(the_roster()))
+        self.assertNotIn("james", ambiguous)
+        self.assertIn("james", key_index)
+        self.assertIn(SON_REF, key_index["james"])
+        result = derive([ducks_age(), *words])
+        node = node_labelled(result, "James's duck-chasing rowboat antics")
+        self.assertEqual(node["subject_refs"], [SON_REF])
+        best = node["best_temporal_value"]
+        self.assertEqual((best["earliest"], best["latest"], best["basis"]),
+                         ("2015-05", "2016-05", "age"))
 
     def test_a_name_only_one_person_answers_to_still_anchors(self):
         _, ambiguous = tt._person_key_index(the_roster())
@@ -399,7 +473,8 @@ class TheMissionIsMeasuredFromHisFathersBirthTests(unittest.TestCase):
     def test_the_age_band_is_measured_from_1954_06_04(self):
         best = self.node["best_temporal_value"]
         self.assertEqual((best["earliest"], best["latest"], best["basis"]),
-                         ("1973-06-04", "1976-06-03", "age"))
+                         # timeline-rules:19: at the grain he said it — the month.
+                         ("1973-06", "1976-06", "age"))
         self.assertEqual(age_findings(self.result), [])
 
     def test_before_this_release_the_same_claim_had_no_anchor(self):
@@ -432,7 +507,7 @@ class TheMissionIsMeasuredFromHisFathersBirthTests(unittest.TestCase):
 class TheRuleVersionMovesTests(unittest.TestCase):
 
     def test_calculation_rule_version(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
 
 
 if __name__ == "__main__":

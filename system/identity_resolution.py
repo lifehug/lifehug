@@ -189,6 +189,34 @@ A_GENERATIONAL_SUFFIX_IS_ONE_GENERATION = (
     "with the suffixed one"
 )
 
+#: v360 (owner, 2026-09-25) (`timeline-rules:20`). WHAT HE CALLS THEM DECIDES A BARE
+#: NAME. The owner, verbatim: *"When I talk about James, I'm talking about my
+#: son. My dad's name was James too, and so was his dad. I call my dad Dad and
+#: his dad Grandpa, so when I'm talking about James, I'm talking about my son."*
+#: His brother Anthon James goes by AJ. v335/v357 kept every bare "James" as a
+#: question because four roster people answer to the word; his ruling is that
+#: they do not all answer to it IN HIS MOUTH. A person he calls by a
+#: relationship word (Dad, Grandpa) or by a nickname (AJ) — a spelling of
+#: theirs on the roster that his own tellings actually use — does not compete
+#: for their first name. The census is read from his vault by
+#: `roster_relations.with_called_by` and carried on each roster row as
+#: :data:`CALLED_BY_FIELD`; with no census on the snapshot, nothing changes.
+WHAT_HE_CALLS_THEM_REASON = "what_he_calls_them"
+
+WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME = (
+    "a bare given name means the one person the owner actually calls by it: a "
+    "person he calls by a relationship word (Dad, Grandpa) or by a nickname "
+    "(AJ) — a roster spelling of theirs his own tellings use — does not compete "
+    "for their first name; a bare name still asks when two or more people he "
+    "genuinely calls by it are left, and when the census was never read"
+)
+
+#: The derived, never-stored roster field the census rides on: the spellings
+#: of this person, other than their given name, that the owner's tellings use
+#: (``["dad", "my dad"]``, ``["AJ"]``). Present-and-empty means "looked, he
+#: uses none"; absent means "never looked" and the rule stands aside.
+CALLED_BY_FIELD = "called_by"
+
 #: Named deterministic rules, in ladder order. These are the values ``reason``
 #: may take when the resolver reached the verdict on its own.
 DETERMINISTIC_REASONS = (
@@ -197,6 +225,7 @@ DETERMINISTIC_REASONS = (
     "unique_name",
     FULL_NAME_REASON,
     RELATIONSHIP_QUALIFIED_REASON,
+    WHAT_HE_CALLS_THEM_REASON,
     SHARED_NAME_TOKEN_REASON,
     "ambiguous_candidates",
     "no_candidate",
@@ -850,6 +879,11 @@ class RosterIndex:
     #: is ``(("james", "taylor"), 0)``; the alias ``"James"`` is no full name
     #: at all. :func:`full_name_candidates` reads it.
     full_names: dict = field(default_factory=dict)
+    #: v360 (:data:`WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`). The refs the
+    #: owner calls by something other than their given name, per the census
+    #: on the snapshot, and whether that census was read at all.
+    called_otherwise: frozenset = frozenset()
+    usage_read: bool = False
 
     def size(self) -> int:
         return len(self.refs)
@@ -934,6 +968,8 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
     by_given_name: dict = {}
     relationship_of: dict = {}
     full_names: dict = {}
+    called_otherwise: set = set()
+    usage_read = False
     for entity in entities:
         if not isinstance(entity, dict):
             continue
@@ -945,6 +981,10 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
             continue
         ref = entity_ref(kind, slug or name)
         refs.setdefault(ref, name or slug)
+        if CALLED_BY_FIELD in entity:
+            usage_read = True
+            if entity.get(CALLED_BY_FIELD):
+                called_otherwise.add(ref)
 
         relationship = normalized_mention_key(entity.get(ROSTER_RELATIONSHIP_KEY))
         if relationship:
@@ -1005,6 +1045,8 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
         by_given_name={k: tuple(dict.fromkeys(v)) for k, v in by_given_name.items()},
         relationship_of=relationship_of,
         full_names={k: tuple(v) for k, v in full_names.items()},
+        called_otherwise=frozenset(called_otherwise),
+        usage_read=usage_read,
     )
 
 
@@ -1279,14 +1321,52 @@ def record_from_dict(value: object) -> ResolutionRecord | None:
 # --------------------------------------------------------------------------
 
 
+#: v360 (owner, 2026-09-25), the right person. The classifier writes the owner in the
+#: third person — *"the narrator's father"*, *"author's father"*, *"the
+#: author's mother"* — and those mentions matched no roster key, so the owner's
+#: father's death was drawn with the raw subject ``the narrator's father``
+#: beside ``person/james-taylor``. The owner's own possessive is his "my": the
+#: owner word (:data:`OWNER_POSSESSIVE_WORDS`) and its ``'s`` are read as
+#: ``my``, and the mention is looked up again — only when the words as written
+#: found nobody, so a roster that spells the phrase itself still wins.
+OWNER_POSSESSIVE_WORDS = frozenset({"narrator", "author", "owner"})
+
+AN_OWNERS_POSSESSIVE_IS_HIS_MY = (
+    "the owner's own possessive is his 'my': \"the narrator's father\" and "
+    "\"author's father\" are looked up as \"my father\" when the words as "
+    "written name nobody"
+)
+
+
+def owner_possessive_as_my(mention: object) -> str:
+    """``"my father"`` for ``"the narrator's father"``, else ``""``
+    (:data:`AN_OWNERS_POSSESSIVE_IS_HIS_MY`)."""
+    tokens = normalized_mention_key(mention).split()
+    if tokens[:1] == ["the"]:
+        tokens = tokens[1:]
+    if len(tokens) < 3 or tokens[0] not in OWNER_POSSESSIVE_WORDS or tokens[1] != "s":
+        return ""
+    return " ".join(["my", *tokens[2:]])
+
+
 def candidates_for(mention: object, roster: object, *, entity_type: object = None) -> tuple[dict, ...]:
     """Every roster entity that answers to this mention, exactly.
 
     Exposed so a caller — including the Wave C model rung, which must choose
     *among the deterministic candidate set* rather than invent a name — can see
     the running without committing to a verdict. Exact keys only: no
-    containment, no edit distance, no first-name folding.
+    containment, no edit distance, no first-name folding. The owner's own
+    possessive reads as his "my" (:data:`AN_OWNERS_POSSESSIVE_IS_HIS_MY`).
     """
+    found = _exact_candidates(mention, roster, entity_type=entity_type)
+    if not found:
+        mine = owner_possessive_as_my(mention)
+        if mine:
+            found = _exact_candidates(mine, roster, entity_type=entity_type)
+    return found
+
+
+def _exact_candidates(mention: object, roster: object, *, entity_type: object = None) -> tuple[dict, ...]:
     index = roster_index(roster, entity_type=entity_type)
     key = normalized_mention_key(mention)
     text = collapsed_text(mention)
@@ -1362,7 +1442,77 @@ def shared_name_token_refs(
         return ()
     index = roster_index(roster, entity_type=entity_type)
     bearers = index.refs_named(names[0])
-    return bearers if len(bearers) > 1 else ()
+    if len(bearers) <= 1:
+        return ()
+    # v360 (:data:`WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`): the people he
+    # calls something else are not in the running. One left is not shared; two
+    # or more left is a question between THOSE; none left is the old question.
+    called = called_name_refs(bearers, index)
+    if len(called) == 1:
+        return ()
+    return called if len(called) > 1 else bearers
+
+
+def called_name_refs(bearers: object, roster: object, *,
+                     entity_type: object = None) -> tuple[str, ...]:
+    """The bearers of a given name the owner genuinely calls by it
+    (:data:`WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`), in the order given.
+
+    Every bearer when the roster carries no census — the rule stands aside
+    rather than guessing on a vault nobody read.
+    """
+    index = roster_index(roster, entity_type=entity_type)
+    refs = tuple(collapsed_text(ref) for ref in bearers or () if collapsed_text(ref))
+    if not index.usage_read:
+        return refs
+    return tuple(ref for ref in refs if ref not in index.called_otherwise)
+
+
+def what_he_calls_them_ref(mention: object, roster: object, *,
+                           entity_type: object = None) -> str:
+    """The ONE person a bare given name means by what the owner calls people,
+    or ``""`` (:data:`WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`).
+
+    Only for a BARE mention several people answer to (v335's census), and only
+    when the census of what he calls them was read and leaves exactly one.
+    """
+    names, relations = mention_tokens(mention)
+    if relations or len(names) != 1:
+        return ""
+    index = roster_index(roster, entity_type=entity_type)
+    bearers = index.refs_named(names[0])
+    if len(bearers) <= 1 or not index.usage_read:
+        return ""
+    called = called_name_refs(bearers, index)
+    return called[0] if len(called) == 1 else ""
+
+
+def other_name_spellings(entity: object) -> tuple[str, ...]:
+    """The spellings on one roster row that are NOT their given name: a
+    relationship word or phrase (``dad``, ``my grandpa``) or a nickname — an
+    alias whose first name word is none of the words of the person's own name
+    (``AJ``, ``AJ Taylor``). The candidates the census counts in his tellings
+    (:data:`WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`); an alias carrying the
+    given name itself (``James``, ``James Taylor (Dad)``) is never one.
+    """
+    if not isinstance(entity, dict):
+        return ()
+    own, _ = mention_tokens(entity.get("name"))
+    own_words = set(own) | set(mention_tokens(entity.get("slug"))[0])
+    raw = entity.get(ROSTER_ALIAS_KEY) or ()
+    if isinstance(raw, (str, bytes)):
+        raw = [raw]
+    out: list[str] = []
+    for alias in raw:
+        text = collapsed_text(alias)
+        if not text:
+            continue
+        names, relations = mention_tokens(text)
+        if not names and relations:
+            out.append(text)
+        elif names and names[0] not in own_words and len(names[0]) >= 2:
+            out.append(text)
+    return tuple(dict.fromkeys(out))
 
 
 def _in_order(inner: tuple, outer: tuple) -> bool:
@@ -1498,6 +1648,30 @@ def resolve_mention(
     :func:`resolution_record`.
     """
     matches = candidates_for(mention, roster, entity_type=entity_type)
+
+    if not (len(matches) == 1 and matches[0]["basis"] == "exact_ref"):
+        # v360 (:data:`WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`), read BEFORE
+        # an exact key: the brother's roster row carries the alias "James", and
+        # an exact alias match is exactly the reading the owner overruled — he
+        # calls his brother AJ, and "James" is his son.
+        decided = what_he_calls_them_ref(mention, roster, entity_type=entity_type)
+        if decided:
+            index = roster_index(roster, entity_type=entity_type)
+            return resolution_record(
+                {
+                    "mention": mention,
+                    "candidates": [
+                        RosterCandidate(
+                            ref=decided, name=index.name_of(decided), basis="name"
+                        ).to_dict()
+                    ],
+                    "resolution": "same",
+                    "resolved_ref": decided,
+                    "reason": WHAT_HE_CALLS_THEM_REASON,
+                    "evidence_ref": evidence_ref,
+                },
+                now=now,
+            )
 
     if len(matches) == 1:
         only = matches[0]
@@ -2045,6 +2219,15 @@ __all__ = [
     "RELATIONSHIP_QUALIFIED_REASON",
     "ROSTER_RELATIONSHIP_KEY",
     "SHARED_NAME_TOKEN_REASON",
+    "WHAT_HE_CALLS_THEM_REASON",
+    "WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME",
+    "AN_OWNERS_POSSESSIVE_IS_HIS_MY",
+    "OWNER_POSSESSIVE_WORDS",
+    "owner_possessive_as_my",
+    "CALLED_BY_FIELD",
+    "called_name_refs",
+    "other_name_spellings",
+    "what_he_calls_them_ref",
     "FULL_NAME_REASON",
     "A_FULL_NAME_OUTRANKS_A_SHARED_FIRST_NAME",
     "A_GENERATIONAL_SUFFIX_IS_ONE_GENERATION",

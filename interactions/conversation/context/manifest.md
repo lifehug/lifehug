@@ -15,24 +15,33 @@ diverge.
 2. **`behavior`** — `prompt/behavior.md`, verbatim.
 3. **`examples`** — `prompt/examples.md`, verbatim (or a relevant subset
    if truncation is needed to fit `budget.examples`).
+4. **`how_words_arrive`** — `interactions/how-words-arrive.md`, verbatim
+   (`lifehug_core.load_how_words_arrive`). The ONE framework-wide statement
+   of how the person's words reach us: conversational telling rather than
+   testimony, and voice-to-text transcription (misheard words, mangled
+   names, "19 to 21" arriving as "1921"). It is not this interaction's own
+   file: the story classifier, the resolver, the landmark recorder,
+   listener, reading and offer leaves and the timeline's era recorder read
+   the same file, so it is stated once and never pasted into N prompts.
+   Stable and shared across users, so it belongs to the cached prefix.
 
 `[per-user]`
 
-4. **`profile`** block — this user's name, active focuses, escalation
+5. **`profile`** block — this user's name, active focuses, escalation
    states (which topics are cleared for deeper follow-up per behavior.md
    rule 7), and rumination cooldowns (which topic categories are currently
    backed off per behavior.md rule 13).
 
 `[per-session, but drawing on the whole vault]`
 
-5. **`record`** blocks — topic-relevant answers and wiki excerpts, a
+6. **`record`** blocks — topic-relevant answers and wiki excerpts, a
    timeline span for the topic in play, entities in play, and candidate
    sibling threads. Every excerpt carries its provenance ID in the form
    `[A14b, 2026-03-14] "…"` so that insight claims can cite receipts
    (behavior.md rule 6 requires this — an insight claim with no
    provenance ID behind it is not backed by anything real).
 
-6. **`asking_supply`** block (issue #168, ADR 0016) — the session focus's
+7. **`asking_supply`** block (issue #168, ADR 0016) — the session focus's
    own held bank questions: a header line naming the focus and its
    answered/total count, followed by up to `knob.asking_supply_top_k`
    unanswered questions from that focus's categories, each rendered
@@ -54,7 +63,7 @@ diverge.
 
 `[per-session, this session only]`
 
-7. **`session`** block — the active arc card (see
+8. **`session`** block — the active arc card (see
    `plan/arc-templates.md`), a rolling summary of the session so far, and
    the recent turns verbatim (not summarized — the model needs the exact
    words just exchanged).
@@ -73,14 +82,14 @@ diverge.
 
 `[last]`
 
-8. **`turn_instructions`** — `prompt/turn-instructions.md` with its
+9. **`turn_instructions`** — `prompt/turn-instructions.md` with its
    `{placeholder}` slots filled for this specific turn.
 
 ## Rules
 
 - **Token budgets** come from `interaction.yaml`'s `budget.*` keys, one
   per block above (`budget.identity`, `budget.behavior`, `budget.examples`,
-  `budget.profile`, `budget.record`, `budget.asking_supply`,
+  `budget.how_words_arrive`, `budget.profile`, `budget.record`, `budget.asking_supply`,
   `budget.session`, `budget.turn_instructions`). A runtime that assembles a
   block over its budget must trim that block, not silently ignore the
   budget — but a trim is never a bare character cut (v201, lifehug#206).
@@ -102,7 +111,7 @@ diverge.
   wasn't given the receipts in the first place — provenance IDs are how
   the context recipe makes that possible.
 - **Order is cache-optimal.** Stable blocks (`identity`, `behavior`,
-  `examples`) come first because they don't change turn to turn within a
+  `examples`, `how_words_arrive`) come first because they don't change turn to turn within a
   session and are shared across users — this lets provider-side prompt
   caching do its job. Per-user and per-session blocks come next because
   they change slowly. `turn_instructions` comes last because it changes

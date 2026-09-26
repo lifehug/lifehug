@@ -466,6 +466,130 @@ _create_or_keep = create_or_keep
 #: nothing re-spells it.
 QUESTION_CONTEXT_KEY = "question_context"
 
+#: One place, one landmark's text twin (owner 2026-09-25): a promoted message
+#: whose words are ALREADY an existing source's body (or one answer block of
+#: it) is the same telling arriving again. The promotion records which source
+#: it repeats under this key: additive, never part of the identity digest.
+REPEATS_SOURCE_KEY = "repeats_source"
+A_REPEATED_TEXT_IS_LINKED_TO_ITS_FIRST_ARRIVAL = (
+    "a message whose words are exactly an existing source's body, or one "
+    "answer block of it, is promoted with a link to that source; its reading "
+    "still files, because a second reader can hear moments the first missed, "
+    "and joining the two readings' moments is the binder's decision"
+)
+
+#: Shorter than this and two messages sharing words ("yes", "about 1995")
+#: are not one telling repeated.
+REPEAT_MIN_CHARS = 200
+
+#: Where a repeated body is looked for: prompted answers and every promoted
+#: or manual source.
+REPEAT_SEARCH_DIRS = ("answers", "sources")
+
+
+def _repeat_normalized(text: object) -> str:
+    lines = [line for line in str(text or "").splitlines()
+             if not line.lstrip().startswith("#") and not line.startswith("**")]
+    return " ".join(" ".join(lines).split()).casefold()
+
+
+def _repeat_blocks(text: object) -> set[str]:
+    """The body whole, and each block between headings (an answer file's
+    "## Additional Answer N" sections), each normalized. A repeat is one of
+    these EXACTLY — never a sentence that happens to appear inside a longer
+    telling, which is a different telling that quotes it."""
+    blocks: list[list[str]] = [[]]
+    for line in str(text or "").splitlines():
+        if line.lstrip().startswith("#"):
+            blocks.append([])
+            continue
+        blocks[-1].append(line)
+    found = {_repeat_normalized("\n".join(block)) for block in blocks}
+    found.add(_repeat_normalized(text))
+    return {block for block in found if block}
+
+
+def repeated_source(vault_root: str | Path, message_text: object, *,
+                    exclude: object = ()) -> str | None:
+    """The vault-relative path of an existing source whose body already holds
+    these exact words, or ``None``. :data:`A_REPEATED_TEXT_IS_LINKED_TO_ITS_FIRST_ARRIVAL`.
+
+    Whitespace and case are folded; headings are ignored, so an answer file's
+    "## Additional Answer" blocks each count. A prompted answer is preferred
+    over a promoted message, then the lexically first path, so the answer is
+    the same on every machine.
+    """
+    wanted = _repeat_normalized(message_text)
+    if len(wanted) < REPEAT_MIN_CHARS:
+        return None
+    root = _vault_root(vault_root)
+    skip = {str(item) for item in (exclude or ())}
+    found: list[str] = []
+    for top in REPEAT_SEARCH_DIRS:
+        base = root / top
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.md")):
+            if path.is_symlink() or not path.is_file():
+                continue
+            relative = path.relative_to(root).as_posix()
+            if relative in skip:
+                continue
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            _meta, body = split_frontmatter(content)
+            if wanted in _repeat_blocks(body):
+                found.append(relative)
+    if not found:
+        return None
+    found.sort(key=lambda rel: (not rel.startswith("answers/"), rel))
+    return found[0]
+
+
+def find_repeated_messages(vault_root: str | Path) -> list[dict]:
+    """Every promoted message that repeats an EARLIER source's words. Read-only.
+
+    ``[{"source_path", "repeats", "captured_at"}]`` sorted by path. The
+    repeated source must be a prompted answer or captured earlier, so of two
+    identical messages only the later one is the repeat. An answer to a card
+    (a ``conversation:cand:work_item:`` session) is never one.
+    """
+    root = _vault_root(vault_root)
+    corpus: list[tuple[str, str, str]] = []
+    for top in REPEAT_SEARCH_DIRS:
+        base = root / top
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.md")):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                meta, body = split_frontmatter(path.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+            corpus.append((path.relative_to(root).as_posix(),
+                           collapsed_text((meta or {}).get("captured_at")),
+                           _repeat_blocks(body)))
+    found = []
+    for relative, captured, blocks in corpus:
+        body = max(blocks, key=len) if blocks else ""
+        if not relative.startswith(f"{CONVERSATION_SOURCES_DIR}/") or len(body) < REPEAT_MIN_CHARS:
+            continue
+        meta, _ = split_frontmatter(read_store_text(vault_root, relative) or "")
+        if collapsed_text((meta or {}).get("session_ref")).startswith("conversation:cand:work_item:"):
+            continue
+        earlier = sorted(
+            (other for other, when, text in corpus
+             if other != relative and body in text
+             and (other.startswith("answers/") or (when and captured and when < captured))),
+            key=lambda rel: (not rel.startswith("answers/"), rel))
+        if earlier:
+            found.append({"source_path": relative, "repeats": earlier[0],
+                          "captured_at": captured})
+    return found
+
 
 def promotion_digest(message_text: object, metadata: object = None) -> str:
     """The sha256 that identifies one utterance (:data:`PROMOTION_IDENTITY_KEYS`).
@@ -618,7 +742,8 @@ def promote_conversational_source(
         "source_path": relative,
         "content_sha256": payload_sha256(payload),
     }
-    for key in ("session_ref", "turn_ref", "speaker", QUESTION_CONTEXT_KEY):
+    for key in ("session_ref", "turn_ref", "speaker", QUESTION_CONTEXT_KEY,
+                REPEATS_SOURCE_KEY):
         value = collapsed_text(meta.get(key))
         if value:
             frontmatter[key] = value

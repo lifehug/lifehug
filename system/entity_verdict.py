@@ -110,6 +110,12 @@ from lifehug_core import read_json, write_json  # noqa: E402
 
 VERDICTS = ("graduate", "never", "clear")
 
+#: `entity_roster.GRANDPARENT_SIDE_FIELD`'s two values (the side card's own).
+GRANDPARENT_SIDE_FIELD = "grandparent_side"
+GRANDPARENT_SIDES = ("maternal", "paternal")
+#: The word he calls this person by ("Grandpa", "Mom") — v360, owner 2026-09-25.
+RELATION_WORD_FIELD = "relation_word"
+
 
 class EntityVerdictError(ValueError):
     """A verdict that must not apply — unknown type/slug, or `graduate` on
@@ -258,7 +264,9 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
                   died_basis: object = None,
                   maps_to: str | None = None,
                   ensure: bool = False,
-                  name: str | None = None) -> dict:
+                  name: str | None = None,
+                  grandparent_side: str | None = None,
+                  relation_word: str | None = None) -> dict:
     """Apply one verdict — and, since v190, one round of identity facts — to
     one roster entity, atomically. Returns the entity's post-verdict record
     (the same dict object written to disk). Raises `EntityVerdictError` on
@@ -267,7 +275,14 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
     Every identity argument is optional and defaults to "unchanged", so a
     pre-v190 three-argument call behaves exactly as it did. The whole call is
     ONE roster write, and re-running the identical call converges to the
-    identical roster bytes."""
+    identical roster bytes.
+
+    v360 (owner, 2026-09-25) (the person form): ``grandparent_side``
+    (``maternal``/``paternal``, or ``""`` to clear — `entity_roster
+    .GRANDPARENT_SIDE_FIELD`, the field the side card asks for) and
+    ``relation_word`` (the word he calls them by — "Grandpa", "Mom"; ``""``
+    clears) ride the same one write. Both are settled identity fields a
+    refresh keeps."""
     if entity_type not in ENTITY_TYPES:
         raise EntityVerdictError(
             f"unknown entity type: {entity_type!r} (known: {', '.join(ENTITY_TYPES)})")
@@ -280,6 +295,13 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
         "born": parse_person_date("born", born, born_basis),
         "died": parse_person_date("died", died, died_basis),
     }
+    if grandparent_side is not None:
+        grandparent_side = str(grandparent_side).strip().casefold()
+        if grandparent_side not in GRANDPARENT_SIDES + ("",):
+            raise EntityVerdictError(
+                f"grandparent side must be one of {', '.join(GRANDPARENT_SIDES)}")
+    if relation_word is not None:
+        relation_word = " ".join(str(relation_word).split())[:40]
     maps_to = str(maps_to).strip() if maps_to is not None else None
     if maps_to == "":
         raise EntityVerdictError("--maps-to requires a slug")
@@ -343,6 +365,14 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
         target["relationship"] = relationship
     if living is not None:
         target["living"] = living
+    for field_name, value in ((GRANDPARENT_SIDE_FIELD, grandparent_side),
+                              (RELATION_WORD_FIELD, relation_word)):
+        if value is None:
+            continue
+        if value:
+            target[field_name] = value
+        else:
+            target.pop(field_name, None)
     # v217 (person dates): derived never overwrites stated; a same-basis
     # restatement wins by recency. `_preferred_date` is the whole rule.
     for date_field in PERSON_DATE_FIELDS:
@@ -435,6 +465,11 @@ def main(argv: list[str] | None = None) -> int:
                              "named (v202). Never page-eligible on creation.")
     parser.add_argument("--name", metavar="NAME",
                         help="With --ensure: the person's name on the created entry")
+    parser.add_argument("--grandparent-side", dest="grandparent_side", default=None,
+                        help="maternal|paternal (empty clears) — whose side a "
+                             "grandparent is on")
+    parser.add_argument("--relation-word", dest="relation_word", default=None,
+                        help="The word the owner calls this person by (Grandpa, Mom)")
     parser.add_argument("--json", action="store_true", help="Print the result as JSON")
     args = parser.parse_args(argv)
 
@@ -447,6 +482,8 @@ def main(argv: list[str] | None = None) -> int:
             died=args.died, died_basis=args.died_basis,
             maps_to=args.maps_to,
             ensure=args.ensure, name=args.name,
+            grandparent_side=args.grandparent_side,
+            relation_word=args.relation_word,
         )
     except EntityVerdictError as exc:
         print(f"✗ entity-verdict: {exc}", file=sys.stderr)

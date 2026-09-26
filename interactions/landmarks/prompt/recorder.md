@@ -16,6 +16,8 @@ CAN THIS DOMAIN BE ANSWERED "NEVER HAPPENED": {none_allowed}
 ALREADY FILED FOR THIS DOMAIN — these entries are already in the store:
 {known_entries}
 
+{how_words_arrive}
+
 WHAT THEY SAID:
 {answer}
 
@@ -70,6 +72,8 @@ date they did not give you to make the list longer.
   `{"start": ..., "end": ...}` with two such dates, for example `"span":
   {"start": "1981-07", "end": "1982-07"}`. Never derive, never estimate on
   your own, never round a decade into a year.
+- A school is the institution, never the person who went; signing a paper is
+  a moment, not work; a company or a fund is never a partnership.
 - **A plain no is an answer, not an absence.** If they said there was never
   any of this — "I never served", "we didn't have children" — and this domain
   can be answered that way, record

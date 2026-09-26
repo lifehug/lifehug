@@ -1338,3 +1338,72 @@ def introduced_relation_verdict(row: object, *, recorded: object = None,
             "reason": "a generational suffix is one generation from the name it suffixes",
         },
     }
+
+
+# --------------------------------------------------------------------------
+# v360 (owner, 2026-09-25) (`timeline-rules:20`): what he calls them
+# --------------------------------------------------------------------------
+
+#: `identity_resolution.WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`, the census
+#: half. The owner: *"I call my dad Dad and his dad Grandpa, so when I'm
+#: talking about James, I'm talking about my son."* A roster row's
+#: relationship words and nicknames (`identity_resolution
+#: .other_name_spellings`) are only candidates; a spelling counts as what he
+#: calls that person when HIS OWN TELLINGS use it, whole-word and
+#: case-insensitive. Read fresh on every fold from the texts it is handed —
+#: never stored on the roster, so it can never go stale against his words.
+CALLED_BY_IS_READ_FROM_HIS_TELLINGS = (
+    "a roster person's relationship word or nickname counts as what the owner "
+    "calls them only when his own tellings use it; the census is derived on "
+    "every fold and never stored"
+)
+
+
+def _spelling_re(spelling: str) -> re.Pattern:
+    words = [re.escape(word) for word in re.split(r"\s+", spelling.strip()) if word]
+    return re.compile(r"(?<![\w.])" + r"\s+".join(words) + r"(?![\w])", re.IGNORECASE)
+
+
+def called_by_census(roster: object, texts: object) -> dict[str, tuple[str, ...]]:
+    """``person ref -> the other-name spellings his tellings use`` for every
+    person row (alias rows are pointers and are skipped). Pure: ``texts`` is
+    whatever the caller read the tellings as."""
+    corpus = "\n".join(str(text) for text in texts or () if text)
+    out: dict[str, tuple[str, ...]] = {}
+    for entity in roster_entities(roster):
+        if ir.is_alias_row(entity):
+            continue
+        used = tuple(
+            spelling for spelling in ir.other_name_spellings(entity)
+            if corpus and _spelling_re(spelling).search(corpus)
+        )
+        out[entity_ref("person", entity)] = used
+    return out
+
+
+def with_called_by(roster: object, texts: object) -> object:
+    """A COPY of a person roster snapshot with each person row carrying
+    `identity_resolution.CALLED_BY_FIELD` from :func:`called_by_census`.
+
+    Any other shape (a non-person snapshot, a list of snapshots, ``()``) is
+    returned unchanged except that every person snapshot inside a list is
+    annotated too, so the fold's three roster shapes all carry it.
+    """
+    if isinstance(roster, dict):
+        entities = roster.get("entities")
+        if collapsed_text_of(roster.get("type")) not in ("", "person") or not isinstance(entities, list):
+            return roster
+        census = called_by_census(roster, texts)
+        rows = []
+        for entity in entities:
+            if isinstance(entity, dict) and not ir.is_alias_row(entity):
+                entity = {**entity, ir.CALLED_BY_FIELD: list(census.get(entity_ref("person", entity), ()))}
+            rows.append(entity)
+        return {**roster, "entities": rows}
+    if isinstance(roster, (list, tuple)):
+        if roster and all(isinstance(item, dict) and item.get("entities") is None
+                          and not collapsed_text_of(item.get("type")) for item in roster):
+            annotated = with_called_by({"type": "person", "entities": list(roster)}, texts)
+            return annotated["entities"]
+        return [with_called_by(item, texts) if isinstance(item, dict) else item for item in roster]
+    return roster

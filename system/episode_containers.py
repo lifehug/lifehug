@@ -40,6 +40,13 @@ point-dated moment ("Charlee was born 2010-12-21") is not a container, which is
 the whole difference between the two Etherfuse rows the design names as
 containers and the four hundred moments that are not.
 
+**A span that contains by place** (lifehug#413,
+:data:`A_MISSION_CONTAINS_ITS_PLACES`). A mission's members are linked to it
+the way a residence's are — by place — plus the mission named as the event's
+setting, never by the word "mission" resolving the mission's own roster entity.
+It is the same rung with a wider grouping key (:func:`place_span_keys`), not a
+second path.
+
 **Containment never narrows a date** (§5.3, untouched). A member gets the
 POSSIBLE OUTER RANGE `episode_fold_contract.possible_outer_range` already
 defines — never stored, never narrower than the span, never an anchor, never a
@@ -60,6 +67,7 @@ Synthetic data only; this module NEVER references any real vault.
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -222,6 +230,9 @@ class EntityIndex:
     keys: dict = field(default_factory=dict)      # {(token, …): (ref, …)}
     names: dict = field(default_factory=dict)     # {ref: display name}
     by_first: dict = field(default_factory=dict)  # {first token: ((tokens, refs), …)}
+    #: ``{person ref: the roster's own birth record}`` — what
+    #: `episode_binder.A_BIRTH_DATED_ELSEWHERE_IS_NOT_THEIRS` reads.
+    born: dict = field(default_factory=dict)
 
     def size(self) -> int:
         return len(self.names)
@@ -242,6 +253,59 @@ def _key_is_a_name(tokens: Sequence[str]) -> bool:
     return len(tokens[0]) >= ENTITY_KEY_MIN_CHARS
 
 
+#: v360 (owner, 2026-09-25), the right person. The owner: *"When I talk about James,
+#: I'm talking about my son."* The fold has read a bare given name through
+#: `identity_resolution.WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME` since
+#: timeline-rules:20; the BINDER's roster index did not. His brother's roster
+#: row carries the alias ``James`` (the family landmark "James (AJ)", filed with
+#: ``who: "James"``), so the key ``james`` named AJ alone and every "James born"
+#: telling — his son's — was bucketed as AJ's birth. The owner's rig: "Charlee
+#: and James arrive" (his daughter's and his son's births, 2010-12-21 to
+#: 2013-05-10) was bound to AJ's 1990-03-20 birth and asked as a contradiction.
+#:
+#: Two readings, one seat. A ONE-WORD person key several people answer to
+#: means the one person the owner calls by it, when the census was read and
+#: leaves exactly one (and nobody when it leaves several, as the fold does);
+#: and a bare name is BARE — a one-word person key matched inside a longer
+#: person name ("James" inside "James Edwin Taylor Sr") is that longer name's
+#: word, never a second person.
+A_BARE_NAME_IN_THE_BINDER_IS_WHO_HE_CALLS_BY_IT = (
+    "the binder's roster index reads a bare given name the way the fold does: "
+    "a one-word person key several people answer to names the one person the "
+    "owner calls by it, or nobody when several are left; and a one-word person "
+    "key inside a longer person name the same words spell is that name's word, "
+    "never a second person"
+)
+
+
+def _bare_person_keys(keys: dict, snapshot: object, kind: object) -> None:
+    """:data:`A_BARE_NAME_IN_THE_BINDER_IS_WHO_HE_CALLS_BY_IT`, in place.
+
+    Only for a person snapshot the census was read on
+    (`roster_relations.with_called_by`); an unread roster changes nothing."""
+    if collapsed_text(kind) not in ("", "person"):
+        return
+    index = ir.roster_index(snapshot, entity_type=kind)
+    if not getattr(index, "usage_read", False):
+        return
+    for tokens in list(keys):
+        if len(tokens) != 1:
+            continue
+        refs = {ref for ref in keys[tokens]
+                if collapsed_text(ref).startswith("person/")}
+        bearers = index.refs_named(tokens[0])
+        if len(bearers) <= 1:
+            continue
+        called = ir.called_name_refs(bearers, index)
+        others = set(keys[tokens]) - refs
+        if len(called) == 1:
+            keys[tokens] = others | {called[0]}
+        elif len(called) > 1 and refs:
+            keys[tokens] = others | (refs & set(called))
+        if not keys[tokens]:
+            del keys[tokens]
+
+
 def entity_index(rosters: object) -> EntityIndex:
     """Build the read model from ``{entity_type: snapshot}`` (or a sequence).
 
@@ -249,7 +313,8 @@ def entity_index(rosters: object) -> EntityIndex:
     becomes a lookup key; a key that could not be a name
     (:func:`_key_is_a_name`) is dropped, because a three-letter theme matching
     every sentence that says "joy" would make the signal noise rather than
-    evidence.
+    evidence. A bare given name reads through what the owner calls people
+    (:data:`A_BARE_NAME_IN_THE_BINDER_IS_WHO_HE_CALLS_BY_IT`).
     """
     if isinstance(rosters, EntityIndex):
         return rosters
@@ -260,16 +325,30 @@ def entity_index(rosters: object) -> EntityIndex:
 
     keys: dict[tuple, set] = {}
     names: dict[str, str] = {}
+    born: dict[str, object] = {}
     for kind, snapshot in pairs:
         index = ir.roster_index(snapshot, entity_type=kind)
+        if collapsed_text(kind) in ("", "person"):
+            import roster_relations as rr  # noqa: PLC0415
+
+            for entity in rr.roster_entities(snapshot):
+                if isinstance(entity, dict) and not ir.is_alias_row(entity) \
+                        and isinstance(entity.get("born"), dict):
+                    record = chrono.from_dict(entity["born"])
+                    if record is not None:
+                        born.setdefault(rr.entity_ref("person", entity), record)
         for ref, name in index.refs.items():
             names.setdefault(ref, name)
+        mine: dict[tuple, set] = {}
         for table in (index.by_name_key, index.by_alias_key):
             for key, refs in table.items():
                 tokens = _key_tokens(key)
                 if not _key_is_a_name(tokens):
                     continue
-                keys.setdefault(tokens, set()).update(refs)
+                mine.setdefault(tokens, set()).update(refs)
+        _bare_person_keys(mine, snapshot, kind)
+        for tokens, refs in mine.items():
+            keys.setdefault(tokens, set()).update(refs)
 
     by_first: dict[str, list] = {}
     for tokens in sorted(keys):
@@ -278,15 +357,21 @@ def entity_index(rosters: object) -> EntityIndex:
         keys={tokens: tuple(sorted(refs)) for tokens, refs in keys.items()},
         names=names,
         by_first={token: tuple(rows) for token, rows in by_first.items()},
+        born=born,
     )
 
 
-def load_entity_index(vault_root: str | Path) -> EntityIndex:
+def load_entity_index(vault_root: str | Path, *, texts: object = None) -> EntityIndex:
     """Every roster a vault holds, as one index. The only impure read here.
 
     A missing roster is an EMPTY roster, never an error: a vault that has never
     curated its people simply scores one signal fewer, exactly the way a host
     that supplies no era memberships does.
+
+    ``texts`` are the owner's own words (`temporal_timeline.telling_texts`);
+    given, the person roster carries the census of what he calls each person
+    (`roster_relations.with_called_by`) the way the fold's does
+    (:data:`A_BARE_NAME_IN_THE_BINDER_IS_WHO_HE_CALLS_BY_IT`).
     """
     rosters: dict[str, object] = {}
     for kind in ENTITY_ROSTER_TYPES:
@@ -300,11 +385,16 @@ def load_entity_index(vault_root: str | Path) -> EntityIndex:
             payload = json.loads(text)
         except (TypeError, ValueError):
             continue
+        if kind == "person" and texts is not None:
+            import roster_relations as rr  # noqa: PLC0415
+
+            payload = rr.with_called_by(payload, texts)
         rosters[kind] = payload
     return entity_index(rosters)
 
 
-def resolve_entities(text: object, index: object) -> frozenset:
+def resolve_entities(text: object, index: object, *,
+                     named_otherwise: object = ()) -> frozenset:
     """Every roster entity a piece of the person's own words names.
 
     The match is a contiguous token run — "Started Etherfuse" names
@@ -329,7 +419,8 @@ def resolve_entities(text: object, index: object) -> frozenset:
     tokens = _key_tokens(text)
     if not tokens:
         return frozenset()
-    found: set[str] = set()
+    capitals = _capitals(text)
+    runs: list[tuple[int, int, tuple]] = []
     for position, token in enumerate(tokens):
         for key, refs in index.by_first.get(token, ()):  # type: ignore[union-attr]
             end = position + len(key)
@@ -337,16 +428,128 @@ def resolve_entities(text: object, index: object) -> frozenset:
                 continue
             if ir._not_a_simple_relation(tokens, position, end):
                 continue
-            found.update(refs)
+            runs.append((position, end, tuple(refs)))
+    found: set[str] = set()
+    for start, end, refs in runs:
+        if end - start == 1 and all(collapsed_text(ref).startswith("person/") for ref in refs) \
+                and any(other_start <= start and end <= other_end
+                        and other_end - other_start > 1
+                        and any(collapsed_text(ref).startswith("person/") for ref in other_refs)
+                        for other_start, other_end, other_refs in runs):
+            # :data:`A_BARE_NAME_IN_THE_BINDER_IS_WHO_HE_CALLS_BY_IT`: "James"
+            # inside "James Edwin Taylor Sr" is that name's word.
+            continue
+        if end - start == 1 and tokens[start] in ir.RELATIONSHIP_MENTION_WORDS and (
+                _named_otherwise(tokens, capitals, end, refs, index)
+                or (start and tokens[start - 1] in SIDE_WORDS)
+                or _relation_family(tokens[start]) & frozenset(named_otherwise or ())):
+            # :data:`A_RELATION_WORD_WITH_ANOTHER_NAME_IS_NOT_THEM`.
+            continue
+        found.update(refs)
     return frozenset(found)
+
+
+#: v360 (owner, 2026-09-25), the right person. The owner calls BOTH his grandfathers
+#: "Grandpa", and the roster files the word on one of them (James Edwin Taylor
+#: Sr.). *"Grandpa Beauchamp"* — his mother's father, who died at 66 — resolved
+#: to his father's father through the word alone, and "Grandfather's death at
+#: 66" read as a telling of Taylor Sr.'s death. A relationship word followed by
+#: a NAME the person it names does not bear (capitalized, ending the mention
+#: or possessive, not a relationship word, none of that person's name words)
+#: names someone else: the fold's own
+#: relationship-qualified rung (every name word borne by the candidate), read
+#: at the token run.
+A_RELATION_WORD_WITH_ANOTHER_NAME_IS_NOT_THEM = (
+    "a relationship word followed by a name the person it would name does not "
+    "bear, or after a side word (maternal, paternal), names somebody else: "
+    "'Grandpa Beauchamp' and 'my maternal grandfather' are not the grandpa the "
+    "roster files the bare word on"
+)
+
+
+#: A side qualifier makes the relationship word a different relation: "my
+#: maternal grandfather" is not whichever grandfather the roster files the bare
+#: word on (:data:`A_RELATION_WORD_WITH_ANOTHER_NAME_IS_NOT_THEM`). The owner's
+#: "Grandpa died at 66", subject "narrator's maternal grandfather", is his
+#: mother's father; the roster's "grandfather" is his father's.
+SIDE_WORDS = frozenset({"maternal", "paternal"})
+
+
+def _capitals(text: object) -> tuple:
+    """Per normalized token: did the word it came from start with a capital?
+    ``()`` when the per-word split does not line up with the whole key."""
+    out: list[bool] = []
+    for word in collapsed_text(text).split():
+        for _token in _key_tokens(word):
+            out.append(word[:1].isupper())
+    return tuple(out)
+
+
+def _named_otherwise(tokens: Sequence[str], capitals: Sequence[bool], end: int,
+                     refs: Sequence[str], index: "EntityIndex") -> bool:
+    """:data:`A_RELATION_WORD_WITH_ANOTHER_NAME_IS_NOT_THEM` for the run ending at ``end``."""
+    if end >= len(tokens) or len(capitals) != len(tokens) or not capitals[end]:
+        return False
+    word = tokens[end]
+    if word in ir.RELATIONSHIP_MENTION_WORDS or word in ir.MENTION_QUALIFIER_WORDS or word == "s":
+        return False
+    # A name, read as one: the capitalized word ends the mention or is
+    # possessive ("Grandpa Beauchamp", "Grandpa Beauchamp's death") — never a
+    # title-cased verb ("Father Dies Of COVID").
+    if end + 1 < len(tokens) and tokens[end + 1] != "s":
+        return False
+    for ref in refs:
+        if not collapsed_text(ref).startswith("person/"):
+            return False
+        name = index.name_of(ref) or collapsed_text(ref).split("/", 1)[1].replace("-", " ")
+        if word in _key_tokens(name):
+            return False
+    return True
 
 
 def resolve_entity_set(texts: object, index: object) -> frozenset:
-    """:func:`resolve_entities` over several pieces of words, unioned."""
+    """:func:`resolve_entities` over several pieces of words, unioned.
+
+    One telling's words are read together for
+    :data:`A_RELATION_WORD_WITH_ANOTHER_NAME_IS_NOT_THEM`: once one of them
+    says "Grandpa Beauchamp", a bare "grandfather" in another is that man too,
+    and names nobody the roster knows by the word."""
+    texts = tuple(texts or ())
+    otherwise = _families_named_otherwise(texts, index)
     found: set[str] = set()
-    for text in texts or ():
-        found |= resolve_entities(text, index)
+    for text in texts:
+        found |= resolve_entities(text, index, named_otherwise=otherwise)
     return frozenset(found)
+
+
+#: The ungendered words a relationship family shares with its sibling family
+#: ("grandparent" is in both grandpa's and grandma's) — never the discriminator.
+_SHARED_RELATION_WORDS = frozenset({"grandparent", "parent", "child", "sibling",
+                                    "spouse", "grandchild"})
+
+
+def _relation_family(word: object) -> frozenset:
+    family = frozenset(ir.RELATIONSHIP_MENTION_WORDS.get(collapsed_text(word), ()))
+    return (family - _SHARED_RELATION_WORDS) or family
+
+
+def _families_named_otherwise(texts: Sequence[object], index: object) -> frozenset:
+    """The relationship families some text qualifies with another name."""
+    if not isinstance(index, EntityIndex) or not index.by_first:
+        return frozenset()
+    out: set[str] = set()
+    for text in texts:
+        tokens = _key_tokens(text)
+        capitals = _capitals(text)
+        for position, token in enumerate(tokens):
+            if token not in ir.RELATIONSHIP_MENTION_WORDS:
+                continue
+            for key, refs in index.by_first.get(token, ()):  # type: ignore[union-attr]
+                if len(key) == 1 and (
+                        (position and tokens[position - 1] in SIDE_WORDS)
+                        or _named_otherwise(tokens, capitals, position + 1, refs, index)):
+                    out |= _relation_family(token)
+    return frozenset(out)
 
 
 #: The tell that one fact was about to be counted twice, and the fix.
@@ -498,6 +701,183 @@ def date_inside_span(member: object, span: object) -> bool:
 
 
 # --------------------------------------------------------------------------
+# A span that contains by PLACE (lifehug#413, v360, owner 2026-09-25)
+# --------------------------------------------------------------------------
+#
+# v356 made a mission a span that "can contain stays and moments", and the
+# first time the owner's mission was filed the rung grouped it on the ONE key
+# it has: a shared roster entity. His mission resolves `period/switzerland-
+# mission`, whose roster aliases include the bare word "mission", so 83 undated
+# tellings joined because they said the word — "Painted for father's company
+# before mission", "AJ left on his mission", "Founding Etherfuse's
+# accessibility mission" and his own "I have not served in the military…" —
+# while NOT ONE of his MTC, Solothurn, Friedrichshafen, Luzern, Schlieren or
+# Wetzikon stays did, because a stay's entities are its places.
+#
+# The fix is the grouping KEY, not a second path. A residence already contains
+# a moment by sharing its place; a mission contains one the same way, through
+# the places it covers, plus the one link a residence does not need — the
+# mission named as the event's setting ("on my mission", "mission president",
+# "Residence at the MTC"). Everything below is read by
+# :func:`containers` / :func:`containment_rows` and nothing else.
+
+#: The span kinds that contain by place and setting, and the landmark domain
+#: whose v356 vocabulary (`questions.yaml` `mentioned_by`) names them. The
+#: kind's own roster entity is NOT one of its keys: a word that names the span
+#: is a mention, not a link.
+PLACE_CONTAINING_SPAN_KINDS = {"mission": "missions"}
+
+A_MISSION_CONTAINS_ITS_PLACES = (
+    "a mission span contains a stay or moment through a link, never through the "
+    "word: (1) its place is a MISSION PLACE — the MTC, an area a telling of his "
+    "mission sets it in ('Mission assignment to Solothurn'), a stay the "
+    "mission's own tenure was dated from, or a place the mission entry names "
+    "('Where did you serve?'); (2) it names the mission as its SETTING ('on my "
+    "mission', 'during the mission', 'mission president', 'mission service', "
+    "'Residence at the MTC'), in the owner's own story and not before, after or "
+    "on the way home; or (3) it is DATED wholly inside the span in a region the "
+    "mission covers (the country or state of a mission place, or one the entry "
+    "names). An undated telling joins only by (1) or (2); a dated one only when "
+    "its whole interval lies inside the span. The mission's own roster entity "
+    "is not a key, so 'I have not served in the military', 'the wrong mission "
+    "statement' and 'AJ left on his mission' never join"
+)
+
+#: The setting vocabulary, as whole-word patterns over
+#: `temporal_claims.normalized_mention_key` text ("two-year" -> "two year").
+#: Closed on purpose: the phrase must PUT the event inside the mission.
+_SPAN_MODIFIERS = r"(?:(?:my|his|her|our|their|the|a|an|two year|2 year|full time|lds|church|mormon)\s+)*"
+MISSION_SETTING_PATTERNS = (
+    rf"\b(?:on|during|while on|while serving)\s+{_SPAN_MODIFIERS}missions?\b",
+    r"\bmission\s+(?:president|presidents|companion|companions|assignment|"
+    r"assignments|area|areas|field|transfer|transfers|office|home|service|"
+    r"district|zone|leader|leaders|apartment|rules)\b",
+    r"\bmissionary\s+(?:companion|companions|apartment)\b",
+)
+#: The MTC is where every LDS mission begins — a mission place by name.
+#: Kept apart from the setting patterns because it names a PLACE (Provo), and
+#: the city it sits in is not an area the mission covers.
+MISSION_MTC_PATTERNS = (r"\bmtc\b", r"\bmissionary training center\b")
+#: Words that put the event OUTSIDE the span it names — before it, after it,
+#: or on the way home from it — in the same mention.
+MISSION_OUTSIDE_PATTERNS = (
+    r"\b(?:before|after|prior|pre|post|prep|prepare|prepares|prepared|preparing|"
+    r"preparation|return|returns|returned|returning)\b",
+    r"\b(?:home|back)\s+from\b",
+    r"\bfrom\s+" + _SPAN_MODIFIERS + r"missions?\b",
+    r"\b(?:came|come|coming|comes)\s+home\b",
+)
+
+_SETTING_RES = {"mission": tuple(re.compile(p) for p in MISSION_SETTING_PATTERNS)}
+_MTC_RES = {"mission": tuple(re.compile(p) for p in MISSION_MTC_PATTERNS)}
+_OUTSIDE_RES = tuple(re.compile(p) for p in MISSION_OUTSIDE_PATTERNS)
+
+#: The subject tokens that are the OWNER (`identity_resolution`'s own list).
+_OWNER_TOKENS = frozenset(
+    token for mention in ir.OWNER_SUBJECT_MENTIONS for token in mention.split()
+    if token != "the"
+)
+
+SETTING_KEY_PREFIX = "setting/"
+REGION_KEY_PREFIX = "region/"
+PLACE_ENTITY_PREFIX = "place/"
+
+
+def about_someone_else(subject_mentions: Sequence[str], subject_entities: object) -> bool:
+    """Is this telling about someone else's life — AJ's mission, Dad's?
+
+    True when a subject mention resolved to a person and no subject mention
+    names the owner. "narrator's family" and "Neil Hall / the narrator" are
+    still his; "A.J. (brother)" is not.
+    """
+    for mention in subject_mentions or ():
+        if set(normalized_mention_key(mention).split()) & _OWNER_TOKENS:
+            return False
+    return any(collapsed_text(ref).startswith("person/") for ref in subject_entities or ())
+
+
+def span_settings(mentions: Sequence[str], subject_mentions: Sequence[str] = (),
+                  subject_entities: object = ()) -> tuple:
+    """``(settings, mtc)`` — the place-containing span kinds a telling names as
+    its SETTING, and the ones it names by their MTC. Both frozensets of kinds.
+
+    Per mention: a mention that says "before/after/home from" the mission is
+    outside it whatever else it says. A telling about someone else's life
+    names no setting of the owner's span.
+    """
+    if about_someone_else(subject_mentions, subject_entities):
+        return frozenset(), frozenset()
+    settings: set = set()
+    mtc: set = set()
+    for text in mentions or ():
+        key = normalized_mention_key(text)
+        if not key or any(pattern.search(key) for pattern in _OUTSIDE_RES):
+            continue
+        for kind in PLACE_CONTAINING_SPAN_KINDS:
+            if any(pattern.search(key) for pattern in _MTC_RES.get(kind, ())):
+                mtc.add(kind)
+                settings.add(kind)
+            elif any(pattern.search(key) for pattern in _SETTING_RES.get(kind, ())):
+                settings.add(kind)
+    return frozenset(settings), frozenset(mtc)
+
+
+def names_span_kind(texts: Sequence[str]) -> frozenset:
+    """The place-containing kinds v356's own vocabulary says these words name
+    ("Missionary - The Church of Jesus Christ…" names a mission)."""
+    import landmarks_interaction as li  # noqa: PLC0415 - the vocabulary's home
+
+    domains = li.mentioned_domains(tuple(texts or ()))
+    return frozenset(kind for kind, domain in PLACE_CONTAINING_SPAN_KINDS.items()
+                     if domain in domains)
+
+
+#: R7's provenance clause (`landmark_offer.inherit_dates`): "a unit named
+#: inside a stay belongs to that stay and is dated by it". Read back so a
+#: mission tenure the recorder dated FROM a stay names that stay as a mission
+#: place — the link the vault already made, never a new one.
+_R7_STAY_CLAUSE = re.compile(r"^from the dates of the (.+) stay$")
+
+
+def dated_from_stays(claims: Sequence[object]) -> tuple:
+    """The stay subjects a telling's own dates were inherited from (R7)."""
+    found: list = []
+    for claim in claims or ():
+        row = claim if isinstance(claim, dict) else {}
+        value = row.get("temporal_value") if isinstance(row.get("temporal_value"), dict) else {}
+        for cell in value.get("provenance") or ():
+            text = collapsed_text((cell or {}).get("claim") if isinstance(cell, dict) else "")
+            match = _R7_STAY_CLAUSE.match(text)
+            if match and match.group(1) not in found:
+                found.append(match.group(1))
+    return tuple(found)
+
+
+def place_refs(view: object) -> frozenset:
+    """Every roster PLACE a telling is about or names."""
+    refs = set(getattr(view, "entities", frozenset()) or ())
+    refs |= set(getattr(view, "place_entities", frozenset()) or ())
+    return frozenset(ref for ref in refs if collapsed_text(ref).startswith(PLACE_ENTITY_PREFIX))
+
+
+def place_in_words(ref: object, said: str, index: object) -> bool:
+    """Does a padded, normalized text name this roster place — its whole name
+    or its first part ("Solothurn" for "Solothurn, Switzerland")?"""
+    name = index.name_of(ref) if isinstance(index, EntityIndex) else ""
+    parts = [normalized_mention_key(part) for part in collapsed_text(name).split(",")]
+    wanted = {normalized_mention_key(name), parts[0] if parts else ""} - {""}
+    return any(len(word) >= ENTITY_KEY_MIN_CHARS and f" {word} " in said for word in wanted)
+
+
+def region_of(ref: object, index: object) -> str:
+    """The region a roster place sits in: the last part of its name
+    ("Solothurn, Switzerland" -> "switzerland"; "…, Mesa, Arizona" -> "arizona")."""
+    name = index.name_of(ref) if isinstance(index, EntityIndex) else ""
+    parts = [part for part in collapsed_text(name).split(",") if part.strip()]
+    return normalized_mention_key(parts[-1]) if len(parts) > 1 else ""
+
+
+# --------------------------------------------------------------------------
 # Containers
 # --------------------------------------------------------------------------
 
@@ -518,6 +898,17 @@ class Container:
     #: `military` for a participation episode, whatever the telling declared
     #: otherwise. Read by the uniqueness rule below and by nothing else.
     event_kind: str = ""
+    #: lifehug#413. For a :data:`PLACE_CONTAINING_SPAN_KINDS` span only: the
+    #: mission places it contains through, and ``(place, region)`` for every
+    #: roster place in a region it covers (read only for a member DATED inside
+    #: the span).
+    places: frozenset = frozenset()
+    region_places: frozenset = frozenset()
+    regions: frozenset = frozenset()
+
+    @property
+    def contains_by_place(self) -> bool:
+        return self.event_kind in PLACE_CONTAINING_SPAN_KINDS
 
     def display_span(self) -> str:
         try:
@@ -536,6 +927,8 @@ class Container:
             "span_open_ended": self.open_ended,
             "opened_by": self.opened_by,
             "container_kind": self.kind,
+            **({"places": sorted(self.places), "regions": sorted(self.regions)}
+               if self.contains_by_place else {}),
         }
 
 
@@ -571,6 +964,8 @@ def containment_reason(rule_id: object, container: Container, *,
 VIEW_FIELDS_READ = (
     "telling_ref", "label", "eligible", "dated", "bounds", "event_kind",
     "entities", "subject_entities", "span", "span_open_ended",
+    # lifehug#413, read for a place-containing span only.
+    "place_entities", "settings", "setting_places", "stretch", "landmark_words",
 )
 UNIT_FIELDS_READ = ("key", "kind", "members", "episode_id", "adopted", "authority")
 
@@ -606,8 +1001,42 @@ CONTAINER_SKIPPED_WHILE_BINDING = (
 )
 
 
+def _span_places(kind: str, container_view: object, views: Mapping[str, object],
+                 index: object) -> tuple:
+    """``(places, regions, region_places)`` for one place-containing span.
+
+    :data:`A_MISSION_CONTAINS_ITS_PLACES` leg (1), gathered from the vault's
+    own words: every place a telling of this kind's setting names
+    (``setting_places``, filed by the binder), and every place the span's own
+    landmark entry names ("Where did you serve?"). The regions are those
+    places' regions plus any region word the entry itself says
+    ("Switzerland Zurich Mission" -> switzerland).
+    """
+    places: set = set()
+    for view in views.values():
+        for row_kind, ref in getattr(view, "setting_places", ()) or ():
+            if row_kind == kind:
+                places.add(ref)
+    words = tuple(getattr(container_view, "landmark_words", ()) or ())
+    places |= {ref for ref in resolve_entity_set(words, index)
+               if ref.startswith(PLACE_ENTITY_PREFIX)}
+    regions = {region_of(ref, index) for ref in places} - {""}
+    known = {}
+    if isinstance(index, EntityIndex):
+        for ref in index.names:
+            if ref.startswith(PLACE_ENTITY_PREFIX):
+                region = region_of(ref, index)
+                if region:
+                    known.setdefault(region, set()).add(ref)
+    said = " " + " ".join(normalized_mention_key(word) for word in words) + " "
+    regions |= {region for region in known if f" {region} " in said}
+    region_places = frozenset((ref, region) for region in regions
+                              for ref in known.get(region, ()))
+    return frozenset(places), frozenset(regions), region_places
+
+
 def containers(views: Mapping[str, object], units: Mapping[str, object],
-               *, excluded_refs: object = ()) -> dict:
+               *, excluded_refs: object = (), entity_index: object = None) -> dict:
     """``{container_key: Container}`` — every stretch a member could go inside.
 
     A unit is a container when one of its tellings OPENS A SPAN in the person's
@@ -632,7 +1061,11 @@ def containers(views: Mapping[str, object], units: Mapping[str, object],
             view = views.get(ref)
             if view is None or getattr(view, "span", None) is None:
                 continue
-            if not getattr(view, "subject_entities", frozenset()):
+            # lifehug#413: a place-containing span is nameable by its places
+            # and its setting, so it needs no roster entity of its own.
+            if (not getattr(view, "subject_entities", frozenset())
+                    and collapsed_text(getattr(view, "event_kind", ""))
+                    not in PLACE_CONTAINING_SPAN_KINDS):
                 continue
             opened_by = ref
             span = view.span
@@ -647,6 +1080,11 @@ def containers(views: Mapping[str, object], units: Mapping[str, object],
                 entities |= set(getattr(view, "subject_entities", frozenset()) or ())
         episode_id = collapsed_text(getattr(unit, "episode_id", "")) or \
             container_episode_id(opened_by)
+        event_kind = collapsed_text(getattr(views.get(opened_by), "event_kind", ""))
+        places = regions = region_places = frozenset()
+        if event_kind in PLACE_CONTAINING_SPAN_KINDS:
+            places, regions, region_places = _span_places(
+                event_kind, views.get(opened_by), views, entity_index)
         found[key] = Container(
             key=key,
             episode_id=episode_id,
@@ -656,9 +1094,10 @@ def containers(views: Mapping[str, object], units: Mapping[str, object],
             opened_by=opened_by,
             open_ended=open_ended,
             kind=collapsed_text(getattr(unit, "kind", "")) or "prospective",
-            event_kind=collapsed_text(
-                getattr(views.get(opened_by), "event_kind", "")
-            ),
+            event_kind=event_kind,
+            places=places,
+            region_places=region_places,
+            regions=regions,
         )
     return found
 
@@ -805,16 +1244,20 @@ def containment_rows(views: Mapping[str, object], found: Mapping[str, Container]
                 continue
             dated = bool(getattr(view, "dated", False))
             bounds = getattr(view, "bounds", None)
+            if container.contains_by_place:
+                # A stay's two ends intersect to nothing, so its own stretch is
+                # the interval that has to fit (lifehug#413).
+                bounds = getattr(view, "stretch", None) or bounds
             inside = date_inside_span(bounds, container.span) if dated else False
             rule_id = ""
             shared: frozenset = frozenset()
             if stamp and resolves_to(stamp, container):
                 rule_id = RULE_ID_QUESTION_CONTEXT
             else:
-                shared = frozenset(
-                    set(getattr(view, "entities", frozenset()) or ())
-                    & set(container.entities)
-                )
+                shared = (place_span_keys(view, container, inside=inside)
+                          if container.contains_by_place else frozenset(
+                              set(getattr(view, "entities", frozenset()) or ())
+                              & set(container.entities)))
                 if shared and (not dated or inside):
                     rule_id = RULE_ID_ENTITY_SPAN
             if not rule_id:
@@ -851,6 +1294,22 @@ def containment_rows(views: Mapping[str, object], found: Mapping[str, Container]
     rows = _unique_entity_rows(rows, found, refused=ambiguities)
     rows.sort(key=lambda row: (row["telling_ref"], row["episode_id"]))
     return rows
+
+
+def place_span_keys(view: object, container: Container, *, inside: bool) -> frozenset:
+    """:data:`A_MISSION_CONTAINS_ITS_PLACES` — the keys one telling shares with
+    a place-containing span. The grouping key the entity rung compares, for the
+    one container kind whose members are linked by place and setting.
+    """
+    kind = container.event_kind
+    places = place_refs(view)
+    keys = set(places & container.places)
+    if kind in (getattr(view, "settings", frozenset()) or ()):
+        keys.add(f"{SETTING_KEY_PREFIX}{kind}")
+    if inside:
+        keys |= {f"{REGION_KEY_PREFIX}{region.replace(' ', '-')}"
+                 for ref, region in container.region_places if ref in places}
+    return frozenset(keys)
 
 
 def _unique_entity_rows(rows: list, found: Mapping[str, Container],
@@ -1115,6 +1574,21 @@ def describe_containments(blocks: Sequence[Mapping], *, authority: object = None
 
 
 __all__ = [
+    "A_MISSION_CONTAINS_ITS_PLACES",
+    "MISSION_MTC_PATTERNS",
+    "MISSION_OUTSIDE_PATTERNS",
+    "MISSION_SETTING_PATTERNS",
+    "PLACE_CONTAINING_SPAN_KINDS",
+    "REGION_KEY_PREFIX",
+    "SETTING_KEY_PREFIX",
+    "about_someone_else",
+    "dated_from_stays",
+    "names_span_kind",
+    "place_in_words",
+    "place_refs",
+    "place_span_keys",
+    "region_of",
+    "span_settings",
     "CONTAINER_REFUSALS_BELONG_TO_THEIR_OWNERS",
     "CONTAINER_RULE_TEXT",
     "CONTAINER_SKIPPED_WHILE_BINDING",
@@ -1154,6 +1628,8 @@ __all__ = [
     "entity_index",
     "group_by_container",
     "load_entity_index",
+    "A_BARE_NAME_IN_THE_BINDER_IS_WHO_HE_CALLS_BY_IT",
+    "A_RELATION_WORD_WITH_ANOTHER_NAME_IS_NOT_THEM",
     "merge_containment_records",
     "resolve_entities",
     "resolve_entity_set",

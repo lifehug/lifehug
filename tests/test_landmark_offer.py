@@ -1122,7 +1122,8 @@ class FilingTests(OfferVaultCase):
         self._applied()
         stay = self._node("residence")
         self.assertEqual(stay["node_kind"], "episode")
-        self.assertEqual(stay["label"], "the Orchard House")
+        # v360 (owner, 2026-09-25): a title is sentence-cased now.
+        self.assertEqual(stay["label"], "The Orchard House")
         self.assertEqual(stay["basis"], "explicit")
         self.assertEqual(stay["best_temporal_value"]["best"], "1986-06/1988-03")
 

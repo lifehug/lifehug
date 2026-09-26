@@ -948,7 +948,7 @@ class Cert11Tests(unittest.TestCase):
 class VersionTests(unittest.TestCase):
 
     def test_the_calculation_rule_version_is_six(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
 
     def test_the_projection_schema_version_did_not_move(self):
         """Every §3.5 field is ADDITIVE, so a v2 reader reads a v2 payload."""

@@ -200,7 +200,8 @@ class GainArithmeticTests(CalculatedFixture):
     def test_a_structural_anchor_outranks_an_isolated_undated_event(self) -> None:
         """The point of the whole cut: one number, comparable across kinds."""
         era = self.item_for(self.node_for("The Lost Years"))
-        loose = self.item_for(self.node_for("the barn dance"))
+        # v360 (owner, 2026-09-25): a title is sentence-cased now.
+        loose = self.item_for(self.node_for("The barn dance"))
         self.assertEqual(era["leverage"], MOMENT_COUNT + 1)
         self.assertEqual(len(era["resolves"]), MOMENT_COUNT)
         self.assertEqual(loose["leverage"], 1)
@@ -525,7 +526,8 @@ class ParityTwinTests(CalculatedFixture):
         _, legacy_leverage = tl.row_leverage(
             self.legacy_rows["moment::X1"], self.legacy_index
         )
-        item = self.item_for(self.node_for("the barn dance"))
+        # v360 (owner, 2026-09-25): a title is sentence-cased now.
+        item = self.item_for(self.node_for("The barn dance"))
         self.assertEqual(legacy_leverage, 1)
         self.assertEqual(item["leverage"], 1)
 

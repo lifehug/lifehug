@@ -63,7 +63,8 @@ class OwnerNameSubjectTests(unittest.TestCase):
         own name somebody else. Only relation words move a subject."""
         index = {"claims": [claim("Patrick Q. Example", "the promotion", "s3")]}
         result = tt.derive_calculated_timeline(index, roster_snapshot=ROSTER, now=NOW)
-        row = next(r for r in result.nodes if r["label"] == "the promotion")
+        # v360 (owner, 2026-09-25): a title is sentence-cased now.
+        row = next(r for r in result.nodes if r["label"] == "The promotion")
         self.assertEqual(row["occurrence_subject_scope"], "owner")
         self.assertEqual(row["owner_timeline_relation"], "participated")
 

@@ -652,7 +652,7 @@ class AnAgeIsMeasuredFromItsOwnSubjectTests(unittest.TestCase):
         result = derive([owner_birth(), desiree_birthday(), mother_married_at_21()],
                         roster_snapshot=roster(MOTHER_ROW))
         node = node_labelled(result, "Mom married dad at 21")
-        self.assertEqual(window(node), ("1976-06-19", "1977-06-18", "age"))
+        self.assertEqual(window(node), ("1976-06", "1977-06", "age"))
         self.assertNotIn("age_without_birth_anchor", findings(result))
 
     def test_it_overlaps_the_parents_wedding_landmark(self) -> None:
@@ -672,15 +672,16 @@ class AnAgeIsMeasuredFromItsOwnSubjectTests(unittest.TestCase):
         result = derive([owner_birth(), *harvey_birth_tellings(), harvey_cussing()],
                         roster_snapshot=roster(HARVEY_ROW))
         node = node_labelled(result, "Harvey explains rule about cussing")
-        self.assertEqual(window(node), ("2025-10-11", "2026-10-10", "age"))
+        self.assertEqual(window(node), ("2025-10", "2026-10", "age"))
 
     def test_the_arithmetic_stayed_subject_agnostic(self) -> None:
         """`_record_for_age_claim` takes a birth and a band and knows nothing
-        about whose they are — which is why only ONE thing changed."""
+        about whose they are — which is why only ONE thing changed.
+        (timeline-rules:19: held at the birthday's month, not its day.)"""
         record, finding = tt._record_for_age_claim(
             mother_married_at_21(), chrono.from_dict(value("1955-06-19")))
         self.assertEqual(finding, "")
-        self.assertEqual((record.earliest, record.latest), ("1976-06-19", "1977-06-18"))
+        self.assertEqual((record.earliest, record.latest), ("1976-06", "1977-06"))
 
     def test_the_anchor_is_missing_only_when_all_three_tiers_are(self) -> None:
         result = derive([owner_birth(), mother_married_at_21()], roster_snapshot=roster())
@@ -693,7 +694,7 @@ class AnAgeIsMeasuredFromItsOwnSubjectTests(unittest.TestCase):
         result = derive([owner_birth(), mother_married_at_21()],
                         roster_snapshot=roster(MOTHER_ROW))
         node = node_labelled(result, "Mom married dad at 21")
-        self.assertEqual(window(node), ("1976-06-19", "1977-06-18", "age"))
+        self.assertEqual(window(node), ("1976-06", "1977-06", "age"))
 
     def test_the_owners_own_age_still_reads_his_own_anchor(self) -> None:
         owner_age = claim(claim_type="age", subject_mention="self",
@@ -703,7 +704,7 @@ class AnAgeIsMeasuredFromItsOwnSubjectTests(unittest.TestCase):
         result = derive([owner_birth(), owner_age, desiree_birthday(),
                          mother_married_at_21()], roster_snapshot=roster(MOTHER_ROW))
         node = node_labelled(result, "Went bankrupt at 26")
-        self.assertEqual(window(node), ("2007-07-11", "2008-07-10", "age"))
+        self.assertEqual(window(node), ("2007-07", "2008-07", "age"))
 
 
 # --------------------------------------------------------------------------
@@ -896,10 +897,10 @@ class TheOwnersReviewTests(unittest.TestCase):
 
     def test_both_age_cards_are_placed(self) -> None:
         self.assertEqual(window(node_labelled(self.result, "Mom married dad at 21")),
-                         ("1976-06-19", "1977-06-18", "age"))
+                         ("1976-06", "1977-06", "age"))
         self.assertEqual(
             window(node_labelled(self.result, "Harvey explains rule about cussing")),
-            ("2025-10-11", "2026-10-10", "age"))
+            ("2025-10", "2026-10", "age"))
 
     def test_no_card_asks_when_either_of_them_happened(self) -> None:
         asked = [row["prompt_intent"] for row in self.result.work_items]
@@ -918,9 +919,9 @@ class TheOwnersReviewTests(unittest.TestCase):
         self.assertEqual(frames[0]["best_temporal_value"]["earliest"], BIRTH_DAY)
 
     def test_the_rule_version_moved(self) -> None:
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
         for node in self.result.nodes:
-            self.assertEqual(node["calculation_rule_version"], "timeline-rules:18")
+            self.assertEqual(node["calculation_rule_version"], "timeline-rules:25")
 
 
 if __name__ == "__main__":

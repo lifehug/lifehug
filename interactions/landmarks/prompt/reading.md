@@ -29,6 +29,8 @@ ALREADY FILED — these entries are already in the store:
 ALREADY ON THE ROSTER — people, places and organizations already known:
 {roster}
 
+{how_words_arrive}
+
 WHAT THEY GAVE YOU:
 {text}
 

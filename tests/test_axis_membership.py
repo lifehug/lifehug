@@ -616,7 +616,8 @@ class FoldTests(FoldTestCase):
             source="src-friend",
         )])
         result = self.fold()
-        node = self.row(result, "a friend")
+        # v360 (owner, 2026-09-25): a title is sentence-cased now.
+        node = self.row(result, "A friend")
         self.assertEqual(node["axis_membership"], "none")
         self.assertEqual(node["axis_membership_reason"], "not_family")
         self.assertNotIn(node["node_id"], self.membership_ids(result))
@@ -691,7 +692,7 @@ class FoldTests(FoldTestCase):
         kind of change and needs the same signal — a v334 projection is not
         merely mislabelled, it is missing cards.
         """
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
 
 
 # ---------------------------------------------------------------------------
@@ -788,11 +789,17 @@ class UnknownRelationshipKeepsItsQuestionTests(FoldTestCase):
                 node = self.row(result, "Synthetic Person Lumen")
                 self.assertEqual(node["axis_membership"], membership)
                 self.assertEqual(node["axis_membership_reason"], reason)
-                # ...and only the DECIDED one loses its card.
-                self.assertEqual(
-                    bool(self.date_items(result, node)),
-                    reason != "not_family",
-                )
+                # ...and only the DECIDED one would lose its card — except
+                # that a death is a cornerstone-type event, and since the
+                # owner's 2026-09-25 cornerstones ruling (*"If I happen to
+                # mention a cornerstone for someone else in a discussion, I
+                # think it's worth a question"*) it keeps ONE card on any axis
+                # (`temporal_work_items.A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`),
+                # asked to the year and never pressed.
+                items = self.date_items(result, node)
+                self.assertEqual(len(items), 1)
+                if reason == "not_family":
+                    self.assertEqual(items[0].get("requested_grain"), "year")
 
     def test_a_friends_undated_event_still_keeps_no_card_without_leverage(self) -> None:
         """Rule 3 is untouched by v338, which is half of what makes it a fix

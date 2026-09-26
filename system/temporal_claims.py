@@ -1093,6 +1093,27 @@ def validate_temporal_quantity(value: object, *, claim_type: str) -> dict:
     text = optional_text(value.get("text"))
     if text:
         normalized["text"] = text
+    # v360 (owner, 2026-09-25) (`chronology.A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR`):
+    # an age said as a school GRADE keeps the grade, so the fold measures it on
+    # the school calendar against its subject's birth. Absent on every other
+    # age, whose normalized value is byte-identical.
+    grade = value.get("grade") if claim_type == "age" else None
+    if grade is not None:
+        if isinstance(grade, bool) or not isinstance(grade, (int, float)) \
+                or int(grade) != grade or not 0 <= int(grade) <= 12:
+            raise _quantity_error(claim_type, f"not a school grade: {grade!r}")
+        normalized["grade"] = int(grade)
+        high = value.get("grade_high")
+        if high is not None:
+            if isinstance(high, bool) or not isinstance(high, (int, float)) \
+                    or int(high) != high or not int(grade) < int(high) <= 12:
+                raise _quantity_error(claim_type, f"not a band of school grades: {high!r}")
+            normalized["grade_high"] = int(high)
+        part = collapsed_text(value.get("grade_part"))
+        if part:
+            if part not in chrono.GRADE_PARTS:
+                raise _quantity_error(claim_type, f"not a part of a school year: {part!r}")
+            normalized["grade_part"] = part
     return normalized
 
 
@@ -1154,13 +1175,21 @@ def _temporal_identity(value: object) -> object:
     if isinstance(value, dict) and value.get("kind") in QUANTITY_CLAIM_TYPES:
         # The raw phrase is annotation; the band, the unit and whether it was
         # hedged are the assertion.
-        return {
+        identity = {
             "kind": value["kind"],
             "low": value.get("low"),
             "high": value.get("high"),
             "unit": value.get("unit"),
             "approximate": bool(value.get("approximate")),
         }
+        # A grade is part of the assertion; absent, the identity is unchanged.
+        if value.get("grade") is not None:
+            identity["grade"] = value.get("grade")
+            if value.get("grade_high") is not None:
+                identity["grade_high"] = value.get("grade_high")
+            if value.get("grade_part"):
+                identity["grade_part"] = value.get("grade_part")
+        return identity
     record = chrono.from_dict(value)
     if record is None:
         return {"kind": "opaque", "value": _text(value)}

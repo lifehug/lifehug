@@ -1412,9 +1412,17 @@ def validate_episode_operation(value: object) -> dict:
             validate_telling_ref(ref) for ref in row.get("members") or () if collapsed_text(ref)
         )
     )
+    # A normalized record keeps what it acted on only inside its
+    # `canonical_inputs`, so a record re-validated off disk (or handed back to
+    # the writer) reads it from there: a carve-out create
+    # (`episode_binder.A_GROUP_NEVER_TAKES_IN_ANOTHER_COUPLES_MILESTONE`) must
+    # digest the same way every time it is read.
+    stated_acted_on = row.get("acted_on_episode_ids")
+    if stated_acted_on is None and isinstance(row.get("canonical_inputs"), dict):
+        stated_acted_on = row["canonical_inputs"].get("acted_on_episode_ids")
     acted_on = sorted(
         dict.fromkeys(
-            _episode_id(value) for value in row.get("acted_on_episode_ids") or () if collapsed_text(value)
+            _episode_id(value) for value in stated_acted_on or () if collapsed_text(value)
         )
     )
     if op == "create":

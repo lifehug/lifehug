@@ -752,8 +752,16 @@ class LegsTests(unittest.TestCase):
         self.publish()
         generic = {row.get("node_ref"): row.get("prompt_intent")
                    for row in (pub.read_work_items(self.root) or {})["work_items"]}
+        # A vault no resolver has run on keeps the composer's sentence.
         self.assertIn("shop", str(generic[self.nodes["shop"]]))
         self.assertNotIn("summer", str(generic[self.nodes["shop"]]))
+        # v360 (`temporal_publication.NEVER_ASK_WHAT_WAS_NOT_LOOKED_AT`): once
+        # the resolver runs here, a date card it has not looked at yet is not
+        # drawn at all.
+        resolver.save_ledger(self.root, {"version": 1, "nodes": {}})
+        pub.publish(self.root, now="2026-09-02T00:00:00Z")
+        waiting = {row.get("node_ref") for row in (pub.read_work_items(self.root) or {})["work_items"]}
+        self.assertNotIn(self.nodes["shop"], waiting)
         resolver.save_ledger(self.root, {"version": 1, "nodes": {self.nodes["shop"]: {
             "label": "The shop", "source_path": "answers/a1.md", "status": "unknown",
             "question": "Which summer did the shop open?", "at": NOW}}})
@@ -791,7 +799,10 @@ class LegsTests(unittest.TestCase):
         resolver.save_ledger(self.root, {"version": 1, "nodes": {node_id: {
             "label": "Grandma stepped in during bullying", "source_path": "answers/c5.md",
             "status": "unknown", "question": question, "at": NOW,
-            "estimate": {"earliest": "1987", "latest": "1996", "confidence": 0.4,
+            # Four years: a window a card may still ask about. One wider than
+            # about five years is asked only when hot (v360 follow-up,
+            # `temporal_publication.A_WIDE_ESTIMATE_IS_ASKED_ONLY_WHEN_HOT`).
+            "estimate": {"earliest": "1987", "latest": "1990", "confidence": 0.4,
                          "basis": [{"kind": "residence", "text": "the Cedarport years"}]}}}})
         pub.publish(self.root, now="2026-09-23T12:00:00Z")
         rows = {row.get("node_ref"): row
@@ -801,7 +812,7 @@ class LegsTests(unittest.TestCase):
         self.assertEqual(mine["prompt_intent"], question)
         self.assertEqual(mine["question_source"], "resolver")
         self.assertEqual(mine["probable_window"]["earliest"], "1987")
-        self.assertEqual(mine["probable_window"]["latest"], "1996")
+        self.assertEqual(mine["probable_window"]["latest"], "1990")
         # The honest status is kept, not traded for the question.
         published = {node["node_id"]: node
                      for node in (pub.read_projection(self.root) or {})["nodes"]}
@@ -1087,6 +1098,10 @@ class RevisitTests(LegsTests):
         self.story("a1", "The shop opened at some point after we moved.",
                    [("shop", "after", ["the move to Cedarport"])])
         self.publish()
+        # The card exists once the resolver has looked and asked (v360,
+        # `temporal_publication.NEVER_ASK_WHAT_WAS_NOT_LOOKED_AT`).
+        self.settle_unknown("shop", "Which year did the shop open?")
+        self.publish()
         rows = (pub.read_work_items(self.root) or {})["work_items"]
         work_item_id = next(row["work_item_id"] for row in rows if row.get("node_ref") == self.nodes["shop"])
         (self.root / "answers" / "a2.md").write_text(
@@ -1107,6 +1122,8 @@ class RevisitTests(LegsTests):
 
         self.story("a1", "The shop opened at some point after we moved.",
                    [("shop", "after", ["the move to Cedarport"])])
+        self.publish()
+        self.settle_unknown("shop", "Which year did the shop open?")
         self.publish()
         rows = (pub.read_work_items(self.root) or {})["work_items"]
         handle_ref = twi.anchor_handle_ref("the move to Cedarport")
@@ -1166,6 +1183,10 @@ class RevisitTests(LegsTests):
         self.story("a1", "The shop opened at some point after we moved.",
                    [("shop", "after", ["the move to Cedarport"])])
         self.publish()
+        # The card exists once the resolver has looked and asked (v360,
+        # `temporal_publication.NEVER_ASK_WHAT_WAS_NOT_LOOKED_AT`).
+        self.settle_unknown("shop", "Which year did the shop open?")
+        self.publish()
         rows = (pub.read_work_items(self.root) or {})["work_items"]
         work_item_id = next(row["work_item_id"] for row in rows if row.get("node_ref") == self.nodes["shop"])
         session = f'session_ref: "conversation:cand:work_item:{work_item_id}"\n'
@@ -1196,17 +1217,22 @@ class RevisitTests(LegsTests):
         self.publish()
         before = (pub.read_projection(self.root) or {})["calculation_rule_version"]
         item = resolver.plan_items(self.root, limit=5)["items"][0]
+        # v360 (`resolver.AN_ESTIMATE_PLACES_AS_THE_SYSTEMS_INFERENCE`): a
+        # GROUNDED estimate (a residence, a tenure, ...) now places its moment;
+        # this is the window an ungrounded one — the resolver's own reading of
+        # the story — still floats as sky. Placement is pinned in
+        # tests/test_v360_look_before_asking.py.
         text = json.dumps({"answers": [self.answer(
             self.nodes["shop"], question="Which year did the shop open?",
             estimate={"earliest": "1996", "latest": "1998", "confidence": 0.5,
-                      "basis": [{"kind": "residence", "text": "the Cedarport years"}]})]})
+                      "basis": [{"kind": "story", "text": "the Cedarport years"}]})]})
         report = resolver.file_envelope(self.root, self.envelope(item, text), now=NOW)
         self.assertEqual((report["filed"], report["estimates"], report["outcomes"]), (0, 1, {"unknown": 1}))
         entry = resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]
         self.assertEqual(entry["estimate"], {"earliest": "1996", "latest": "1998", "confidence": 0.5,
-                                             "basis": [{"kind": "residence", "text": "the Cedarport years"}]})
+                                             "basis": [{"kind": "story", "text": "the Cedarport years"}]})
         window = {"earliest": "1996", "latest": "1998", "confidence": 0.5, "source": "resolver",
-                  "basis": [{"kind": "residence", "text": "the Cedarport years"}]}
+                  "basis": [{"kind": "story", "text": "the Cedarport years"}]}
         rows = {row.get("node_ref"): row for row in (pub.read_work_items(self.root) or {})["work_items"]}
         self.assertEqual(rows[self.nodes["shop"]]["probable_window"], window)
         nodes = {node["node_id"]: node for node in (pub.read_projection(self.root) or {})["nodes"]}
@@ -1228,10 +1254,12 @@ class RevisitTests(LegsTests):
         self.story("b1", "We moved house the year I finished school.",
                    [("move", "after", ["finishing school"])])
         self.publish()
+        item = self.item_for(resolver.plan_items(self.root, limit=5), "answers/a1.md")
+        self.settle_unknown("shop", "Which year did the shop open?")
+        self.publish()
         handle_ref = twi.anchor_handle_ref("the move to Cedarport")
         rows = (pub.read_work_items(self.root) or {})["work_items"]
         self.assertTrue(any(row.get("subject_ref") == handle_ref for row in rows))
-        item = self.item_for(resolver.plan_items(self.root, limit=5), "answers/a1.md")
         text = json.dumps({"answers": [self.answer(
             self.nodes["shop"], question="Which year did the shop open?",
             estimate={"earliest": "1996", "latest": "1998", "confidence": 0.4,
@@ -1396,7 +1424,10 @@ class ProposalAdoptionTests(LegsTests):
         self.assertEqual(entry["status"], "unverified")
         self.assertEqual(entry["estimate"], {"earliest": "1996", "latest": "1998", "confidence": 0.3,
                                              "basis": [{"kind": "story", "text": "the move bounds it"}]})
-        rows = {row.get("node_ref"): row for row in (pub.read_work_items(self.root) or {})["work_items"]}
-        self.assertEqual(rows[self.nodes["shop"]]["probable_window"]["earliest"], "1996")
+        # An `unverified` row asked no question, so no card is drawn for it
+        # (v360, `temporal_publication.NEVER_ASK_WHAT_WAS_NOT_LOOKED_AT`);
+        # the window floats on the node itself.
+        nodes = {node["node_id"]: node for node in (pub.read_projection(self.root) or {})["nodes"]}
+        self.assertEqual(nodes[self.nodes["shop"]]["probable_window"]["earliest"], "1996")
         # With its estimate adopted, the backfill has nothing left to ask.
         self.assertEqual(resolver.plan_items(self.root, limit=5, estimate_missing=True)["items"], [])

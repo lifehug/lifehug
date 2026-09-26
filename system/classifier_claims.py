@@ -452,6 +452,107 @@ def _age_band_text(value: object) -> str | None:
     return text if chrono.parse_age(text) is not None else None
 
 
+#: WHOSE AGE A STATED AGE IS (lifehug#415, the classifier seat; v360, owner
+#: 2026-09-25). `date.age` is filed under the claim's subject and the fold
+#: measures it from THAT subject's birth (v346), so the subject is the whole
+#: arithmetic. The classifier filed the owner's own words as another person's
+#: age three times on his vault:
+#:
+#: * *"Father's four years bedridden"* — ``when I was just off my mission, so
+#:   like 22, 23`` filed as his FATHER's 22-23, drawn from the father's 1954
+#:   birth to ≈1976–1978;
+#: * *"Dad wins pet snake at fair"* — ``I must have been like four or five
+#:   years old`` filed as Dad's;
+#: * *"Charlee currently 15 and a half"* — subject *"Narrator and Charlee"*
+#:   (two people, so the event fell back to the owner), ``Charlee is 15 and a
+#:   half right now`` measured from the OWNER's birth.
+#:
+#: THE RULE, read from the person's own words (the ``when_hint`` and the
+#: grounded quote, never the classifier's third-person description):
+#:
+#: 1. an age in the FIRST PERSON (`chronology.NARRATOR_AGE_RE`, the one
+#:    definition the card-answer seat also asks) is the narrator's: the claim's
+#:    subject is the owner, on the SAME moment (``event_ref`` is untouched);
+#: 2. an age stated OF a named person (*"Charlee is 15 and a half"*, *"when my
+#:    dad was 19"*) is that person's — the event's own spelling of them when
+#:    the event names them, else the name as written;
+#: 3. an age held NOW (*"currently"*, *"is 15 … right now"*) dates the
+#:    TELLING: the moment is the capture month (`chronology.from_present_age`),
+#:    not a year counted from anybody's birth;
+#: 4. otherwise the event's own subject, as before.
+#:
+#: The moment keeps its own subject: when the age moves off it, an
+#: ``occurrence`` under the event's subject rides beside the age on the same
+#: ``event_ref`` (:func:`event_claims`).
+#:
+#: REPAIR, not edit. A vault that already filed the old readings is repaired
+#: by the next `migrate_classifier_moments` sweep: the changed readings are
+#: new content-addressed claims (a new receipt beside the old), and the old
+#: ones are retired by :func:`_superseded_by_reclassification`'s correction.
+#: `timeline_evidence.CLASSIFIER_CLAIMS_RULE_VERSION` deliberately does NOT
+#: move: since v354 a reading's receipt is keyed on its own assertion, so
+#: only the readings that changed are re-filed. Bumping it re-keys all ~1,200
+#: readings, and on the owner's vault that drops 18 nodes that only a stale
+#: claim id was keeping clear of the recorder dedupe — a different defect,
+#: not this one's to trigger.
+AGE_BELONGS_TO_WHOEVER_SAID_IT_OF = "age_belongs_to_whoever_said_it_of"
+
+
+def _age_texts(event: dict) -> list[str]:
+    """The person's own words an age was read out of."""
+    texts = [collapsed_text(event.get("when_hint"))]
+    grounding = event.get("source_grounding")
+    if isinstance(grounding, dict):
+        texts.append(collapsed_text(grounding.get("quote")))
+    return [text for text in texts if text]
+
+
+def _event_subject_parts(event: dict) -> list[str]:
+    """Every person the event itself names as its subject or people."""
+    parts: list[str] = []
+    for key in EVENT_SUBJECT_KEYS:
+        parts.extend(tc.split_subject_enumeration(collapsed_text(event.get(key))))
+    for key in EVENT_PEOPLE_KEYS:
+        parts.extend(_place_names(event.get(key)))
+    return [part for part in parts if part]
+
+
+def age_subject(event: object, age: object) -> dict:
+    """``{"subject_mention": <str or "">, "present": bool}`` for one age.
+
+    ``subject_mention`` is empty when the event's own subject stands
+    (:data:`AGE_BELONGS_TO_WHOEVER_SAID_IT_OF`, rule 4).
+    """
+    import temporal_timeline as tt  # noqa: PLC0415 — the one owner-reference reader
+
+    row = event if isinstance(event, dict) else {}
+    statement = None
+    for text in _age_texts(row):
+        statement = chrono.age_statement_of(text, age)
+        if statement is not None:
+            break
+    if statement is None:
+        return {"subject_mention": "", "present": False}
+    own = event_subject_mention(row)
+    subject = ""
+    if statement["speaker"] == "narrator":
+        if own != OWNER_SUBJECT_REF and not tt.is_owner_reference_only(own):
+            subject = OWNER_SUBJECT_REF
+    elif statement["speaker"] == "named":
+        who = collapsed_text(statement["who"])
+        bare = re.sub(r"^my\s+", "", who, flags=re.IGNORECASE)
+        named = who[:1].isupper() or bare != who
+        if named:
+            wanted = {normalized_mention_key(who), normalized_mention_key(bare)}
+            match = next((part for part in _event_subject_parts(row)
+                          if normalized_mention_key(part) in wanted), "")
+            spelled = match or who
+            if normalized_mention_key(spelled) != normalized_mention_key(own) and \
+                    len(spelled) <= tc.MAX_SUBJECT_MENTION_CHARS:
+                subject = spelled
+    return {"subject_mention": subject, "present": bool(statement["present"])}
+
+
 def capture_context(vault_root: str | Path, source_path: object) -> dict:
     """``{"captured": <ISO day>, "question_text": <str>}`` for one telling.
 
@@ -541,6 +642,51 @@ def recency_reading(event: object, capture: object = None) -> dict | None:
     }
 
 
+def grade_reading(event: object) -> dict | None:
+    """A school GRADE the moment's own words name, as an ``age`` claim reading.
+
+    The second named exception to "``when_hint`` dates nothing", and as narrow
+    as the first: a closed vocabulary (`chronology.SCHOOL_GRADE_RE` — "sixth
+    grade", "middle of 6th grade", "freshman year", "kindergarten") read by the
+    ONE grade reader, `chronology.school_grade_of`, which the card-answer seat
+    (`answer_placement.grade_reading`) asks too. The fold measures it on the
+    school calendar against the SUBJECT's birth
+    (`chronology.A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR`). Whose grade:
+    the event's own subject, unless the words say "I was in" / "my" (the
+    narrator) or name somebody ("for James", "James's sixth grade").
+    """
+    import temporal_timeline as tt  # noqa: PLC0415 — the one owner-reference reader
+
+    row = event if isinstance(event, dict) else {}
+    found = None
+    for text in cross_dating.moment_fields(row):
+        found = chrono.school_grade_of(text)
+        if found is not None:
+            break
+    value = chrono.school_grade_quantity(found)
+    if value is None:
+        return None
+    reading = {
+        "claim_type": "age",
+        "temporal_value": value,
+        "basis": "explicit",
+        "confidence": AGE_CLAIM_CONFIDENCE,
+    }
+    own = event_subject_mention(row)
+    if found["speaker"] == "narrator":
+        if own != OWNER_SUBJECT_REF and not tt.is_owner_reference_only(own):
+            reading["subject_mention"] = OWNER_SUBJECT_REF
+    elif found["speaker"] == "named":
+        who = collapsed_text(found["who"])
+        wanted = normalized_mention_key(who)
+        match = next((part for part in _event_subject_parts(row)
+                      if wanted and wanted in normalized_mention_key(part)), "")
+        if not match and len(who) <= tc.MAX_SUBJECT_MENTION_CHARS \
+                and wanted != normalized_mention_key(own):
+            reading["subject_mention"] = who
+    return reading
+
+
 def temporal_reading(event: object, capture: object = None) -> dict:
     """What this moment asserts about time: ``{claim_type, temporal_value,
     basis, confidence}``. Deterministic, and never a fabrication.
@@ -585,11 +731,28 @@ def temporal_reading(event: object, capture: object = None) -> dict:
                 }
         age = _age_band_text(claim.get("age"))
         if age:
+            # :data:`AGE_BELONGS_TO_WHOEVER_SAID_IT_OF` — whose age, and
+            # whether it is held on the day of the telling.
+            whose = age_subject(row, age)
+            subject = {"subject_mention": whose["subject_mention"]} \
+                if whose["subject_mention"] else {}
+            if whose["present"]:
+                captured = (capture if isinstance(capture, dict) else {}).get("captured")
+                record = chrono.from_present_age(captured)
+                if record is not None:
+                    return {
+                        "claim_type": "date",
+                        "temporal_value": record.to_dict(),
+                        "basis": "explicit",
+                        "confidence": lp.CONFIDENCE_SCORE.get(record.confidence, 0.45),
+                        **subject,
+                    }
             return {
                 "claim_type": "age",
                 "temporal_value": age,
                 "basis": "explicit",
                 "confidence": AGE_CLAIM_CONFIDENCE,
+                **subject,
             }
         anchor_ref = optional_text(claim.get("anchor_ref"))
         if anchor_ref:
@@ -602,6 +765,9 @@ def temporal_reading(event: object, capture: object = None) -> dict:
                 "basis": "explicit",
                 "confidence": ORDER_CLAIM_CONFIDENCE,
             }
+    grade = grade_reading(row)
+    if grade is not None:
+        return grade
     recency = recency_reading(row, capture)
     if recency is not None:
         return recency
@@ -771,6 +937,22 @@ def event_claims(
 
     row = event if isinstance(event, dict) else {}
     direct = {**temporal_reading(row, capture), "reading_kind": "direct"}
+    # :data:`AGE_BELONGS_TO_WHOEVER_SAID_IT_OF`: when the age is somebody
+    # else's than the moment's own subject, the moment still happened to its
+    # own subject — "Dad wins pet snake at fair" is Dad's, the "four or five"
+    # is the owner's. The age moves; the moment's subject is kept by an
+    # occurrence under it, on the same ``event_ref``.
+    companion = None
+    if direct.get("subject_mention") and \
+            normalized_mention_key(direct["subject_mention"]) != \
+            normalized_mention_key(event_subject_mention(row)):
+        companion = {
+            "claim_type": tc.OCCURRENCE_CLAIM_TYPE,
+            "temporal_value": None,
+            "basis": "explicit",
+            "confidence": OCCURRENCE_CLAIM_CONFIDENCE,
+            "reading_kind": "direct",
+        }
     grounding = row.get("source_grounding")
     direct_grounded = False
     if (isinstance(grounding, dict)
@@ -795,6 +977,8 @@ def event_claims(
         for reading in readings
     ):
         readings.append(contextual)
+    if companion is not None:
+        readings.append(companion)
     event_ref = tp.derive_node_id(
         node_kind="event",
         event_kind=MOMENT_EVENT_KIND,
@@ -814,7 +998,11 @@ def event_claims(
             "source_ref": source_ref,
             "source_kind": SOURCE_KIND,
             "claim_type": reading["claim_type"],
-            "subject_mention": event_subject_mention(row),
+            # The reading's own subject when it names one (an age said of
+            # someone, :data:`AGE_BELONGS_TO_WHOEVER_SAID_IT_OF`); the moment —
+            # ``event_ref`` above — is the event's either way.
+            "subject_mention": (reading.get("subject_mention")
+                                or event_subject_mention(row)),
             "event_kind": event_kind,
             "event_ref": event_ref,
             "event_mention": moment_title(row),
@@ -867,14 +1055,91 @@ def classification_events(data: object) -> list[dict]:
 RECORDER_RECORD_SOURCE_TYPES = frozenset({"landmark_entry"})
 
 
+#: v360 (owner, 2026-09-25). The landmark entry "schools: high school" (grades
+#: "sophomore or junior year") was folded into Mountain View by the landmark
+#: fold, and the classifier's own reading of the entry's FILE came back as a
+#: node of its own, "High school (sophomore or junior year)", unplaced and
+#: uncarded. The recorder had filed that entry — undated, so the dedupe that
+#: asked for a recorder DATE on the file let it through. A record the recorder
+#: filed is canonical whether or not it carries a date; an undated classifier
+#: restatement of it is never a second moment.
+A_RECORDED_RECORD_IS_CANONICAL_DATED_OR_NOT = (
+    "an undated classifier moment read from a landmark entry file the recorder "
+    "filed restates that record and is never a claim of its own, whether or not "
+    "the recorder's claim carries a date"
+)
+
+
+def _recorder_source_paths(index: object) -> frozenset:
+    """Every ``source_path`` a non-classifier ACTIVE claim cites
+    (:data:`A_RECORDED_RECORD_IS_CANONICAL_DATED_OR_NOT`)."""
+    paths: set[str] = set()
+    for claim in store.active_claims(index if isinstance(index, dict) else {}):
+        ref = claim.get("source_ref")
+        if not isinstance(ref, dict) or is_classifier_source_id(ref.get("source_id")):
+            continue
+        path = collapsed_text(ref.get("source_path"))
+        if path:
+            paths.add(path)
+    return frozenset(paths)
+
+
+#: v360 (owner, 2026-09-25). The owner answered the card about Harvey's late talking
+#: with *"He only really started talking when he was 4"*. `place-answers` filed
+#: that age on Harvey's node, where the card was — and the classifier, reading
+#: the same message with no card beside it, filed it again as "Child's late
+#: start talking" about an unidentified child: a second node, unplaced and
+#: uncarded, for one sentence. A card answer is read once, by the seat that
+#: knows which card it answers; a classifier age read off the same message
+#: that says the same age is that reading again.
+A_CARD_ANSWER_IS_READ_ONCE = (
+    "a classifier age read off a card answer that states the same age the "
+    "answer placement already filed from that message is that answer read "
+    "again, never a claim of its own"
+)
+
+
+def _answer_ages_by_source_path(index: object) -> dict[str, set]:
+    """``source_path -> {(low, high)}`` the answer placement filed as ages
+    (:data:`A_CARD_ANSWER_IS_READ_ONCE`)."""
+    out: dict[str, set] = {}
+    for claim in store.active_claims(index if isinstance(index, dict) else {}):
+        if tc.extractor_identity(claim.get("extractor_version")) != ap.EXTRACTOR_NAME:
+            continue
+        if collapsed_text(claim.get("claim_type")) != "age":
+            continue
+        value = claim.get("temporal_value") or {}
+        path = collapsed_text((claim.get("source_ref") or {}).get("source_path"))
+        if path and isinstance(value, dict):
+            out.setdefault(path, set()).add((value.get("low"), value.get("high")))
+    return out
+
+
+def _restates_the_answer(claim: dict, answer_ages: object) -> bool:
+    """:data:`A_CARD_ANSWER_IS_READ_ONCE` for one classifier claim."""
+    if not answer_ages or collapsed_text(claim.get("claim_type")) != "age":
+        return False
+    value = claim.get("temporal_value") or {}
+    return isinstance(value, dict) and (value.get("low"), value.get("high")) in answer_ages
+
+
 def _restates_recorded_record(
     claims: list[dict], *, source_type: object, recorded: bool,
 ) -> bool:
-    """An undated, unlinked classifier moment from a record the recorder filed."""
+    """An undated, unlinked classifier moment from a record the recorder filed.
+
+    A moment dated only by the GRADE the record itself states ("Attended fifth
+    grade at Hillside Elementary", read out of the school's own entry) is the
+    same restatement: the record already dates that school, and the grade is
+    one of its own fields (v360, owner 2026-09-25, :func:`grade_reading`)."""
     if not recorded or collapsed_text(source_type) not in RECORDER_RECORD_SOURCE_TYPES:
         return False
     return bool(claims) and all(
-        claim.get("claim_type") == tc.OCCURRENCE_CLAIM_TYPE for claim in claims
+        claim.get("claim_type") == tc.OCCURRENCE_CLAIM_TYPE
+        or (claim.get("claim_type") == "age"
+            and isinstance(claim.get("temporal_value"), dict)
+            and claim["temporal_value"].get("grade") is not None)
+        for claim in claims
     )
 
 
@@ -949,6 +1214,14 @@ def _already_recorded(claim: dict, recorder_dates: list) -> bool:
     """
     record = chrono.from_dict(claim.get("temporal_value"))
     if record is None:
+        return False
+    # An age held NOW dates the telling from its capture day
+    # (`chronology.from_present_age`); no other reader could have recorded
+    # that date from the story's words, so any overlap is another moment of
+    # the same month, never this one told twice.
+    if any(isinstance(row, dict)
+           and row.get("source") == chrono.PRESENT_AGE_PROVENANCE_SOURCE
+           for row in (claim.get("temporal_value") or {}).get("provenance") or ()):
         return False
     return any(chrono.intersect(record, other) is not None for other in recorder_dates)
 
@@ -1031,7 +1304,7 @@ def _empty_report(dry_run: bool) -> dict:
         "with_place": 0,
         "subjects": {"self": 0, "named_other": 0},
         "deduped_against_recorder": 0,
-        "deduped_undated_recorder_records": 0,
+        "deduped_undated_recorder_records": 0, "deduped_refiled_records": 0,
         "deduped_sources": 0,
         "receipts": 0,
         "receipts_written": 0,
@@ -1078,6 +1351,9 @@ def migrate_classifier_moments(
 
     index = store.fold_active_index(root)
     recorder_dates = _recorder_dates_by_source_path(index)
+    recorder_sources = _recorder_source_paths(index)
+    refiled_paths = lp.refiled_record_paths(root)
+    answer_ages = _answer_ages_by_source_path(index)
     claims_by_source_id = _claims_by_source_id(index)
     projection = pub.read_projection(root) or {}
     report["nodes_before"] = len(projection.get("nodes") or ())
@@ -1129,19 +1405,34 @@ def migrate_classifier_moments(
         current_claim_ids: set[str] = set()
 
         for event in events:
+            if source_path in refiled_paths:
+                # v360 (owner, 2026-09-25) (`landmark_projection.A_RECORD_IS_FILED_WHERE_IT_BELONGS`):
+                # a refiled record read back by the classifier is the record
+                # again, and its refile already says what it is.
+                report["deduped_refiled_records"] += 1
+                deduped_here += 1
+                continue
             claims = event_claims(
                 stem=stem, event=event, revision=revision,
                 source_path=source_path, capture=capture, now=now,
             )
             if _restates_recorded_record(
                     claims, source_type=source_type,
-                    recorded=bool(recorder_dates.get(source_path))):
+                    recorded=bool(recorder_dates.get(source_path))
+                    or source_path in recorder_sources):
                 report["deduped_undated_recorder_records"] += 1
                 deduped_here += 1
                 continue
             current_claim_ids.update(claim["claim_id"] for claim in claims)
             kept_claims = []
             for claim in claims:
+                if _restates_the_answer(claim, answer_ages.get(source_path)):
+                    # :data:`A_CARD_ANSWER_IS_READ_ONCE` — and a copy already
+                    # filed is superseded by this re-reading, not kept.
+                    current_claim_ids.discard(claim["claim_id"])
+                    report["deduped_against_recorder"] += 1
+                    deduped_here += 1
+                    continue
                 if _already_recorded(claim, recorder_dates.get(source_path) or ()):
                     report["deduped_against_recorder"] += 1
                     deduped_here += 1
@@ -1326,6 +1617,8 @@ def describe_migration(report: object) -> list[str]:
 
 
 __all__ = [
+    "A_CARD_ANSWER_IS_READ_ONCE",
+    "A_RECORDED_RECORD_IS_CANONICAL_DATED_OR_NOT",
     "AGE_CLAIM_CONFIDENCE",
     "CLASSIFIER_EXTRACTOR",
     "ERROR_CODES",

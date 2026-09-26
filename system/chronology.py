@@ -1025,6 +1025,12 @@ def from_recency(captured: object, *texts: object) -> DateRecord | None:
     day = capture_day(captured)
     if day is None:
         return None
+    # v360 (owner, 2026-09-25), :data:`N_MONTHS_AGO_IS_COUNTED_BACK_FROM_THE_TELLING`:
+    # a COUNTED cue ("six to eight months ago") is tighter than any rung, so it
+    # is read first, under the same two refusals the rungs keep.
+    counted = from_months_ago(day, *texts)
+    if counted is not None:
+        return counted
     found = recency_cue(*texts)
     if found is None:
         return None
@@ -1104,7 +1110,7 @@ def display_date(record: object, *, with_basis: bool = True) -> str:
     record = record if isinstance(record, DateRecord) else from_dict(record)
     if record is None:
         return ""
-    body = _display_interval(record)
+    body = _display_interval(shown_at_its_grain(record))
     if not with_basis:
         return body
     claim, claim_basis = "", ""
@@ -1133,6 +1139,65 @@ def display_date(record: object, *, with_basis: bool = True) -> str:
     if claim_basis in VERBATIM_PROVENANCE_BASES:
         return f"{body} — {claim}"
     return f"{body} — you said {claim}"
+
+
+#: Owner ruling, 2026-09-25 (the cornerstones ruling): *"Days worked out by
+#: arithmetic display as months."* A day is shown only when somebody SAID it —
+#: the person, a document, a relative (:data:`DAY_SAYING_BASES`) — or when it
+#: is a definitional join to such a day: a ``certain`` single-day ``anchor``
+#: record is a landmark's own date carried onto a moment that IS that landmark
+#: (the Derived-date entry in the handbook glossary: "a certain birthday gives
+#: 11 July 1981"), and every cornerstone the fold holds to a day is one of
+#: those two. A day that came out of arithmetic — an age frame's edge, a
+#: containment window opening on a birthday, a stay's inferred start — is
+#: shown at its MONTH ("June 1989"). DISPLAY ONLY: the stored interval keeps
+#: its day, so every derivation downstream still has it.
+A_WORKED_OUT_DAY_IS_SHOWN_AS_ITS_MONTH = (
+    "a day is displayed only when the person or a document stated it, or when "
+    "it is a certain definitional join to such a day; a day worked out by "
+    "arithmetic is displayed as its month, and the stored interval is unchanged"
+)
+
+#: The bases whose day somebody actually said.
+DAY_SAYING_BASES = ("stated", "document", "relative")
+
+_DAY_POINT_RE = re.compile(r"^(-?\d{4}-\d{2})-\d{2}([~?%]*)$")
+
+
+def day_was_said(record: object) -> bool:
+    """Did a person or a document give this record's DAY?
+    (:data:`A_WORKED_OUT_DAY_IS_SHOWN_AS_ITS_MONTH`)"""
+    record = record if isinstance(record, DateRecord) else from_dict(record)
+    if record is None:
+        return False
+    if record.basis in DAY_SAYING_BASES:
+        return True
+    return (record.basis == "anchor" and record.confidence == "certain"
+            and record.earliest is not None and record.earliest == record.latest)
+
+
+def shown_at_its_grain(record: DateRecord) -> DateRecord:
+    """The record as it may be DISPLAYED: a worked-out day becomes its month."""
+    if day_was_said(record):
+        return record
+
+    def month(value: str | None) -> str | None:
+        return value[:7] if isinstance(value, str) and _DAY_RE.match(value) else value
+
+    earliest, latest = month(record.earliest), month(record.latest)
+    if (earliest, latest) == (record.earliest, record.latest):
+        return record
+    best = record.best
+    point = _DAY_POINT_RE.match(best or "")
+    if point:
+        best = point.group(1) + point.group(2)
+    elif best and "/" in best:
+        best = None
+    granularity = record.granularity
+    if granularity == "day":
+        granularity = "month"
+    return replace(record, best=best, earliest=earliest, latest=latest,
+                   granularity=granularity)
 
 
 _POINT_BEST_RE = re.compile(r"^-?\d{2,4}(?:X{1,2}|-\d{2}(?:-\d{2})?)?[~?%]*$", re.IGNORECASE)
@@ -1434,7 +1499,25 @@ NUMBER_WORDS = {
 _NUMBER_WORDS = NUMBER_WORDS
 _HEDGES = ("about", "around", "roughly", "approximately", "maybe", "or so",
            "something like", "somewhere around", "ish", "give or take")
-_AGE_TOKEN_RE = re.compile(r"\d{1,3}|[a-z]+", re.IGNORECASE)
+#: One age token. Four shapes, first match wins at each position, and the
+#: order is load-bearing (v360, owner 2026-09-25, ``parse_age("nineteen to
+#: twenty-one")`` had answered ``(1, 20)`` because "twenty-one" split into
+#: 20 and 1):
+#:
+#: * a small FRACTION (``1/2``, ``3/4``) is consumed and counts for nothing —
+#:   *"15 1/2"* is fifteen, not fifteen-or-one;
+#: * a number with an optional DECIMAL tail — *"15.5"* is fifteen, the year the
+#:   person is in, exactly as *"fifteen and a half"* is;
+#: * a COMPOUND number word — a tens word, then a hyphen or a space, then a
+#:   unit word (*"twenty-one"*, *"thirty two"*) — is ONE age;
+#: * any other word, looked up in :data:`NUMBER_WORDS`.
+_AGE_TOKEN_RE = re.compile(
+    r"(?P<fraction>\b[1-3]\s*/\s*[2-4]\b)"
+    r"|(?P<num>\d{1,3})(?:\.\d+)?"
+    r"|(?P<tens>twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)"
+    r"(?:[\s-]+(?P<unit>one|two|three|four|five|six|seven|eight|nine)\b)?"
+    r"|(?P<word>[a-z]+)",
+    re.IGNORECASE)
 _AGE_DECADE_RE = re.compile(r"\b(?:in\s+(?:my\s+)?)?(?P<decade>\d{2})s\b", re.IGNORECASE)
 _AGE_DECADE_WORDS = {
     "twenties": 20,
@@ -1470,16 +1553,490 @@ def parse_age(age_text: object) -> tuple[int, int, bool] | None:
         if re.search(rf"\b{word}\b", lowered):
             return decade, decade + 9, hedged
     ages: list[int] = []
-    for token in _AGE_TOKEN_RE.findall(lowered):
-        if token.isdigit():
-            value = int(token)
+    for token in _AGE_TOKEN_RE.finditer(lowered):
+        if token.group("fraction"):
+            continue
+        if token.group("num"):
+            value = int(token.group("num"))
             if 0 <= value <= 120:
                 ages.append(value)
-        elif token in _NUMBER_WORDS:
-            ages.append(_NUMBER_WORDS[token])
+        elif token.group("tens"):
+            ages.append(_NUMBER_WORDS[token.group("tens")]
+                        + _NUMBER_WORDS.get(token.group("unit") or "", 0))
+        elif token.group("word") in _NUMBER_WORDS:
+            ages.append(_NUMBER_WORDS[token.group("word")])
     if not ages:
         return None
     return min(ages), max(ages), hedged
+
+
+# --------------------------------------------------------------------------
+# WHOSE AGE IT IS (lifehug#415; v359's card-answer rule, moved here to serve
+# the classifier seat too — v360, owner 2026-09-25)
+# --------------------------------------------------------------------------
+
+#: One stated age, as the person said it: a number or a number word (compound
+#: words included), optionally a band — *"4 or 5"*, *"19-21"*, *"22, 23"*,
+#: *"four or five"*, *"nineteen to twenty-one"*, *"15 and a half"*. Captured as
+#: group 1. The words are :data:`NUMBER_WORDS`' own, so this vocabulary and
+#: :func:`parse_age` cannot drift apart.
+_AGE_WORD = (r"(?:\d{1,3}(?:\.\d+)?|(?:" + "|".join(
+    sorted(NUMBER_WORDS, key=len, reverse=True))
+    + r")(?:[\s-]+(?:one|two|three|four|five|six|seven|eight|nine)\b)?)")
+AGE_TEXT = (r"(" + _AGE_WORD
+            + r"(?:\s*(?:-|–|—|to|or|,)\s*" + _AGE_WORD + r")?"
+            + r"(?:\s+and\s+a\s+half)?)")
+
+#: The words between a speaker's verb and the age: hedges and asides (*"like"*,
+#: *"probably"*, *"just off my mission, so like"*). Bounded, inside one
+#: sentence, and it may not hold ANOTHER copula — *"I was there when Dad was
+#: 19"* is Dad's 19, never mine — so the age belongs to the nearest speaker.
+_AGE_BRIDGE = (r"(?:(?!\b(?:was|is|were|are|am|been|turned|turns)\b|['’](?:s|m|re)\b)"
+               r"[^.!?;:()]){0,40}?")
+
+#: AN AGE SAID IN THE FIRST PERSON IS THE NARRATOR'S (v359, extended for the
+#: classifier seat). *"when I was just off my mission, so like 22, 23"*, *"I
+#: must have been like four or five years old"*, *"probably when I was 4 or
+#: 5"*: the owner's own age, whatever moment it dates — it is measured from HIS
+#: birth and stays on the same moment. A closed vocabulary of first-person
+#: verbs; group 1 is the age text.
+NARRATOR_AGE_RE = re.compile(
+    r"\b(?:i|we)\s*(?:was|am|['’]m|were|are|['’]re|must\s+have\s+been|"
+    r"would\s+have\s+been|might\s+have\s+been|could\s+have\s+been|"
+    r"had\s+been|['’]d\s+been|['’]d\s+have\s+been|turned)\s+"
+    + _AGE_BRIDGE + r"(?<![\w-])" + AGE_TEXT + r"(?![\w])",
+    re.IGNORECASE)
+
+#: An age stated OF a named person or a pronoun: *"Charlee is 15 and a half"*,
+#: *"when Dad was 19"*, *"she's 15 and a half now"*, *"AJ was around nine"*.
+#: Group ``who`` is the person as written, group ``tense`` the verb, group 3
+#: the age text. STRICTER than the first person: only hedge words may sit
+#: between the verb and the age, so *"two weeks after James was born, age
+#: 31"* is never James's 31 — moving an age OFF the event's subject needs the
+#: plainest statement there is.
+_AGE_HEDGES = (r"(?:(?:about|around|maybe|only|just|like|probably|roughly|almost|"
+               r"nearly|barely|currently|now|already|still)\s+)*")
+THIRD_PERSON_AGE_RE = re.compile(
+    r"\b(?P<who>(?:my\s+)?[a-z][\w’'-]*)\s*(?P<tense>is|was|['’]s|turned|turns)\s+"
+    + _AGE_HEDGES + r"(?<![\w-])" + AGE_TEXT + r"(?![\w])",
+    re.IGNORECASE)
+
+#: Words that say the age is the one held ON THE DAY OF THE TELLING.
+PRESENT_AGE_WORDS_RE = re.compile(
+    r"\b(?:now|currently|right\s+now|today|at\s+the\s+moment|these\s+days|nowadays)\b",
+    re.IGNORECASE)
+_CURRENTLY_AGE_RE = re.compile(
+    r"\bcurrently\s+" + _AGE_BRIDGE + r"(?<![\w-])" + AGE_TEXT + r"(?![\w])",
+    re.IGNORECASE)
+_PRESENT_TENSES = frozenset({"is", "'s", "’s", "am", "'m", "’m", "are", "turns"})
+_SPEAKER_PRONOUNS = frozenset({"i", "we"})
+_THIRD_PERSON_PRONOUNS = frozenset({"he", "she", "they", "it", "that", "this",
+                                    "there", "which", "who", "what"})
+
+
+def _same_age(found: object, wanted: object) -> bool:
+    """Is the age a field names inside the age text a pattern captured?
+
+    By parse, not by spelling: *"22, 23"* in the hint and *"22 or 23"* in the
+    field are one age, and *"4"* read off a reply is inside *"4 or 5"*. One
+    direction only: a field band WIDER than the statement (*"19 or 20
+    (author); AJ about 9"* against *"AJ was around nine"*) is not that
+    statement's age."""
+    have, want = parse_age(str(found or "")), parse_age(str(wanted or ""))
+    if have is None or want is None:
+        return False
+    return have[0] <= want[0] and want[1] <= have[1]
+
+
+def age_is_first_person(text: object, age: object) -> bool:
+    """Is ``age`` said in the first person anywhere in ``text``
+    (:data:`NARRATOR_AGE_RE`)? The one test both seats ask — the card answer
+    (`answer_placement.age_is_the_narrators`) and the classifier's claims
+    (`classifier_claims.age_subject`)."""
+    body = " ".join(str(text or "").split())
+    if not body:
+        return False
+    return any(_same_age(match.group(1), age)
+               for match in NARRATOR_AGE_RE.finditer(body))
+
+
+def age_statement_of(text: object, age: object) -> dict | None:
+    """Who ``text`` says holds ``age``, and whether they hold it NOW.
+
+    ``{"speaker": "narrator"|"named"|"pronoun", "who": <as written>,
+    "present": bool}`` or ``None`` when the text states that age of nobody.
+    First person wins (:func:`age_is_first_person`); otherwise the nearest
+    third-person statement of the same age. ``present`` is a present-tense
+    verb (*"is"*, *"'s"*) or *"currently"* before the age, in a text that
+    carries a word for the day of the telling (:data:`PRESENT_AGE_WORDS_RE`).
+    """
+    body = " ".join(str(text or "").split())
+    if not body or parse_age(str(age or "")) is None:
+        return None
+    now_word = PRESENT_AGE_WORDS_RE.search(body) is not None
+    for match in NARRATOR_AGE_RE.finditer(body):
+        if _same_age(match.group(1), age):
+            verb = match.group(0)[:match.start(1) - match.start(0)].lower()
+            present = now_word and bool(re.search(r"\b(?:am|are)\b|['’](?:m|re)\b", verb))
+            return {"speaker": "narrator", "who": "I", "present": present}
+    for match in THIRD_PERSON_AGE_RE.finditer(body):
+        if not _same_age(match.group(3), age):
+            continue
+        who = match.group("who")
+        word = who.lower().removeprefix("my ").strip()
+        if word in _SPEAKER_PRONOUNS:
+            continue
+        tense = match.group("tense").lower()
+        return {
+            "speaker": "pronoun" if word in _THIRD_PERSON_PRONOUNS else "named",
+            "who": who,
+            "present": now_word and tense in _PRESENT_TENSES,
+        }
+    for match in _CURRENTLY_AGE_RE.finditer(body):
+        if _same_age(match.group(1), age):
+            return {"speaker": "pronoun", "who": "", "present": True}
+    return None
+
+
+def from_present_age(captured: object) -> DateRecord | None:
+    """An age held NOW, told on ``captured``: the moment is the telling's own
+    MONTH (basis ``stated``). *"Charlee is 15 and a half right now"* dates
+    the telling, not a year fifteen after anybody's birth; the owner's
+    ruling ("almost nothing needs precision of more than a month") sets the
+    grain. ``None`` without a readable capture date."""
+    day = capture_day(captured)
+    if day is None:
+        return None
+    month = f"{day.year:04d}-{day.month:02d}"
+    return DateRecord(
+        best=month, earliest=month, latest=month, granularity="month",
+        confidence="certain", basis="stated",
+        provenance=({
+            "claim": PRESENT_AGE_PROVENANCE.format(captured=day.isoformat()),
+            "basis": "stated",
+            "source": PRESENT_AGE_PROVENANCE_SOURCE,
+        },),
+    )
+
+
+PRESENT_AGE_PROVENANCE = "an age held now, told {captured}"
+PRESENT_AGE_PROVENANCE_SOURCE = "present_age"
+
+
+# --------------------------------------------------------------------------
+# Counted recency: "six to eight months ago" (v360, owner 2026-09-25)
+# --------------------------------------------------------------------------
+
+#: THE RULE. *"Six to eight months ago, the author and James were hanging out
+#: every day practicing baseball"* (``msg-969d8348ddfa64be466dc602``) is a
+#: placement: two numbers he chose and the day he said them. The months are
+#: counted back from the telling's capture date and held at MONTH grain (the
+#: owner's "month is enough" ruling). A band is the stretch it names; a single
+#: count is that month, widened by a month each side when he hedged it
+#: ("about six months ago"). The count is read by :func:`parse_age` — the ONE
+#: number reader, which already reads number words and bands ("six to eight",
+#: "twenty-one") — so this vocabulary cannot drift from the age one.
+N_MONTHS_AGO_IS_COUNTED_BACK_FROM_THE_TELLING = (
+    "'N months ago' and 'N to M months ago', in digits or words, are counted "
+    "back from the telling's capture date and placed at month grain"
+)
+
+_COUNT_WORD = (r"(?:\d{1,2}|(?:" + "|".join(sorted(NUMBER_WORDS, key=len, reverse=True))
+               + r")(?:[\s-]+(?:one|two|three|four|five|six|seven|eight|nine)\b)?)")
+MONTHS_AGO_RE = re.compile(
+    r"\b(?P<hedge>(?:about|around|roughly|maybe|like|probably|approximately)\s+)?"
+    r"(?P<count>" + _COUNT_WORD + r"(?:\s*(?:-|–|—|to|or)\s*" + _COUNT_WORD + r")?)"
+    r"\s+months?\s+ago\b",
+    re.IGNORECASE)
+
+#: A counted-recency placement's provenance clause, under basis ``stated``.
+MONTHS_AGO_PROVENANCE = "{cue}, told {captured}"
+MONTHS_AGO_PROVENANCE_SOURCE = "months_ago"
+
+
+def _month_back(day: _date, months: int) -> str:
+    total = (day.year * 12 + (day.month - 1)) - months
+    year, month = divmod(total, 12)
+    return f"{year:04d}-{month + 1:02d}"
+
+
+def from_months_ago(captured: object, *texts: object) -> DateRecord | None:
+    """:data:`N_MONTHS_AGO_IS_COUNTED_BACK_FROM_THE_TELLING`, or ``None``.
+
+    The same two refusals :func:`recency_cue` applies, per text: a text naming
+    a four-digit year dates itself (:data:`YEAR_RE`), and the idioms of
+    :data:`RECENCY_VETO_RES` say the opposite of recency. A count above 60
+    months is not recency and reads nothing.
+    """
+    day = capture_day(captured)
+    if day is None:
+        return None
+    for text in texts:
+        if not isinstance(text, str) or not text.strip() or YEAR_RE.search(text):
+            continue
+        if any(veto.search(text) for veto in RECENCY_VETO_RES):
+            continue
+        match = MONTHS_AGO_RE.search(text)
+        if match is None:
+            continue
+        parsed = parse_age(match.group("count"))
+        if parsed is None:
+            continue
+        low, high, hedged = parsed
+        hedged = hedged or bool(match.group("hedge"))
+        if high > 60 or low < 0:
+            continue
+        widen = 1 if low == high and hedged else 0
+        earliest = _month_back(day, high + widen)
+        latest = _month_back(day, max(low - widen, 0))
+        best = earliest if earliest == latest else f"{earliest}/{latest}"
+        cue = " ".join(match.group(0).split()).lower()
+        return DateRecord(
+            best=best, earliest=earliest, latest=latest,
+            granularity="month" if earliest == latest else "range",
+            confidence="approximate", basis="stated",
+            provenance=({
+                "claim": MONTHS_AGO_PROVENANCE.format(cue=cue, captured=day.isoformat()),
+                "basis": "stated",
+                "source": MONTHS_AGO_PROVENANCE_SOURCE,
+            },),
+        )
+    return None
+
+
+# --------------------------------------------------------------------------
+# School grades: "middle of sixth grade for James" (v360, owner 2026-09-25)
+# --------------------------------------------------------------------------
+
+#: THE RULE. A school GRADE is an age on the school calendar. *"This happened
+#: in the middle of sixth grade for James"* (``msg-3737a80061e5fd4938204b9b``)
+#: names a grade and whose grade it is, and the vault knows that person's
+#: birth: the US school year (:func:`school_year_start` — kindergarten the
+#: August after the child turns five on or before 1 September, the convention
+#: the owner's places follow) turns the two into a school year, August to June.
+#: *"Middle of"* is that year's winter months (December to February), *"start
+#: of"* its first three months, *"end of"* its last three, at month grain.
+#: ONE definition, read by every seat: the resolver's grade table
+#: (`resolver.grade_table`), the card-answer seat (`answer_placement`) and the
+#: classifier seat (`classifier_claims.temporal_reading`) all call
+#: :func:`school_grade_of`, and the fold measures the claim against its
+#: SUBJECT's birth in the one seat that measures ages
+#: (`temporal_timeline._record_for_age_claim` -> :func:`school_year_record`).
+A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR = (
+    "a school grade said of a person is that person's school year, measured "
+    "from their birth on the US school calendar; 'middle of' is its winter "
+    "months, at month grain"
+)
+
+#: Grade 0 is kindergarten; 1..12 are the numbered grades.
+GRADE_NAMES = ("kindergarten",) + tuple(
+    f"{n}{'st' if n == 1 else 'nd' if n == 2 else 'rd' if n == 3 else 'th'} grade"
+    for n in range(1, 13))
+_ORDINAL_WORDS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
+    "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12,
+}
+#: High-school year names; "junior HIGH" is a school, never a grade.
+_CLASS_YEAR_GRADES = {"freshman": 9, "sophomore": 10, "junior": 11, "senior": 12}
+#: A part of the school year, as ``(first month offset, last month offset)``
+#: from the August the year starts (0 = August, 10 = June).
+GRADE_PARTS = {"start": (0, 2), "middle": (4, 6), "end": (8, 10)}
+_PART_WORDS = {"beginning": "start", "start": "start", "early": "start",
+               "middle": "middle", "mid": "middle", "end": "end", "late": "end"}
+_GRADE_ORDINAL = (r"(?:" + "|".join(sorted(_ORDINAL_WORDS, key=len, reverse=True))
+                  + r"|\d{1,2}(?:st|nd|rd|th))")
+_GRADE_JOIN = r"\s*(?:or|and|to|through|thru|-|–|—|/)\s*"
+_CLASS_YEAR = r"(?:freshman|sophomore|junior|senior)"
+SCHOOL_GRADE_RE = re.compile(
+    r"\b(?:(?:the\s+)?(?P<part>beginning|start|early|middle|mid|end|late)"
+    r"(?:\s+part)?(?:\s+of|-)?\s+(?:the\s+|his\s+|her\s+|my\s+|their\s+|our\s+)?)?"
+    r"(?:(?P<ordinal>" + _GRADE_ORDINAL + r")(?:" + _GRADE_JOIN + r"(?P<ordinal_high>"
+    + _GRADE_ORDINAL + r"))?[\s-]+grade(?:r|s)?"
+    r"|grades?\s+(?P<number>\d{1,2})(?:" + _GRADE_JOIN + r"(?P<number_high>\d{1,2}))?\b"
+    r"|(?P<class_year>" + _CLASS_YEAR + r")(?:" + _GRADE_JOIN + r"(?P<class_year_high>"
+    + _CLASS_YEAR + r"))?\s+years?"
+    r"|(?P<kindergarten>kindergarten))\b",
+    re.IGNORECASE)
+_NOT_SCHOOL_AFTER_RE = re.compile(
+    r"^\W{0,3}(?:(?:of|in|at)\s+(?:college|university|uni|grad(?:uate)?\s+school|law\s+school|"
+    r"med(?:ical)?\s+school)|(?:in|at)\s+[A-Z][\w.]*\s+(?:University|College))",
+    re.IGNORECASE)
+_GRADE_FOR_RE = re.compile(r"^\s*(?:for|of)\s+(?P<who>(?:my\s+)?[A-Z][\w’'-]*)")
+_GRADE_POSSESSIVE_RE = re.compile(r"(?P<who>\b[A-Z][\w-]*)['’]s\s*$")
+_GRADE_WAS_IN_RE = re.compile(
+    r"(?P<who>\b[A-Za-z][\w’'-]*)\s+(?:was|were|is|am|['’]m)\s+"
+    r"(?:(?:probably|maybe|about|around|like|only|just|still|already|in\s+about)\s+)*"
+    r"in\s*(?:the\s+)?$", re.IGNORECASE)
+_GRADE_MY_RE = re.compile(r"\bmy\s*$", re.IGNORECASE)
+#: The words a classifier writes for the owner himself.
+_NARRATOR_WORDS = frozenset({"narrator", "author", "speaker", "owner", "self"})
+
+
+def _grade_number(word: object) -> int | None:
+    text = str(word or "").lower()
+    if not text:
+        return None
+    if text in _CLASS_YEAR_GRADES:
+        return _CLASS_YEAR_GRADES[text]
+    if text in _ORDINAL_WORDS:
+        return _ORDINAL_WORDS[text]
+    match = re.match(r"\d+", text)
+    return int(match.group(0)) if match else None
+
+
+def school_year_start(birth_date: object) -> int | None:
+    """The calendar year a person born on ``birth_date`` starts kindergarten
+    (August), or ``None`` without a readable birth. Born on or before 1
+    September -> the year they turn five; later -> the year after."""
+    record = birth_date if isinstance(birth_date, DateRecord) else (
+        from_dict(birth_date) if isinstance(birth_date, dict) else None)
+    text = str((record.earliest or record.best) if record is not None else (birth_date or "")).strip()
+    match = re.match(r"^(\d{4})-(\d{2})(?:-(\d{2}))?", text)
+    if not match:
+        return None
+    year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3) or 1)
+    return year + 5 if (month, day) <= (9, 1) else year + 6
+
+
+def school_grade_of(text: object) -> dict | None:
+    """The first school grade ``text`` names, or ``None``.
+
+    ``{"grade": 0..12, "part": "start"|"middle"|"end"|None, "phrase": <words>,
+    "speaker": "narrator"|"named"|None, "who": <as written>}``. ``speaker`` is
+    whose grade the words say: *"for James"*, *"James's sixth grade"*, *"when
+    James was in sixth grade"* name a person; *"I was in"*, *"my sixth grade"*
+    are the narrator; ``None`` leaves it to the claim's own subject.
+
+    Refused: a text naming a four-digit year (it dates itself — the
+    :data:`YEAR_RE` trap every recency and age reader keeps), and a class-year
+    word about college (*"freshman year of college"*).
+    """
+    body = " ".join(str(text or "").split())
+    if not body or YEAR_RE.search(body):
+        return None
+    for match in SCHOOL_GRADE_RE.finditer(body):
+        after = body[match.end():]
+        if _NOT_SCHOOL_AFTER_RE.search(after):
+            continue
+        if match.group("kindergarten"):
+            grade, high = 0, None
+        elif match.group("class_year"):
+            grade, high = (_grade_number(match.group("class_year")),
+                           _grade_number(match.group("class_year_high")))
+        elif match.group("number"):
+            grade, high = (_grade_number(match.group("number")),
+                           _grade_number(match.group("number_high")))
+        else:
+            grade, high = (_grade_number(match.group("ordinal")),
+                           _grade_number(match.group("ordinal_high")))
+        if grade is None or not 0 <= grade <= 12:
+            continue
+        if high is not None and not grade < high <= 12:
+            high = None
+        part = _PART_WORDS.get((match.group("part") or "").lower())
+        before = body[:match.start()]
+        speaker, who = None, ""
+        found = _GRADE_FOR_RE.match(after)
+        if found is None:
+            found = _GRADE_POSSESSIVE_RE.search(before)
+        if found is None:
+            found = _GRADE_WAS_IN_RE.search(before)
+        if found is not None:
+            who = found.group("who")
+            word = who.lower().removeprefix("my ").strip()
+            if word in _SPEAKER_PRONOUNS or word in _NARRATOR_WORDS:
+                speaker, who = "narrator", "I"
+            elif word in _THIRD_PERSON_PRONOUNS:
+                speaker, who = None, ""
+            else:
+                speaker = "named"
+        elif _GRADE_MY_RE.search(before):
+            speaker, who = "narrator", "I"
+        return {"grade": grade, "grade_high": high, "part": None if high else part,
+                "phrase": " ".join(match.group(0).split()),
+                "speaker": speaker, "who": who}
+    return None
+
+
+def school_grade_quantity(found: object) -> dict | None:
+    """:func:`school_grade_of`'s reading as an ``age`` claim's value: the ages
+    a child is during that grade (a band, approximate) carrying the grade, so
+    the fold measures it on the school calendar (:func:`school_year_record`)."""
+    row = found if isinstance(found, dict) else {}
+    grade = row.get("grade")
+    if not isinstance(grade, int) or not 0 <= grade <= 12:
+        return None
+    high = row.get("grade_high")
+    high = high if isinstance(high, int) and grade < high <= 12 else None
+    value = {"kind": "age", "low": float(grade + 5), "high": float((high or grade) + 6),
+             "unit": "years", "approximate": True, "grade": grade,
+             "text": collapsed_phrase(row.get("phrase"))}
+    if high is not None:
+        value["grade_high"] = high
+    elif row.get("part") in GRADE_PARTS:
+        value["grade_part"] = row["part"]
+    return value
+
+
+def collapsed_phrase(text: object) -> str:
+    return " ".join(str(text or "").split())
+
+
+def school_year_record(birth_date: object, grade: object, *, part: object = None,
+                       grade_high: object = None,
+                       claim: str | None = None) -> DateRecord | None:
+    """:data:`A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR`'s arithmetic.
+
+    Birth + grade -> that school year (August to June), or the part of it
+    ``part`` names, at month grain, basis ``age`` (it is birthday arithmetic)
+    and ``approximate`` (a school calendar is a convention, not a record).
+    """
+    start = school_year_start(birth_date)
+    try:
+        index = int(grade)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if start is None or not 0 <= index <= 12:
+        return None
+    try:
+        top = int(grade_high) if grade_high is not None else index  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        top = index
+    if not index <= top <= 12:
+        top = index
+    first, last = GRADE_PARTS.get(str(part or ""), (0, 10)) if top == index else (0, 10)
+    year = start + index
+
+    def month(at_year: int, offset: int) -> str:
+        total = at_year * 12 + 7 + offset  # August is month index 7
+        return f"{total // 12:04d}-{total % 12 + 1:02d}"
+
+    earliest, latest = month(year, first), month(start + top, last)
+    said = collapsed_phrase(claim) or GRADE_NAMES[index]
+    named = (GRADE_NAMES[index] if top == index
+             else f"{GRADE_NAMES[index]} to {GRADE_NAMES[top]}")
+    return DateRecord(
+        best=f"{earliest}/{latest}", earliest=earliest, latest=latest,
+        granularity="range", confidence="approximate", basis="age",
+        provenance=({
+            "claim": (f"calculated from “{said}” on the US school year "
+                      f"({named}, {year}-08 to {start + top + 1}-06)"),
+            "basis": CALCULATED_PROVENANCE_BASIS,
+        },),
+    )
+
+
+def grade_table_lines(birth_date: object) -> list[str]:
+    """``"2nd grade -> 2020-08 to 2021-06"`` for a whole US school career —
+    the resolver's grade table, read off :func:`school_year_start` so the
+    table and the fold cannot disagree about a school year."""
+    start = school_year_start(birth_date)
+    if start is None:
+        return []
+    names = list(GRADE_NAMES)
+    for grade, word in ((9, "freshman"), (10, "sophomore"), (11, "junior"), (12, "senior")):
+        names[grade] += f" ({word})"
+    return [f"{name} -> {start + n}-08 to {start + n + 1}-06" for n, name in enumerate(names)]
 
 
 def _age_band(low: object, high: object) -> tuple[int, int] | None:
@@ -1622,6 +2179,74 @@ def from_age_band(birth_date: object, low: object, high: object, *,
         anchors=("birth",),
         provenance=provenance,
     )
+
+
+#: The finest grain an AGE is said at. Owner, 2026-09-25: *"If I say 19-21 you
+#: can say the start of his birth month to the end range of his birth month …
+#: I don't care that much about days."* An age names a year of somebody's life,
+#: and the birthday's MONTH is the finest edge that year honestly has — so a
+#: day-precise birth still gives a month-grained window, never a day-exact one.
+AGE_STATEMENT_GRAIN = "month"
+
+
+def at_grain(record: object, grain: str) -> DateRecord | None:
+    """``record`` with each bound rounded OUTWARD to ``grain``. Only ever widens.
+
+    ``1973-06-04/1976-06-03`` at ``month`` is ``1973-06/1976-06``: truncation
+    (:func:`_truncate_iso`), which reads as the 1st of the month for an
+    ``earliest`` bound and the last day for a ``latest`` one, so the result
+    always CONTAINS the input. A bound already at or coarser than ``grain`` is
+    kept as it is, and a record with nothing to round comes back unchanged
+    (the same object). ``best`` is re-derived only when it named the old
+    bounds as an interval; a hedged point (``1974~``) is left alone, because
+    it is the reading a person recognises and rounding the bounds does not
+    move it.
+    """
+    parsed = _as_record(record)
+    if parsed is None or grain not in ("day", "month", "year"):
+        return parsed
+
+    def rounded(token: str | None) -> str | None:
+        if not token or len(str(token).split("-")) != 3:
+            return token
+        return _truncate_iso(token, grain)
+
+    earliest, latest = rounded(parsed.earliest), rounded(parsed.latest)
+    if (earliest, latest) == (parsed.earliest, parsed.latest):
+        return parsed
+    best = parsed.best
+    if best and "/" in best and best == f"{parsed.earliest or '..'}/{parsed.latest or '..'}":
+        best = f"{earliest or '..'}/{latest or '..'}"
+    granularity = parsed.granularity
+    if granularity == "day":
+        granularity = grain if earliest == latest else "range"
+    return replace(parsed, best=best, earliest=earliest, latest=latest,
+                   granularity=granularity)
+
+
+def age_statement_record(birth_date: object, low: object, high: object, *,
+                         approximate: bool = False,
+                         claim: str | None = None) -> DateRecord | None:
+    """An age as the person SAID it: :func:`from_age_band` at the age's grain.
+
+    Two things, both the owner's ruling (:data:`AGE_STATEMENT_GRAIN`): the
+    bounds are rounded to the birthday's month, and a band said as a band —
+    *"19 to 21"*, not *"about 20"* — reads as the stretch it names
+    (``1973-06/1976-06``) rather than as its midpoint year (``1974~``). A hedged
+    age keeps its hedged point, which is the owner's own example (*"about 5"*
+    reads *around 1984*). The arithmetic is :func:`from_age_band`'s and there
+    is still one of it; this only decides how finely its answer is held.
+    """
+    record = from_age_band(birth_date, low, high, approximate=approximate, claim=claim)
+    if record is None:
+        return None
+    record = at_grain(record, AGE_STATEMENT_GRAIN) or record
+    band = _age_band(low, high)
+    if (not approximate and band is not None and band[0] < band[1]
+            and record.earliest and record.latest):
+        record = replace(record, best=f"{record.earliest}/{record.latest}",
+                         granularity="range")
+    return record
 
 
 def from_age(birth_date: object, age_text: object, *, claim: str | None = None) -> DateRecord | None:

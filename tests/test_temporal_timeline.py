@@ -231,8 +231,10 @@ class RelativeAndInferredTime(unittest.TestCase):
         # straddle. The test's own point survives unweakened: `best` still
         # stays a fuzzy `~` YEAR, never a derived day (the assertion right
         # below), which is what "never a birthday-derived day" means here.
+        # timeline-rules:19 (`chronology.AGE_STATEMENT_GRAIN`): an age is held
+        # at the birthday's MONTH — the owner's "I don't care that much about days".
         self.assertEqual((value["earliest"], value["latest"]),
-                         ("1983-03-08", "1986-03-07"))
+                         ("1983-03", "1986-03"))
         self.assertNotRegex(value["best"] or "", r"^\d{4}-\d{2}-\d{2}$")
 
     def test_an_age_without_a_birthday_stays_unplaced_and_asks_for_the_anchor(self):

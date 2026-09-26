@@ -351,7 +351,10 @@ def preserve_existing_object_roster(entity_type: str, entities: list[dict],
 _SETTLED_IDENTITY_FIELDS = ("relationship", "living", "born", "died", *roster_relations.PLACE_IDENTITY_FIELDS,
                             # v358: the owner's answer to the relation-word card.
                             relation_words.RELATION_GENDER_FIELD,
-                            relation_words.RELATION_GENDER_BASIS_FIELD)
+                            relation_words.RELATION_GENDER_BASIS_FIELD,
+                            # v360, owner 2026-09-25 (the person form): whose side
+                            # a grandparent is on, and the word he calls them.
+                            "grandparent_side", "relation_word")
 _SETTLED_PLACE = object()
 
 #: The two date-shaped settled fields, as a subset of the tuple above. Named
@@ -829,6 +832,404 @@ def load_roster(entity_type: str = "person", *, vault_root: object = None) -> di
 
 
 # --------------------------------------------------------------------------
+# v360 (owner, 2026-09-25) — a `children`/`family` LANDMARK ENTRY introduces
+# a person too, not just a claim's own words
+# --------------------------------------------------------------------------
+#
+# THE DEFECT. The owner's vault carries four `children` landmark entries with
+# real full names and dates — Charlee Joy Taylor, Dottie Ovelle Taylor, Harvey
+# Rex Taylor, James Everett Taylor, all filed 2026-08-27 — plus a fifth, EMPTY
+# `children` entry for Charlee filed overnight (2026-09-25T08:20:58Z). Two of
+# the four — Charlee and Dottie — had no roster row at all. v344's
+# `ensure_introduced_relatives` only reads the CLAIM substrate
+# (`roster_relations.relationship_introduction_batch`) for a relationship
+# PHRASE beside a name in the owner's own words, and no source in this vault
+# happens to carry Charlee's or Dottie's name inside the SAME clause as a
+# relationship word — the closest one, "I have my beautiful daughter Charlee"
+# (`answer:E27`), produced no dated claim at all, so its source never entered
+# the batch. The `children` landmark domain names them anyway, unambiguously
+# (the domain itself IS the relation), and the vault had already filed it.
+# This reads that.
+#
+# THE RULE. A `children` landmark entry with a full name earns "child" — the
+# same relationship `harvey` and `james-everett-taylor` already carry under
+# `source: "landmark:family"`; a `family` landmark entry keeps using its own
+# `relation` field (already the roster's vocabulary —
+# `roster_relations.landmark_recorded_relations`'s reading of the same field,
+# used today only to REFUSE a contradiction, never to introduce a row). Both
+# go through the SAME writer as v344, `entity_verdict.apply_verdict(...,
+# ensure=True)` — never a parallel store.
+#
+# THE SAME GUARDS. Never from a first name alone (v202/v347's own principle,
+# applied here): the name must be at least two capitalised, alphabetic
+# tokens, so a bare "Harvey" landmark entry is never enough by itself. Never
+# a second row for somebody the roster already answers to: a name already
+# known by its own spelling, or one sharing its FIRST token with an existing
+# person's name or alias ("Harvey Rex Taylor" shares "harvey" with the row
+# `harvey` already on the roster, so it is read as the SAME person and left
+# alone, never a duplicate) is skipped. No compounds, no "my dad's dad"
+# confusion: the domain names one relation directly, so there is no
+# relationship WORD to parse and nothing to misread.
+
+CHILDREN_RELATION_DOMAIN = "children"
+LANDMARK_RELATION_DOMAINS = (roster_relations.FAMILY_RELATION_DOMAIN, CHILDREN_RELATION_DOMAIN)
+
+
+def _looks_like_a_full_name(text: str) -> bool:
+    """At least two capitalised, alphabetic tokens — never a first name alone."""
+    parts = text.split()
+    return len(parts) >= 2 and all(
+        p[:1].isupper() and p.replace("'", "").replace("-", "").isalpha() for p in parts)
+
+
+def _first_token(text: str) -> str:
+    parts = text.split()
+    return parts[0].casefold() if parts else ""
+
+
+def _roster_first_tokens(roster: object) -> set[str]:
+    """Every first token any existing person row already answers to, by name
+    or by alias — the guard that keeps "Harvey Rex Taylor" from becoming a
+    second row beside the roster's existing "Harvey"."""
+    out: set[str] = set()
+    for entity in roster_relations.roster_entities(roster):
+        for spelling in (entity.get("name"), *(entity.get("aliases") or ())):
+            body = roster_relations.collapsed_text_of(spelling)
+            if body:
+                out.add(_first_token(body))
+    out.discard("")
+    return out
+
+
+def landmark_relationship_introductions(landmark_entries: object, *,
+                                        roster: object = ()) -> tuple[dict, ...]:
+    """Every person a `children`/`family` LANDMARK ENTRY introduces and the
+    roster lacks, one row per slug — the landmark-sourced half of
+    :func:`ensure_introduced_relatives`. Pure: entries and a roster snapshot
+    in, rows out. Deterministic (sorted by slug), so two runs propose the
+    same rows in the same order; when more than one entry names the same
+    slug (Charlee's two `children` entries), the one carrying a birth date
+    wins over the one that does not, and the row never regresses from dated
+    to undated.
+    """
+    import identity_resolution as ir  # noqa: PLC0415
+
+    known_tokens = _roster_first_tokens(roster)
+    index = None
+    try:
+        index = ir.roster_index(roster, entity_type="person")
+    except Exception:  # noqa: BLE001 — a roster we cannot read knows nobody
+        index = None
+
+    def known(name: str) -> bool:
+        key = ir.normalized_mention_key(name)
+        if index is not None and (index.by_name_key.get(key) or index.by_alias_key.get(key)
+                                   or index.has_ref(name)):
+            return True
+        return _first_token(name) in known_tokens
+
+    by_slug: dict[str, dict] = {}
+    for row in sorted(landmark_entries or (),
+                      key=lambda r: (r.get("ordinal", 0) if isinstance(r, dict) else 0,
+                                     r.get("source_id", "") if isinstance(r, dict) else "")):
+        if not isinstance(row, dict):
+            continue
+        domain = roster_relations.collapsed_text_of(row.get("domain"))
+        if domain not in LANDMARK_RELATION_DOMAINS:
+            continue
+        record = row.get("record")
+        if not isinstance(record, dict):
+            continue
+        if domain == CHILDREN_RELATION_DOMAIN:
+            relationship = "child"
+        else:
+            relationship = roster_relations.collapsed_text_of(record.get("relation"))
+        if not relationship:
+            continue
+        name = roster_relations.collapsed_text_of(
+            record.get("who") or record.get("label") or record.get("subject"))
+        if not name or not _looks_like_a_full_name(name):
+            continue
+        if known(name):
+            continue
+        slug = ir.normalized_mention_key(name).replace(" ", "-")
+        if not slug:
+            continue
+        date = record.get("date") if isinstance(record.get("date"), dict) else None
+        born = roster_relations.collapsed_text_of(date.get("best")) if date else ""
+        born_basis = roster_relations.collapsed_text_of(date.get("basis")) if date else ""
+        candidate = {
+            "name": name, "slug": slug, "relationship": relationship,
+            "relationship_word": f"landmark:{domain}", "aliases": (),
+            "source_id": row.get("source_id"), "mention": name,
+        }
+        if born:
+            candidate["born"], candidate["born_basis"] = born, born_basis or "stated"
+        existing = by_slug.get(slug)
+        if existing is None or (candidate.get("born") and not existing.get("born")):
+            by_slug[slug] = candidate
+    return tuple(by_slug[key] for key in sorted(by_slug))
+
+
+# --------------------------------------------------------------------------
+# v360 (owner, 2026-09-25) — a roster row already answers to its own
+# relation word
+# --------------------------------------------------------------------------
+#
+# THE DEFECT. `grandma-betty-jo`'s own canonical NAME is "Grandma Betty Jo" —
+# the owner's word for her is baked into the roster's name, not introduced by
+# a separate relationship phrase beside a bare "Betty Jo". v344's
+# introduction batch reads a relationship WORD beside a name it does not
+# already know; the roster already had this row (`known()` was true from the
+# first mention), so it never carried `relationship`.
+#
+# THE RULE. A roster row with no `relationship`, whose own canonical NAME
+# opens with a relation word (`identity_resolution.RELATIONSHIP_MENTION_WORDS`,
+# read through `roster_relations.roster_relationship_for`), gets that
+# relationship — through the same writer, `entity_verdict.apply_verdict` (the
+# row already exists, so never `--ensure`). Never a collective ("Kids",
+# "Siblings") or a bare role word ("Son", "Daughter") — the same tests
+# `relation_words.is_collective_row` / `is_role_row` already screen the
+# gendered-word card with, read here rather than re-typed — and never a
+# personal name that merely happens to start with a common word, because the
+# check is against the CLOSED relation-word vocabulary, not any capitalised
+# first token.
+
+
+def relationship_from_own_name(roster: object, *, dry_run: bool = False) -> dict:
+    """File `relationship` for every roster row whose own NAME already states
+    it, and the row has none yet. ``{"updated": [...], "filed": n}``."""
+    import entity_verdict  # noqa: PLC0415
+
+    updated: list[dict] = []
+    filed = 0
+    for entity in roster_relations.roster_entities(roster):
+        if roster_relations.collapsed_text_of(entity.get("relationship")):
+            continue
+        if relation_words.is_collective_row(entity) or relation_words.is_role_row(entity):
+            continue
+        name = roster_relations.collapsed_text_of(entity.get("name"))
+        parts = name.split()
+        if len(parts) < 2:
+            continue
+        relationship = roster_relations.roster_relationship_for(parts[0])
+        if not relationship:
+            continue
+        slug = roster_relations.collapsed_text_of(entity.get("slug"))
+        if not slug:
+            continue
+        updated.append({"slug": slug, "name": name, "relationship": relationship,
+                        "relationship_word": parts[0]})
+        if dry_run:
+            continue
+        entity_verdict.apply_verdict("person", slug, "clear", relationship=relationship)
+        filed += 1
+    return {"updated": updated, "filed": filed}
+
+
+# --------------------------------------------------------------------------
+# v360 (owner, 2026-09-25) — whose grandparent, when the roster does not say
+# --------------------------------------------------------------------------
+#
+# `roster_relationship_for` places a "grandma"/"grandpa" word into the one
+# roster bucket `grandparent` — `focus_candidate.FOCUS_RELATIONSHIPS` has no
+# maternal/paternal seat, and none is needed to place her on the roster. But
+# "your mom's side, or your dad's" is real information the owner may want,
+# and the only way to get it is to ask: ONE low-rank card, following the v358
+# `relation_words` card conventions (same `kind`, scored lowest, at most one
+# per person, never re-minted once the field is set) — kind
+# `relation_words.RELATION_WORD_KIND`, `requested_field` `"grandparent_side"`
+# rather than `"relation_gender"`, because whose side is a different question
+# about the same word.
+
+GRANDPARENT_SIDE_FIELD = "grandparent_side"
+REQUESTED_FIELD_GRANDPARENT_SIDE = "grandparent_side"
+
+#: The two sides, as the card's own candidate refs.
+MATERNAL = "maternal"
+PATERNAL = "paternal"
+
+#: v360 follow-up (owner, 2026-09-25) (item 6). A side he already SAID is known, and
+#: a card about it is the failed question the owner ruled out ("a card is asked
+#: only when a person could answer it" — and never when he already has). The
+#: owner's own words, read the way `relation_words` reads a relationship word:
+#: ONE clause, the grandparent's own spelling beside "my dad's dad" / "my mom's
+#: mother" (either order), or a subject that is itself "maternal grandfather".
+#: Never a surname, never a guess from "Sr.", never somebody else's words.
+A_GRANDPARENT_SIDE_HE_SAID_IS_KNOWN = (
+    "a grandparent's side is known when the owner's own words put it beside "
+    "that grandparent's name in one clause — \"James Edwin Taylor Sr., my dad's "
+    "dad\", \"my mom's mother Ruth\", \"my maternal grandmother Ruth\" — and then "
+    "no side card is asked; a surname or a generational suffix decides nothing"
+)
+
+_SIDE_PARENT_WORDS = {
+    "dad": PATERNAL, "father": PATERNAL, "papa": PATERNAL,
+    "mom": MATERNAL, "mother": MATERNAL, "mum": MATERNAL, "mama": MATERNAL,
+}
+_SIDE_GRANDPARENT_WORDS = ("dad", "father", "mom", "mother", "mum", "grandpa",
+                           "grandma", "grandfather", "grandmother", "parent", "parents")
+_SIDE_PHRASE = (
+    r"(?:my|our)\s+(?P<parent>dad|father|papa|mom|mother|mum|mama)['’]s\s+"
+    r"(?:" + "|".join(_SIDE_GRANDPARENT_WORDS) + r")\b")
+_SIDE_ADJECTIVE = r"(?:my\s+|our\s+)?(?P<side>maternal|paternal)\s+grand(?:father|mother|pa|ma|parent)s?\b"
+
+
+def _side_spellings(entity: dict) -> list[str]:
+    """The grandparent's own spellings a clause may name them by: the full name
+    and any alias that is not a bare relationship word ("grandpa" is every
+    grandfather)."""
+    out: list[str] = []
+    for value in [entity.get("name"), *(entity.get("aliases") or ())]:
+        text = roster_relations.collapsed_text_of(value)
+        text = re.sub(r"\s*\(.*?\)\s*", " ", text).strip()
+        if not text or relation_words.bare_relation_word(text):
+            continue
+        if len(text) < 4 or text in out:
+            continue
+        out.append(text)
+    return sorted(out, key=len, reverse=True)
+
+
+def stated_grandparent_side(entity: object, texts: object) -> dict | None:
+    """``{"side", "clause"}`` when the owner's own words give this grandparent's
+    side (:data:`A_GRANDPARENT_SIDE_HE_SAID_IS_KNOWN`), else ``None``. Two
+    clauses that disagree decide nothing."""
+    if not isinstance(entity, dict):
+        return None
+    spellings = _side_spellings(entity)
+    if not spellings:
+        return None
+    found: dict[str, str] = {}
+    for text in texts or ():
+        for clause in roster_relations.introduction_clauses(text):
+            if not any(re.search(rf"(?<!\w){re.escape(name)}(?!\w)", clause, re.I)
+                       for name in spellings):
+                continue
+            for match in re.finditer(_SIDE_PHRASE, clause, re.I):
+                found.setdefault(_SIDE_PARENT_WORDS[match.group("parent").casefold()], clause)
+            for match in re.finditer(_SIDE_ADJECTIVE, clause, re.I):
+                found.setdefault(match.group("side").casefold(), clause)
+    if len(found) != 1:
+        return None
+    side, clause = next(iter(found.items()))
+    return {"side": side, "clause": clause}
+
+
+def grandparent_side_rows(roster: object, *, claims: object = ()) -> tuple[dict, ...]:
+    """One row per named grandparent whose side is not yet known — neither
+    answered (the roster field) nor said (:func:`stated_grandparent_side` over
+    the texts of ``claims``, `relation_words.texts_by_source`' own unit)."""
+    import identity_resolution as ir  # noqa: PLC0415
+
+    sources = relation_words.texts_by_source(claims)
+    out: list[dict] = []
+    for entity in roster_relations.roster_entities(roster):
+        if roster_relations.collapsed_text_of(entity.get("relationship")) != "grandparent":
+            continue
+        if ir.is_alias_row(entity) or relation_words.is_collective_row(entity) \
+                or relation_words.is_role_row(entity):
+            continue
+        if roster_relations.collapsed_text_of(entity.get(GRANDPARENT_SIDE_FIELD)):
+            continue
+        ref = roster_relations.entity_ref("person", entity)
+        if not ref:
+            continue
+        sides = {row["side"] for texts in sources.values()
+                 for row in (stated_grandparent_side(entity, texts),) if row}
+        if len(sides) == 1:
+            continue
+        out.append({"subject_ref": ref, "name": roster_relations.collapsed_text_of(entity.get("name"))})
+    return tuple(sorted(out, key=lambda row: row["subject_ref"]))
+
+
+def grandparent_side_question(name: object) -> str:
+    """The card's question, in the house wording (v358's relation-word card)."""
+    body = roster_relations.collapsed_text_of(name)
+    return f"Is {body} on your mom's side or your dad's?" if body else ""
+
+
+def grandparent_side_cards(rows: object, *, now: object) -> tuple[dict, ...]:
+    """At most one open card per row — the same shape
+    `relation_words.relation_word_cards` mints, a different question."""
+    import temporal_projection as tp  # noqa: PLC0415
+    import temporal_timeline as tt  # noqa: PLC0415
+    import temporal_work_items as twi  # noqa: PLC0415
+
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in rows or ():
+        name = row.get("name") if isinstance(row, dict) else ""
+        if not name:
+            continue
+        ref = row["subject_ref"]
+        work_item_id = twi.canonical_work_item_id(
+            kind=relation_words.RELATION_WORD_KIND, subject_ref=ref,
+            requested_field=REQUESTED_FIELD_GRANDPARENT_SIDE)
+        if not work_item_id or work_item_id in seen:
+            continue
+        seen.add(work_item_id)
+        scores = tt._score_components(  # noqa: SLF001 — the fold's one scorer
+            relation_words.RELATION_WORD_KIND, system_value=0.0, event_kind=None,
+            subject_ref=ref, resolved=True)
+        item = tp.validate_temporal_work_item({
+            "work_item_id": work_item_id,
+            "kind": relation_words.RELATION_WORD_KIND,
+            "state": "open",
+            "subject_ref": ref,
+            "requested_field": GRANDPARENT_SIDE_FIELD,
+            "prompt_intent": grandparent_side_question(name),
+            "allowed_surfaces": list(tt.SURFACES_BY_KIND.get(
+                relation_words.RELATION_WORD_KIND, ("timeline",))),
+            **scores,
+            "created_at": now,
+            "updated_at": now,
+        }, now=now)
+        item["label"] = name
+        item["candidates"] = [
+            {"ref": MATERNAL, "name": "my mom's side"},
+            {"ref": PATERNAL, "name": "my dad's side"},
+            {"ref": "unspecified", "name": "just “grandparent”"},
+        ]
+        out.append(item)
+    return tuple(out)
+
+
+def with_grandparent_side_cards(payloads: dict, *, roster: object, now: object = None,
+                                claims: object = ()) -> dict:
+    """Publish the ambiguity cards onto a rendered payload pair, in place —
+    the same append shape `relation_words.with_relation_words` uses for its
+    own cards, so the two kinds sit in the same queue without either module
+    writing the other's. Wired into `temporal_publication` beside the
+    relation-word cards (v360 follow-up, owner 2026-09-25, item 6)."""
+    rows = grandparent_side_rows(roster, claims=claims)
+    cards = grandparent_side_cards(rows, now=now)
+    if cards:
+        for payload in payloads.values():
+            items = payload.get("work_items")
+            if not isinstance(items, list):
+                continue
+            have = {str(row.get("work_item_id") or "") for row in items
+                    if isinstance(row, dict)}
+            added = [dict(card) for card in cards if card["work_item_id"] not in have]
+            if not added:
+                continue
+            payload["work_items"] = [*items, *added]
+            counts = payload.get("counts")
+            if isinstance(counts, dict) and "work_items" in counts:
+                counts["work_items"] = len(payload["work_items"])
+            components = payload.get("score_components")
+            if isinstance(components, dict):
+                for card in added:
+                    components[card["work_item_id"]] = {
+                        key: card[key] for key in (
+                            "person_value", "system_value", "interaction_cost",
+                            "sensitivity", "context_fit", "combined_score")
+                        if key in card}
+    return {"rows": rows, "cards": cards}
+
+
+# --------------------------------------------------------------------------
 # v344 — the person a relationship phrase introduced gets a row
 # --------------------------------------------------------------------------
 
@@ -858,8 +1259,17 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
     written (`roster_relations.A_RECORDED_RELATION_OUTRANKS_AN_INTRODUCED_ONE`).
     The refusals come back as ``findings``; nothing about them is written.
 
+    v360 (owner, 2026-09-25) (roster membership): the claim-sourced batch is joined
+    by :func:`landmark_relationship_introductions` — a `children`/`family`
+    LANDMARK ENTRY introduces a person exactly as a claim's relationship
+    phrase does, through the same writer, for the person a claim alone never
+    reaches (Charlee, Dottie) — and by :func:`relationship_from_own_name`, for
+    a row the roster already has whose own name states the relation nobody
+    ever filed (Grandma Betty Jo). Both are additive and additional to the
+    claim-sourced rows, never a replacement of them.
+
     ``{"introduced": [...], "filed": n, "skipped_aliases": [...],
-    "findings": [...]}``.
+    "findings": [...], "own_name": [...]}``.
     """
     import entity_verdict  # noqa: PLC0415
     import landmark_projection as lp  # noqa: PLC0415
@@ -882,7 +1292,12 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
         claims, roster=roster, owner_names=owner_names,
         landmark_entries=landmark_entries, correction_texts=correction_texts,
     )
-    rows = batch["rows"]
+    rows = list(batch["rows"])
+    have_slugs = {row["slug"] for row in rows}
+    for row in landmark_relationship_introductions(landmark_entries, roster=roster):
+        if row["slug"] not in have_slugs:
+            rows.append(row)
+            have_slugs.add(row["slug"])
     skipped: list[dict] = []
     filed = 0
     for row in rows:
@@ -907,8 +1322,9 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
             name=row["name"],
         )
         filed += 1
+    own_name = relationship_from_own_name(roster, dry_run=dry_run)
     return {"introduced": list(rows), "filed": filed, "skipped_aliases": skipped,
-            "findings": list(batch["findings"])}
+            "findings": list(batch["findings"]), "own_name": own_name["updated"]}
 
 
 def _thresholds(entity_type: str, args) -> tuple[float, int]:
@@ -962,6 +1378,9 @@ def main() -> int:
         for row in result["skipped_aliases"]:
             print(f"    ↯ “{row['alias']}” already answers to "
                   f"{', '.join(row['taken_by'])} — left alone")
+        for row in result.get("own_name") or ():
+            print(f"  {row['slug']}: {row['name']} — {row['relationship']} "
+                  f"(from its own name's “{row['relationship_word']}”)")
         return 0
 
     if args.show:

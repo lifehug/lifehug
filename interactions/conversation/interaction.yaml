@@ -6,7 +6,10 @@ modes: chat|conversation
 # file load order (per-turn assembly; also documented in context/manifest.md)
 # asking_supply (issue #168, ADR 0016) sits between record and session:
 # per-session-but-whole-vault-derived like record, cache-tier correct.
-load_order: identity|behavior|examples|profile|record|asking_supply|session|turn_instructions
+# how_words_arrive (2026-09-25) is the one framework-wide block every
+# interaction that interprets the person's words reads —
+# interactions/how-words-arrive.md, stable, so it joins the cached prefix.
+load_order: identity|behavior|examples|how_words_arrive|profile|record|asking_supply|session|turn_instructions
 # model roles by capability tier (config keys resolved by the runtime;
 # OSS config keys land in Wave 2 — these name the ROLES, not providers)
 role.router: haiku-class
@@ -60,6 +63,7 @@ knob.asking_supply_top_k: 3
 budget.identity: 900
 budget.behavior: 4000
 budget.examples: 2400
+budget.how_words_arrive: 400
 budget.profile: 400
 budget.record: 1800
 budget.asking_supply: 400

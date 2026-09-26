@@ -67,6 +67,8 @@ QUEUED_MUTATION_COMMANDS = frozenset({
 })
 READ_ONLY_COMMANDS = frozenset({
     "ai-status", "answer-ack-prompt", "answer-ack-status",
+    # one place, one landmark (2026-09-25): lists repeated messages, writes nothing.
+    "repeated-messages",
     # Issue #118: the daily attach is a PURE READ of state/arc_cards.json —
     # it must never take the writer lock, because daily_question.sh calls it
     # between picking and sending.
@@ -207,6 +209,19 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # nothing, but the command is classified BY NAME exactly as era-migrate and
     # bind-episodes are.
     "landmark-reinstate",
+    # one place, one landmark (2026-09-25): files merge records under
+    # sources/landmarks/merges/ and redraws + republishes. --apply is the
+    # writing door; classified by name like landmark-reinstate.
+    "landmark-fold-duplicates",
+    # v360, owner 2026-09-25: refiles a record filed in the wrong domain — a
+    # supersession, and for an event a refile record plus its moment receipt —
+    # then redraws + republishes. --apply is the writing door; by name.
+    "landmark-refile",
+    # v360, owner 2026-09-25 (the edit forms): the owner's landmark and person
+    # forms. Each files corrections + records through `timeline.save_landmark`
+    # and the roster writer, then republishes — the same single-transaction
+    # vault mutation family as landmark-record.
+    "landmark-edit", "person-edit",
     "source-lint", "source-manifest", "timeline-place", "timeline-retire",
     # v232 (wave E, item E2): a drag files a durable correction source under
     # sources/corrections/ and republishes the calculated projection. Same
@@ -2278,6 +2293,166 @@ def cmd_landmark_reinstate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_landmark_fold_duplicates(args: argparse.Namespace) -> int:
+    """Fold every existing landmark duplicate into the entry he gave (v360, owner 2026-09-25).
+
+    `landmark_identity.ONE_PLACE_ONE_LANDMARK` for what landed before the
+    write seat knew it: `landmark_projection.duplicate_fold_plan` names each
+    undated duplicate and its dated original, and ``--apply`` files one merge
+    record per duplicate source (`sources/landmarks/merges/`), redraws and
+    republishes. The promoted sources are never touched; the old node ids are
+    redirected through `node_aliases`. Dry run by default. Idempotent: a
+    second ``--apply`` files nothing.
+
+    ``--pair SOURCE=TARGET`` folds one source into another by the owner's own
+    decision, for a duplicate no rule can see. Never "dad's house" into BJ's
+    House: a relation word's home is a relative place, filed as a mention by
+    `landmark_identity.A_RELATION_WORDS_HOME_IS_A_RELATIVE_PLACE` ("Dad's house
+    could be many houses", owner 2026-09-25).
+    """
+    import json as _json  # noqa: PLC0415
+
+    import landmark_projection as _lp  # noqa: PLC0415
+    import timeline as _timeline  # noqa: PLC0415
+
+    import temporal_store as _store  # noqa: PLC0415
+
+    sources = _lp.load_landmark_sources(REPO_DIR)
+    index = _store.read_active_index(REPO_DIR) or _store.fold_active_index(REPO_DIR)
+    active = {collapsed for collapsed in (
+        (row.get("source_ref") or {}).get("source_id")
+        for row in _store.active_claims(index)
+        if row.get("claim_type") == "identity") if collapsed}
+    plan = _lp.duplicate_fold_plan(
+        sources, owner_names=_lp.owner_names_for(REPO_DIR),
+        active_source_ids=active)
+    by_id = {row["source_id"]: row for row in sources}
+    for pair in args.pair or ():
+        merged, _, target = pair.partition("=")
+        merged, target = merged.strip(), target.strip()
+        if merged not in by_id or target not in by_id:
+            print(f"Error: --pair {pair!r}: both ends must be filed landmark "
+                  f"source ids", file=sys.stderr)
+            return 1
+        plan.append({"domain": by_id[merged]["domain"], "kind": _lp.MERGE_INTO_ENTRY,
+                     "source_ids": [merged], "from": by_id[merged]["entry_key"],
+                     "into": by_id[target]["entry_key"],
+                     "into_entry_key": by_id[target]["entry_key"],
+                     "into_source_id": target, "reason": "owner_decided_pair",
+                     "mention": ""})
+    filed = []
+    if args.apply:
+        for step in plan:
+            for source_id in step["source_ids"]:
+                record = _lp.file_landmark_merge(
+                    REPO_DIR, domain=step["domain"], merged_source_id=source_id,
+                    kind=step["kind"], into_entry_key=step["into_entry_key"] or None,
+                    into_source_id=step["into_source_id"] or None,
+                    reason=(f"{step['reason']}: folded by landmark-fold-duplicates "
+                            f"(one place, one landmark)"),
+                    mention=step["mention"] or None,
+                )
+                filed.append(record["source_path"])
+        if plan:
+            _timeline.redraw_landmarks()
+    if args.json:
+        print(_json.dumps({"plan": plan, "filed": filed, "applied": bool(args.apply)},
+                          indent=2, sort_keys=True))
+        return 0
+    if not plan:
+        print("✓ no landmark duplicates to fold")
+        return 0
+    for step in plan:
+        target = (f"→ {step['into']} ({step['into_source_id']})"
+                  if step["kind"] == _lp.MERGE_INTO_ENTRY
+                  else f"→ mention ({step['mention'] or step['reason']})")
+        print(f"  {step['domain']}: {step['from']!r} [{len(step['source_ids'])} "
+              f"source(s)] {target}  [{step['reason']}]")
+    if not args.apply:
+        print(f"{len(plan)} duplicate(s) would fold (nothing written — re-run "
+              f"with --apply)")
+        return 0
+    print(f"✓ folded {len(plan)} duplicate(s); {len(filed)} merge record(s) filed")
+    return 0
+
+
+def cmd_landmark_refile(args: argparse.Namespace) -> int:
+    """Refile every landmark record filed in the wrong domain (v360, owner 2026-09-25).
+
+    `landmark_projection.A_RECORD_IS_FILED_WHERE_IT_BELONGS` for what landed
+    before the write seat knew it: a person's name filed as a school, a dated
+    event filed as a job, a company or a fund filed as a partnership.
+    `landmark_projection.refile_plan` names each one; ``--apply`` supersedes
+    its claims (scope ``landmarks/<domain>``) and, for an event, files the
+    ordinary moment it is (a refile record under
+    ``sources/landmarks/refiles/`` and one receipt over it), then redraws and
+    republishes. Dry run by default. Idempotent: a refiled record has no active
+    claim left, so a second ``--apply`` files nothing.
+    """
+    import json as _json  # noqa: PLC0415
+
+    import landmark_projection as _lp  # noqa: PLC0415
+    import temporal_store as _store  # noqa: PLC0415
+    import timeline as _timeline  # noqa: PLC0415
+
+    sources = _lp.load_landmark_sources(REPO_DIR)
+    index = _store.fold_active_index(REPO_DIR)
+    plan = _lp.refile_plan(sources, index)
+    filed = []
+    if args.apply and plan:
+        for step in plan:
+            filed.append(_lp.file_landmark_refile(REPO_DIR, step, active_index=index))
+        _timeline.redraw_landmarks()
+    if args.json:
+        print(_json.dumps({"plan": plan, "filed": filed, "applied": bool(args.apply)},
+                          indent=2, sort_keys=True))
+        return 0
+    if not plan:
+        print("✓ no misfiled landmark records to refile")
+        return 0
+    for step in plan:
+        print(f"  {step['domain']}: {step['label']!r} ({step['source_id']}) → "
+              f"{step['kind']}  [{step['reason']}; {len(step['claim_ids'])} claim(s)]")
+    if not args.apply:
+        print(f"{len(plan)} record(s) would be refiled (nothing written — re-run "
+              f"with --apply)")
+        return 0
+    print(f"✓ refiled {len(filed)} record(s); "
+          f"{sum(row['claims'] for row in filed)} moment claim(s) filed")
+    return 0
+
+
+def cmd_repeated_messages(args: argparse.Namespace) -> int:
+    """List every promoted message that repeats an earlier source word for word.
+
+    Read-only (`temporal_store.A_REPEATED_TEXT_IS_LINKED_TO_ITS_FIRST_ARRIVAL`).
+    Each row names the repeat, the source it repeats, and how many active
+    claims its own reading holds, which is what an owner decision about the
+    repeat needs to see.
+    """
+    import json as _json  # noqa: PLC0415
+
+    import temporal_store as _store  # noqa: PLC0415
+
+    repeats = _store.find_repeated_messages(REPO_DIR)
+    index = _store.read_active_index(REPO_DIR) or _store.fold_active_index(REPO_DIR)
+    active = list(_store.active_claims(index))
+    for row in repeats:
+        row["claim_ids"] = sorted(
+            str(claim.get("claim_id")) for claim in active
+            if (claim.get("source_ref") or {}).get("source_path") == row["source_path"])
+    if args.json:
+        print(_json.dumps(repeats, indent=2, sort_keys=True))
+        return 0
+    if not repeats:
+        print("✓ no repeated messages")
+        return 0
+    for row in repeats:
+        print(f"  {row['source_path']} repeats {row['repeats']} "
+              f"({len(row['claim_ids'])} active claim(s))")
+    return 0
+
+
 def cmd_landmark_record(args: argparse.Namespace) -> int:
     """File one landmark answer (v197). The only writer for the landmark set."""
     import chronology as _chrono  # noqa: PLC0415
@@ -2361,6 +2536,12 @@ def cmd_landmark_record(args: argparse.Namespace) -> int:
         return 0
     if saved.get("none"):
         print(f"recorded {validated['domain']}: none — the domain is complete")
+        return 0
+    if saved.get("not_written"):
+        # One place, one landmark (owner ruling 2026-09-25): nothing new, or
+        # a city/state he has stays in, or someone else's residence.
+        print(f"not written {validated['domain']}: {saved['not_written']} — "
+              f"already recorded as {saved.get('label') or saved.get('name') or 'his stays'}")
         return 0
     print(f"recorded {validated['domain']}: "
           f"{saved.get('label') or _li.rung_reached(saved, row) or 'noted'}")
@@ -2723,9 +2904,42 @@ def cmd_entity_verdict(args: argparse.Namespace) -> int:
         flags.extend(["--name", args.name])
     if getattr(args, "ensure", False):
         flags.append("--ensure")
+    for flag in ("grandparent_side", "relation_word"):
+        value = getattr(args, flag, None)
+        if value is not None:
+            flags.extend([f"--{flag.replace('_', '-')}", str(value)])
     if args.json:
         flags.append("--json")
     return run_python("entity_verdict.py", flags)
+
+
+def cmd_form_edit(args: argparse.Namespace) -> int:
+    """`landmark-edit` / `person-edit` — the owner's edit forms (v360, owner
+    2026-09-25, `landmark_edit.OWNER_EDIT_IS_EXACT`).
+
+    One JSON payload on stdin (`landmark_edit.edit_landmark` /
+    `edit_person` name its shape). Files through the landmark record and
+    correction machinery and the roster writer, never a store of its own, and
+    republishes once. Idempotent: an unchanged form files nothing.
+    """
+    import json as _json  # noqa: PLC0415
+
+    import landmark_edit  # noqa: PLC0415
+
+    raw = "" if sys.stdin.isatty() else sys.stdin.read()
+    code, result = landmark_edit.main(args.form_verb, raw, REPO_DIR)
+    if code != 0:
+        print(f"Error: {result.get('error')}", file=sys.stderr)
+        return code
+    if getattr(args, "json", False):
+        print(_json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return 0
+    filed = len(result.get("filed") or ())
+    retired = len(result.get("retired") or ())
+    print(f"✓ {args.form_verb} ({result.get('mode')}): {filed} filed, {retired} retired, "
+          f"{result.get('unchanged', 0)} unchanged; corrections: "
+          f"{', '.join(result.get('corrections') or ()) or 'none'}")
+    return 0
 
 
 def cmd_focus_recommend_from_entity(args: argparse.Namespace) -> int:
@@ -3515,8 +3729,20 @@ def build_parser() -> argparse.ArgumentParser:
                         "Never page-eligible on creation.")
     p.add_argument("--name", metavar="NAME",
                    help="With --ensure: the person's name on the created entry")
+    p.add_argument("--grandparent-side", dest="grandparent_side", default=None,
+                   help="maternal|paternal (empty clears) — whose side a grandparent is on")
+    p.add_argument("--relation-word", dest="relation_word", default=None,
+                   help="The word you call this person by (Grandpa, Mom)")
     p.add_argument("--json", action="store_true", help="Print the result as JSON")
     p.set_defaults(func=cmd_entity_verdict)
+
+    for verb, what in (("landmark-edit", "a landmark (home, school, work, mission area)"),
+                       ("person-edit", "a cornerstone person (category, names, dates)")):
+        p = sub.add_parser(
+            verb, help=f"File the owner's edit form for {what}; JSON payload on stdin "
+                       "(v360, owner 2026-09-25)")
+        p.add_argument("--json", action="store_true", help="Print the result as JSON")
+        p.set_defaults(func=cmd_form_edit, form_verb=verb)
 
     p = sub.add_parser("focus-recommend-from-entity",
                        help="Append ONE pending Focus recommendation for a graduated "
@@ -4285,6 +4511,36 @@ def build_parser() -> argparse.ArgumentParser:
                         "written and the plan is printed")
     p.add_argument("--json", action="store_true", help="machine-readable summary")
     p.set_defaults(func=cmd_landmark_reinstate)
+
+    p = sub.add_parser(
+        "landmark-fold-duplicates",
+        help="Fold existing landmark duplicates into the entry he gave "
+             "(one place, one landmark)")
+    p.add_argument("--pair", action="append", default=[],
+                   help="SOURCE_ID=TARGET_SOURCE_ID: fold one source into "
+                        "another by the owner's decision (repeatable)")
+    p.add_argument("--apply", action="store_true",
+                   help="file the merge records and republish; without it "
+                        "nothing is written and the plan is printed")
+    p.add_argument("--json", action="store_true", help="machine-readable summary")
+    p.set_defaults(func=cmd_landmark_fold_duplicates)
+
+    p = sub.add_parser(
+        "landmark-refile",
+        help="Refile landmark records filed in the wrong domain (a person as a "
+             "school, an event as a job, a company as a partnership)")
+    p.add_argument("--apply", action="store_true",
+                   help="supersede, file the moments and republish; without it "
+                        "nothing is written and the plan is printed")
+    p.add_argument("--json", action="store_true", help="machine-readable summary")
+    p.set_defaults(func=cmd_landmark_refile)
+
+    p = sub.add_parser(
+        "repeated-messages",
+        help="List promoted messages that repeat an earlier source word for "
+             "word (read-only)")
+    p.add_argument("--json", action="store_true", help="machine-readable list")
+    p.set_defaults(func=cmd_repeated_messages)
 
     p = sub.add_parser(
         "arc-plan-target",

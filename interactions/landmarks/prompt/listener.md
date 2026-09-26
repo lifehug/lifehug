@@ -19,6 +19,8 @@ the question comes back anyway.
 ALREADY FILED — these entries are already in the store:
 {known_entries}
 
+{how_words_arrive}
+
 WHAT THEY SAID:
 {answer}
 
@@ -151,6 +153,8 @@ is most of what people actually say.
 - `evidence` is a SHORT quotation of the words that say it, copied from what
   they said. A claim with no quotation is refused: a claim you cannot trace
   back to the sentence it came from is not evidence of anything.
+- A school is the institution, never the person who went; signing a paper is
+  a moment, not work; a company or a fund is never a partnership.
 - **A person and an event are two records.** "My sister Ruth was born in
   1948" is an `identity` claim for Ruth AND a `date` claim with
   `event_kind: "birth"`. Naming somebody is not the same fact as dating

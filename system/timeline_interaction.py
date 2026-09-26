@@ -33,7 +33,7 @@ if str(_SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(_SYSTEM_DIR))
 
 import chronology as chrono  # noqa: E402
-from lifehug_core import now_utc  # noqa: E402
+from lifehug_core import fill_how_words_arrive, now_utc  # noqa: E402
 
 
 class TimelineInteractionError(ValueError):
@@ -2166,10 +2166,13 @@ ERA_RECORDER_PURPOSE = "date_record"
 
 
 def load_era_recorder_leaf(framework_root: str | Path | None = None) -> str:
-    """The era recorder leaf, verbatim. A host REPLAYs exactly this text."""
+    """The era recorder leaf, verbatim but for the shared ``{how_words_arrive}``
+    block (`lifehug_core.fill_how_words_arrive`). A host REPLAYs exactly this
+    text."""
     base = (Path(framework_root) / "interactions" / "timeline"
             if framework_root else _SYSTEM_DIR.parent / "interactions" / "timeline")
-    return (base / "prompt" / ERA_RECORDER_PROMPT).read_text(encoding="utf-8")
+    return fill_how_words_arrive(
+        (base / "prompt" / ERA_RECORDER_PROMPT).read_text(encoding="utf-8"), framework_root)
 
 
 def build_era_recorder_prompt(*, target: object, question_asked: str,

@@ -177,7 +177,7 @@ class TheRuleIsWrittenDown(unittest.TestCase):
     """The rule text lives as a constant, and the retirement says so too."""
 
     def test_the_rule_version_tracks_the_current_rules(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:18")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
         self.assertEqual(tt.CALCULATION_RULE_VERSION,
                          CERT_10["calculation_rule_version"])
 
@@ -296,12 +296,25 @@ class TwoEpisodesAtTheSamePlace(CertCase):
         self.assertEqual(
             self.binder["plan"].counts["containment_by_rule"]["entity_span"], 0)
 
-    def test_ambiguous_stays_publish_as_not_usable(self):
+    def test_a_bare_mention_spans_both_stays(self):
+        """v360 follow-up (`timeline-rules:23`,
+        `temporal_timeline.A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`, owner:
+        "place the story across both stays"). The zoo trip names San Diego and
+        nothing else about when, so it spans every San Diego stay — one
+        envelope, the gap between the stays in its provenance — and no
+        "which time?" card is asked."""
         pub.publish(self.root, now=NOW)
         view = pub.calculated_view(self.root)
         moments = [row for row in view["nodes"] if row.get("event_kind") == "moment"]
         self.assertTrue(moments)
-        self.assertTrue(all(row["usable_placement"] is False for row in moments))
+        spans = self.expected["spans_the_stays"]
+        for row in moments:
+            best = row["best_temporal_value"]
+            self.assertEqual((best["earliest"], best["latest"]),
+                             (spans["earliest"], spans["latest"]))
+            gaps = [item for item in best.get("provenance") or ()
+                    if item.get("rule") == "place_anchor_gap"]
+            self.assertEqual(gaps[0]["gaps"], [spans["gap"]])
 
     def test_the_rung_says_why_it_refused(self):
         refused = self.binder["plan"].containment_ambiguities
@@ -309,20 +322,18 @@ class TwoEpisodesAtTheSamePlace(CertCase):
         self.assertEqual(refused[0]["entity"], "place/san-diego")
         self.assertEqual(refused[0]["kind"], self.expected["work_item_kind"])
 
-    def test_one_place_ambiguous_item_is_minted_and_names_the_place(self):
+    def test_one_place_several_stays_asks_no_which_time_card(self):
+        """Until `timeline-rules:23` this minted "Which time in San Diego was
+        this — 1988–1990 or 1996–1999?". ONE place he lived at twice, and
+        nothing more specific said, is no question
+        (`temporal_timeline.A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`); the
+        finding says so."""
         items = self.items_of_kind(self.expected["work_item_kind"])
         self.assertEqual(len(items), self.expected["place_ambiguous_items"])
-        self.assertIn("San Diego", items[0]["prompt_intent"] or "")
-        self.assertIn("timeline", items[0]["allowed_surfaces"])
-
-    def test_the_question_is_a_sentence_a_person_would_say(self):
-        """D3's deterministic backstop applies to this kind too — a lint
-        finding would have minted `prompt_intent: None` and a withheld
-        reason."""
-        item = self.items_of_kind(self.expected["work_item_kind"])[0]
-        self.assertEqual(cl.lint_question(item["prompt_intent"]), [])
-        self.assertIsNone(item.get("withheld_reason"))
-        self.assertEqual(item["prompt_intent"], self.expected["prompt_intent"])
+        findings = [row for row in self.result.diagnostics["findings"]
+                    if row.get("finding") == "one_place_several_stays_no_card"]
+        self.assertEqual(len(findings), 1)
+        self.assertTrue(findings[0]["spans_the_stays"])
 
     def test_the_item_is_openable(self):
         """An item no host can open is invisible work (ADR 0021)."""

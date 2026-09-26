@@ -96,6 +96,35 @@ asks you for a year.
   <!-- parity: timeline.UNKNOWNS_PAGE_CAP = 30 -->
 - **Leverage** — how many unknowns one anchor would resolve. **Keystones** are
   the top two, starred. <!-- parity: timeline.KEYSTONE_CAP = 2 -->
+- **Cornerstone** (owner-named, 2026-09-25; ADR 0038) — one of the small FIXED
+  set of dates everything is measured from, and the only dates asked to the
+  day: the owner's birth; each child's birth; the births of his parents,
+  siblings and spouse; each of his weddings and divorces; the deaths of his
+  parents, spouse, siblings, children and grandparents; his baptism once
+  mentioned (`cornerstones.CORNERSTONES`). A keystone is computed and changes
+  with every answer; a cornerstone is the same set for every life.
+- **Landmarks view / Cornerstones view** (v360, owner 2026-09-25,
+  `timeline_views`) — the two read models behind the Timeline's two square
+  buttons, published as the additive `landmarks_view` and `cornerstones_view`
+  keys beside `relation_words` (a display decision; the rule version does not
+  move). The **landmarks view** is every landmark entry you gave, after the
+  merge records, by domain: a place you lived twice is one landmark with both
+  stays, each at the grain you gave, and a home always shows nickname,
+  address, city, state and country — `null` where you have not said it, never
+  guessed (`timeline_views.A_HOME_SHOWS_EVERY_FIELD`). Homes, schools and work
+  show their **gaps** — a hole of more than two months between stays
+  (`timeline_views.A_GAP_IS_A_HOLE_OF_MORE_THAN_TWO_MONTHS`), shown ░ and
+  never asked; a residence gap names `landmarks_interaction.residence_gaps`'
+  own unknown key rather than redefining it — and their **covered** stretches
+  ◇: a stretch another landmark accounts for, a mission or military service,
+  is covered, not a gap (`timeline_views.A_COVERED_STRETCH_IS_NOT_A_GAP`). The
+  **cornerstones view** is one row per person in the cornerstone set, grouped
+  You / Spouse / Children / Parents / Siblings / Grandparents, with born,
+  married, divorced and died, each `exact` (a day), `needs_day`,
+  `disagreement` (an open contradiction on it) or `missing`; a death nobody
+  has told is `not_owed`, never asked. Each person is shown by what you call
+  them ("Dad", "Mom", "AJ"). A row that needs settling carries its Play: the
+  open work item on it, else its landmarks ladder.
 - **Cross-dating** (v205) — the pass that spends the landmarks. For every
   still-undated moment it tries one derivation, strongest join first:
   **definitional** (the moment IS a landmark fact — a birth, a move, a
@@ -186,10 +215,13 @@ asks you for a year.
   remembered, the unknown simply stays outstanding and keeps its star. (v196
   deleted the deferral side-state v195 had introduced.)
 
-**How the three timeline words relate.** Landmarks are the universal
-skeleton; **keystones** are the per-person gaps that skeleton leaves — the one
-date that would place the most moments, computed from the dependency graph;
-and **whispers** and **keystone questions** are the two ways the loop asks.
+**How the timeline words relate.** Landmarks are the universal
+skeleton — spans and points, by domain; **keystones** are the per-person gaps
+that skeleton leaves — the one date that would place the most moments,
+computed from the dependency graph; **cornerstones** are the fixed dated
+points everything is measured from, asked to the day while everything else
+stops at a month; and **whispers** and **keystone questions** are the two ways
+the loop asks.
 
 ### The substrate nouns
 
@@ -515,6 +547,33 @@ calculating placement against a spine**:
   again where the probable window is known. A question may still ask for
   higher fidelity when that would settle many things, and its wording may
   name the grain it needs.
+- **A day is asked only of a cornerstone** (owner ruling, 2026-09-25, ADR
+  0038). *"We almost never need more than month precision except for
+  extremely important dates like birth, death, wedding, divorce."* Every date
+  card carries `requested_grain`: `day` for a cornerstone — missing, or held
+  coarser than a day, and that card keeps its stakes whatever the gate above
+  says; `year` for a cornerstone-type event about somebody outside the set
+  (*"When did your sister get divorced?"*), asked once, accepted at any grain
+  and never pressed; and never finer than `month` for anything else. Leverage
+  raises a card's rank, never its grain
+  (`temporal_work_items.A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`). A day worked
+  out by arithmetic is DISPLAYED as its month
+  (`chronology.A_WORKED_OUT_DAY_IS_SHOWN_AS_ITS_MONTH`); the stored interval
+  keeps it. A marriage is drawn as a span that opens on the wedding
+  cornerstone and stays open while married
+  (`temporal_timeline.A_MARRIAGE_IS_A_SPAN`).
+- **A place mention is an outer bound** (v360 follow-up, owner 2026-09-25,
+  `timeline-rules:23`). "In Arizona" bounds a moment by his Arizona stays and
+  the moment's other evidence narrows it — the event its own handle names, his
+  age, a span — never across a gap between stays
+  (`temporal_timeline.A_PLACE_MENTION_IS_AN_OUTER_BOUND`). A house he lived at
+  twice spans both stays minus the gap, and one place never asks "which time?"
+  (`A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`). "Dad's house" is a relative
+  place, never a residence (`landmark_identity.A_RELATION_WORDS_HOME_IS_A_RELATIVE_PLACE`).
+- **An estimate is capped at about five years**
+  (`resolver.AN_ESTIMATE_WIDER_THAN_FIVE_YEARS_STAYS_A_WINDOW`): a wider one
+  stays the probable window and is asked about only when hot
+  (`temporal_publication.A_WIDE_ESTIMATE_IS_ASKED_ONLY_WHEN_HOT`).
 - **Verification is mechanical**: every cited quote must occur in the cited
   passage, every date must parse, ranges must be ordered, a `derived` answer
   must cite the spine fact it came from. What fails files nothing.

@@ -112,6 +112,7 @@ import episode_fold_contract as efc  # noqa: E402
 import era_memberships as era  # noqa: E402
 import event_binding as eb
 import identity_resolution as ident  # noqa: E402
+import roster_relations as rr  # noqa: E402
 import landmark_opportunities as lo  # noqa: E402
 import landmark_projection as lp  # noqa: E402
 import landmarks_interaction as li  # noqa: E402
@@ -119,6 +120,7 @@ import temporal_claims as tc  # noqa: E402
 import timeline_evidence  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import axis_membership as axm  # noqa: E402
+import cornerstones as cs  # noqa: E402
 import temporal_work_items as twi  # noqa: E402
 import timeline_gain as tg  # noqa: E402
 from temporal_claims import (  # noqa: E402
@@ -287,7 +289,80 @@ from temporal_claims import (  # noqa: E402
 #: calculate to a different subject set, and so to different node ids (each
 #: published as a v350 redirect), different age anchors and a different
 #: work-item set for claims nobody edited.
-CALCULATION_RULE_VERSION = "timeline-rules:18"
+#:
+#: timeline-rules:19 (:data:`AN_ANSWER_IS_THE_PLACEMENT`, owner 2026-09-25): a
+#: node the person dated in their own words — an answer to a card or a stated
+#: date or age in a telling — is placed by what they said, at the grain they
+#: said it; the resolver's inference and every other agreeing reading become
+#: supporting evidence on that placement, and a reading that does not fit
+#: stays the rival the contradiction card names. An age is held at the
+#: birthday's MONTH, and a band as the stretch it names
+#: (`chronology.age_statement_record`), so "19 to 21" from a 1954-06-04 birth
+#: draws 1973-06/1976-06 rather than 1973-06-04/1976-06-03. The same claims
+#: calculate to a different best value on every node where the person's own
+#: words and the fold's former winner differed.
+#:
+#: timeline-rules:20 (v360, owner 2026-09-25): WHAT HE CALLS THEM DECIDES A
+#: BARE NAME (`identity_resolution.WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`).
+#: *"When I talk about James, I'm talking about my son ... I call my dad Dad
+#: and his dad Grandpa."* A roster person the owner's own tellings call by a
+#: relationship word or a nickname (`roster_relations.with_called_by`, read
+#: from the claims this fold holds) does not compete for their first name, so
+#: a bare "James" binds his son where v335/v357 left it unresolved — the same
+#: claims calculate to a different subject, and so to different node ids,
+#: different age anchors and a different work-item set.
+#: timeline-rules:21 (`landmark_identity.ONE_PLACE_ONE_LANDMARK` and
+#: `A_PLACE_MENTION_TIES_TO_HIS_LANDMARKS`, owner 2026-09-25): a landmark
+#: telling a merge record folds into an entry he gave lands on THAT entry's
+#: episode (its old id published as an alias, and every reading that froze
+#: the old id carried with it), and a place an anchor or an undated telling
+#: names ("left Kristen", "while living in San Diego", "when I lived in
+#: Arizona") binds to his stays at the level he named: a house is that stay,
+#: "left <house>" its end month, a city or state the union of his stays
+#: there, month-grained at most. The same claims calculate to different
+#: nodes (the duplicates are gone) and different bounds (those moments are
+#: placed).
+#: timeline-rules:22 (:data:`A_MARRIAGE_IS_A_SPAN`, owner 2026-09-25, the
+#: cornerstones ruling): the owner's marriage is drawn as its own open span,
+#: starting at his wedding cornerstone and closing only at a divorce or a
+#: death. The same claims now calculate to one more node. The rest of the
+#: ruling is work items and display only (`cornerstones`,
+#: `temporal_work_items.A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`,
+#: `chronology.A_WORKED_OUT_DAY_IS_SHOWN_AS_ITS_MONTH`) and moves no placement.
+#: timeline-rules:23 (v360 follow-up, owner 2026-09-25): a place mention is
+#: an OUTER bound (:data:`A_PLACE_MENTION_IS_AN_OUTER_BOUND`) — the stays it
+#: names bound a moment that its other evidence narrows, a handle's own event
+#: ("earning Eagle Scout in Arizona") binds beside its place, and a window is
+#: never left hanging in a gap between the stays; a house he lived at twice
+#: places across both stays minus the gap between them
+#: (:data:`A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`) instead of asking which
+#: time; a handle titled as a cornerstone binds to it
+#: (:data:`A_HANDLE_NAMING_A_CORNERSTONE_BINDS_TO_IT`); a cornerstone is
+#: titled by its own name (`cornerstones.A_CORNERSTONE_IS_TITLED_BY_ITS_OWN_NAME`)
+#: and asked in its own words (:data:`A_CORNERSTONE_IS_ASKED_IN_ITS_OWN_WORDS`).
+#: The same claims calculate to different bounds and different titles.
+#: timeline-rules:24 (v360, owner 2026-09-25, the right couple and the right
+#: person): a death cornerstone his own stated date places is dated by a DATE —
+#: an age or an anchor window a telling of the death carries is a finding, never
+#: its rival (:data:`A_DEATH_IS_DATED_BY_ITS_DATE`); the owner's third-person
+#: possessive is his "my" (`identity_resolution.AN_OWNERS_POSSESSIVE_IS_HIS_MY`),
+#: so "the narrator's father" is his father. The same claims calculate to
+#: different alternates, work items and subject refs.
+#: timeline-rules:25 (v360, owner 2026-09-25, his records): a school tenure
+#: inferred from a stay ends at the graduation he stated
+#: (`landmark_projection.A_STATED_GRADUATION_ENDS_THE_SCHOOL` — Mountain View
+#: 11th-12th ends June 1999, not August 2000); two dated tellings of one school
+#: with different grades are two stays
+#: (`landmarks_interaction.TWO_STATED_GRADE_STRETCHES_ARE_TWO_STAYS`); an age
+#: said as a school grade is measured on the school calendar against its
+#: subject's birth (`chronology.A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR`
+#: — "middle of sixth grade for James" is Dec 2024 to Feb 2025); "six to eight
+#: months ago" is counted back from the telling
+#: (`chronology.N_MONTHS_AGO_IS_COUNTED_BACK_FROM_THE_TELLING`); a span told as
+#: running to the present is ongoing
+#: (`landmark_projection.HIS_WORD_PRESENT_IS_ONGOING`). The same claims
+#: calculate to different bounds.
+CALCULATION_RULE_VERSION = "timeline-rules:25"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -716,6 +791,24 @@ def structural_signature(result: object) -> dict:
 # --------------------------------------------------------------------------
 # Reading the substrate
 # --------------------------------------------------------------------------
+
+
+def telling_texts(claims: object) -> list[str]:
+    """The owner's own words a fold holds: every claim's subject and event
+    mention and its evidence quotes. What `roster_relations.with_called_by`
+    reads to learn what he calls each person (timeline-rules:20)."""
+    out: list[str] = []
+    for claim in claims or ():
+        if not isinstance(claim, dict):
+            continue
+        for key in ("subject_mention", "event_mention"):
+            text = collapsed_text(claim.get(key))
+            if text:
+                out.append(text)
+        for row in claim.get("evidence") or ():
+            if isinstance(row, dict) and collapsed_text(row.get("quote")):
+                out.append(collapsed_text(row.get("quote")))
+    return out
 
 
 def active_claim_rows(active_index: object) -> list[dict]:
@@ -1231,7 +1324,22 @@ def _person_key_index(roster_snapshot: object) -> tuple[dict, frozenset]:
             elif standing != position:
                 owners[key] = -1
     index: dict[str, frozenset] = {}
+    # timeline-rules:20: the position of each person row by ref, so a bare
+    # name the census of what he calls them decides is filed under THAT
+    # person — never under whichever row happens to spell it as an alias.
+    position_of = {}
+    for position, row in enumerate(rows):
+        slug = (normalized_mention_key(row.get("slug"))
+                or normalized_mention_key(row.get("name"))).replace(" ", "-")
+        if slug:
+            position_of.setdefault(ident.entity_ref("person", slug), position)
     for key in owners:
+        decided = ident.what_he_calls_them_ref(key, census)
+        if decided and decided in position_of:
+            owners[key] = position_of[decided]
+            for position, keys in sets.items():
+                (keys.add if position == position_of[decided] else keys.discard)(key)
+            continue
         if ident.shared_name_token_refs(key, census):
             owners[key] = -1
     ambiguous = frozenset(key for key, position in owners.items() if position < 0)
@@ -1484,7 +1592,24 @@ def _record_for_age_claim(claim: dict, birth: object) -> tuple[chrono.DateRecord
         return None, "quantity_band_unrepresentable"
     if birth is None:
         return None, "age_without_birth_anchor"
-    record = chrono.from_age_band(
+    if quantity.get("grade") is not None:
+        # v360 (owner, 2026-09-25) (timeline-rules:25,
+        # `chronology.A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR`): an age
+        # said as a school grade is that subject's school year, not the band.
+        record = chrono.school_year_record(
+            birth, quantity.get("grade"), part=quantity.get("grade_part"),
+            grade_high=quantity.get("grade_high"),
+            claim=optional_text(quantity.get("text")))
+        if record is None:
+            return None, "quantity_band_unrepresentable"
+        entry = _claim_provenance(claim)
+        if entry:
+            record = replace(record, provenance=record.provenance + (entry,))
+        return record, ""
+    # timeline-rules:19 (:data:`AN_ANSWER_IS_THE_PLACEMENT`'s second half):
+    # the age is held at the grain it was said at — the birthday's month, and a
+    # band as the stretch it names — `chronology.age_statement_record`.
+    record = chrono.age_statement_record(
         birth,
         quantity.get("low"),
         quantity.get("high"),
@@ -1695,6 +1820,105 @@ def _is_gerund_phrase(text: object) -> bool:
     return bool(subject) and subject not in _BARE_DETERMINERS
 
 
+# --------------------------------------------------------------------------
+# v360 (owner, 2026-09-25) — cleaning a TITLE's own text
+# --------------------------------------------------------------------------
+#
+# A title is never re-worded — it is the person's own words (a telling's
+# summary, a handle he said, a mention the roster carries), and the one thing
+# this module still owns about it is how it is CASED and DATED, never what it
+# means. "junior year", "701 north williams foreclosure", "mike eyre email on
+# aug 28 2025" are the same handles the owner used; a title reads them
+# sentence-cased, with a date in his own "28 Aug 2025" order (owner ruling,
+# 2026-09-25 v360 review).
+
+_MONTH_FRAG = (
+    r"Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
+    r"Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?"
+)
+_MONTH_ABBR_BY_PREFIX = {
+    "jan": "Jan", "feb": "Feb", "mar": "Mar", "apr": "Apr", "may": "May",
+    "jun": "Jun", "jul": "Jul", "aug": "Aug", "sep": "Sep", "sept": "Sep",
+    "oct": "Oct", "nov": "Nov", "dec": "Dec",
+}
+#: "Aug 28, 2025", "August 28 2025" — the extractor's usual order.
+_MONTH_DAY_YEAR_RE = re.compile(
+    rf"\b(?P<month>{_MONTH_FRAG})\.?\s+(?P<day>\d{{1,2}})(?:st|nd|rd|th)?,?\s+"
+    rf"(?P<year>\d{{4}})\b",
+    re.IGNORECASE,
+)
+#: "28 Aug 2025", "28th of August, 2025" — already the owner's own order.
+_DAY_MONTH_YEAR_RE = re.compile(
+    rf"\b(?P<day>\d{{1,2}})(?:st|nd|rd|th)?\s+(?:of\s+)?(?P<month>{_MONTH_FRAG})\.?,?\s+"
+    rf"(?P<year>\d{{4}})\b",
+    re.IGNORECASE,
+)
+#: "2025-08-28" — left alone; it is not the reading order this rewrites,
+#: only a signal that a full date is already spelled out (D5, below).
+_ISO_DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+
+
+def _month_abbr(word: str) -> str:
+    """Any spelling of a month, as the owner's own three letters."""
+    key = re.sub(r"[^a-z]", "", word.lower())
+    for prefix, abbr in _MONTH_ABBR_BY_PREFIX.items():
+        if key.startswith(prefix):
+            return abbr
+    return word[:1].upper() + word[1:].lower()
+
+
+def _reformat_dates(text: str) -> str:
+    """"Aug 28, 2025" -> "28 Aug 2025" wherever one appears in a title.
+
+    One order, the owner's own (2026-09-25: *"28 Aug 2025"*), so a title
+    naming a date never disagrees with the timeline's own date rendering
+    about which number is the day.
+    """
+    def month_first(match: re.Match) -> str:
+        return f"{int(match.group('day'))} {_month_abbr(match.group('month'))} {match.group('year')}"
+
+    def day_first(match: re.Match) -> str:
+        return f"{int(match.group('day'))} {_month_abbr(match.group('month'))} {match.group('year')}"
+
+    text = _MONTH_DAY_YEAR_RE.sub(month_first, text)
+    text = _DAY_MONTH_YEAR_RE.sub(day_first, text)
+    return text
+
+
+def _handle_names_a_full_date(text: object) -> bool:
+    """Does this handle already carry a day, a month AND a year?
+
+    v360. *"Mike Eyre email on Aug 28, 2025"* asks its own date back — the
+    handle already IS the answer to "when". :func:`compose_anchor_question`
+    reads this to withhold rather than compose a circular question.
+    """
+    body = collapsed_text(text)
+    return bool(
+        _MONTH_DAY_YEAR_RE.search(body)
+        or _DAY_MONTH_YEAR_RE.search(body)
+        or _ISO_DATE_RE.search(body)
+    )
+
+
+def _sentence_case(text: object) -> str:
+    """A cleaned TITLE: its date reformatted, its first letter capitalised.
+
+    v360. Never a second guess at what the text means — :func:`_node_label`
+    and the title branch of :func:`compose_question` are the ONE seat that
+    decides what a title says; this is the one seat that decides how it
+    reads, so a raw handle ("junior year", "701 North Williams foreclosure")
+    and a quoted clause read like a sentence rather than a lowercase key.
+    """
+    body = collapsed_text(text)
+    if not body:
+        return ""
+    body = _reformat_dates(body)
+    for index, char in enumerate(body):
+        if char.isalpha():
+            return body[:index] + char.upper() + body[index + 1:]
+    return body
+
+
 #: One row per event kind: the node's TITLE and the sentence each work-item
 #: kind asks. ``None`` is the default row. Slots:
 #:
@@ -1886,6 +2110,7 @@ def compose_question(
     readings: object = "",
     is_owner: bool = False,
     is_place: bool = False,
+    is_person: bool = False,
 ) -> str | None:
     """The sentence this work item asks, or ``None`` — *withheld*.
 
@@ -1907,10 +2132,37 @@ def compose_question(
     slot = _ITEM_KIND_SLOTS.get(collapsed_text(item_kind))
     if slot is None:
         return None
+    # v360. A RESIDENCE is a SPAN whose subject is a place — `_place_keys`'s
+    # own docstring already promises "When were you in Yucaipa?" rather than
+    # "When was Yucaipa?" — never a kind of its own in this table, so it reads
+    # through `span`'s place row on its kind alone. Forcing `is_place` here
+    # means a residence never depends on the roster having also flagged it (a
+    # residence is a place by definition, not by lookup).
+    if kind == "residence":
+        kind = "span"
+        is_place = True
     row = KIND_SENTENCES.get(kind) or KIND_SENTENCES[None]
     template = row.get(slot)
     if not template:
         return None
+
+    # v360. A TITLE is the person's own words, sentence-cased — never a fixed
+    # word glued to a name ("meeting {who}") or `{what}` run through
+    # :func:`owner_rewrite` — when the underlying text is a CLAUSE rather
+    # than a name: "hanging around Trevor Hammons" is what somebody called
+    # the node, not who it was, and rewriting only its lead noun risks the
+    # same broken agreement :func:`compose_anchor_question` already refuses
+    # to invent by quoting a clause back instead of conjugating it. Detected
+    # the same way that composer detects one, never guessed.
+    if slot == "title":
+        raw_title_text = collapsed_text(what) or collapsed_text(who)
+        if raw_title_text and (
+            _leads_with_a_verb(raw_title_text) or _is_gerund_phrase(raw_title_text)
+        ):
+            text = _sentence_case(raw_title_text)
+            if not text or cl.lint_question(text):
+                return None
+            return text
 
     who_text = "you" if is_owner else owner_rewrite(who)
     what_text = "you" if (is_owner and not collapsed_text(what)) else owner_rewrite(what)
@@ -1925,6 +2177,24 @@ def compose_question(
     if slot != "title" and is_owner_reference_only(what_text) and "{what}" in template:
         return None
     if _is_bare_kind_word(what_text) and "{what}" in template:
+        return None
+    # v360. A bare PERSON'S NAME is not an event: `_node_what` falls back to
+    # the subject's own display when no telling ever said more about the
+    # node, and that fallback reads identical to `who` when it does —
+    # "When did James happen?" names a person, never a thing that happened.
+    # `is_person` is the roster's own signal (a real person's name or alias),
+    # never a guess from the shape of the text — an institution's name
+    # ("Mountain View High", "Mike Eyre phone call") is just as often its own
+    # `who` and `what` and reads fine as a bare name, so only a genuine
+    # PERSON match refuses here.
+    if (
+        slot != "title"
+        and "{what}" in template
+        and is_person
+        and not is_owner
+        and who_text
+        and collapsed_text(what_text).casefold() == collapsed_text(who_text).casefold()
+    ):
         return None
 
     # v343 (`timeline-rules:13`). The fallback row's two "happen?" slots read
@@ -1962,6 +2232,8 @@ def compose_question(
     text = collapsed_text(text)
     if not text or cl.lint_question(text):
         return None
+    if slot == "title":
+        text = _sentence_case(text)
     return text
 
 
@@ -2080,9 +2352,18 @@ def compose_anchor_question(text: object) -> str | None:
     Orderville — whose move was that, and when?"*. A date question alone would
     be read as the owner's own move, because a question on the owner's
     timeline is in the owner's voice by default.
+
+    v360. A fourth shape gets no sentence at all: a handle that already names
+    its own full date ("Mike Eyre email on Aug 28, 2025") is asked "when was
+    that?" only by a composer that did not read its own question — the answer
+    is sitting in the handle it was just given. Withheld here so the caller's
+    ``question_withheld`` diagnostic can report it and gating can refuse the
+    card outright rather than show it with no play control.
     """
     body = owner_rewrite(text)
     if not body or is_owner_reference_only(body) or _is_bare_kind_word(body):
+        return None
+    if _handle_names_a_full_date(body):
         return None
     noun = _anchor_leading_noun(body)
     if noun:
@@ -2106,6 +2387,100 @@ def compose_anchor_question(text: object) -> str | None:
     if cl.lint_question(question):
         return None
     return question
+
+
+def _identity_option_label(
+    candidate: dict, *, mention_key: str, by_ref: dict, rw_mod, rr_mod,
+) -> str:
+    """One candidate, in the owner's own terms — *"your son James"*, *"AJ
+    (your brother)"* — or just the roster's name when no relation word or
+    nickname is known.
+
+    v360. `relation_words` (v358) already derives the gendered word from a
+    person's roster ``relationship``/``relation_gender``; this reads it, never
+    re-decides it. A nickname distinct from the ambiguous mention itself leads
+    ("AJ" is how the owner actually calls his brother "James"); otherwise the
+    relation word leads the roster's own given name ("your son James").
+    """
+    ref = collapsed_text(candidate.get("ref"))
+    name = collapsed_text(candidate.get("name")) or ref
+    entity = by_ref.get(ref)
+    if not isinstance(entity, dict):
+        return name
+    relationship = collapsed_text(entity.get("relationship"))
+    if not relationship:
+        return name
+    gender = collapsed_text(entity.get("relation_gender"))
+    word = rw_mod.relation_word(relationship, gender)
+    if not word:
+        return name
+    # v360. An alias that is ITSELF a relation word ("dad", "my grandfather")
+    # or that shares a token with the roster's own name ("James Taylor
+    # (Dad)") says nothing "(your {word})" does not already say — a true
+    # nickname ("AJ") shares no token with the name it stands in for.
+    name_tokens = set(re.findall(r"[a-z']+", name.lower()))
+    aliases = [
+        alias for alias in (
+            collapsed_text(a) for a in (entity.get("aliases") or ())
+        )
+        if alias
+        and normalized_mention_key(alias) != mention_key
+        and not rw_mod.bare_relation_word(alias)
+        and not (set(re.findall(r"[a-z']+", alias.lower())) & name_tokens)
+    ]
+    if aliases:
+        return f"{aliases[0]} (your {word})"
+    given = name.split()[0] if name else word
+    return f"your {word} {given}"
+
+
+def compose_identity_uncertain_question(
+    mention: object, candidates: object, *, roster_snapshot: object = None,
+) -> str | None:
+    """*"Who is 'James' here — your son James, AJ (your brother), or someone
+    else?"* — the sentence over an ambiguous mention's own candidate list.
+
+    v360 (owner staging review, 2026-09-25): *"Which Anthon James Taylor or
+    James Everett Taylor or James Edwin Taylor Sr. or James Taylor is 'James'
+    here?"* is unreadable — four full names joined by "or" is the roster's
+    bookkeeping, not a sentence a person answers. This is the sentence over
+    the SAME candidate list `identity_resolution.identity_work_item` already
+    decided (which candidates survive is entirely its own; this only reads
+    it): the mention sentence-cased rather than a lowercase key, each
+    candidate named the way the owner would name them
+    (:func:`_identity_option_label`), and "someone else" always the last
+    option, because the mention may name nobody on the list. ``None`` when
+    there is nothing to ask about — the caller's own fallback, never a
+    template leak.
+    """
+    mention_text = _sentence_case(mention)
+    if not mention_text:
+        return None
+    rows = [
+        c for c in (candidates or ())
+        if isinstance(c, dict) and collapsed_text(c.get("name") or c.get("ref"))
+    ]
+    if not rows:
+        return None
+    import relation_words as rw  # noqa: PLC0415 - avoids a framework import cycle
+    import roster_relations as rr  # noqa: PLC0415 - same seat as `relation_words`
+
+    entities = list(rr.roster_entities(roster_snapshot)) if roster_snapshot else []
+    by_ref = {
+        rr.entity_ref("person", entity): entity
+        for entity in entities if isinstance(entity, dict)
+    }
+    mention_key = normalized_mention_key(mention)
+    options = [
+        _identity_option_label(row, mention_key=mention_key, by_ref=by_ref, rw_mod=rw, rr_mod=rr)
+        for row in rows
+    ]
+    options = [collapsed_text(option) for option in options if collapsed_text(option)]
+    if not options:
+        return None
+    listed = _english_list(options, joiner="or")
+    question = f'Who is "{mention_text}" here — {listed}, or someone else?'
+    return None if cl.lint_question(question) else question
 
 
 def _event_words(event_kind: object) -> str:
@@ -2140,15 +2515,23 @@ def _node_label(subject_display: str, event_kind: object, *,
     return collapsed_text(subject_display) or _event_words(event_kind)
 
 
-def _subject_display(subject: str, claims: list[dict], roster_names: dict) -> str:
+def _subject_display(subject: str, claims: list[dict], roster_names: dict, *,
+                     prefer_subject: bool = False) -> str:
     """The roster's name for a resolved subject; the raw mention otherwise.
 
     A display label is never a primary key — the node id is — so this is free to
     prefer whatever reads best without anything downstream depending on it.
+
+    ``prefer_subject`` is a landmark stay's (one place, one landmark): a stay
+    is called what the entry he GAVE calls it, never what a duplicate merged
+    into it called it ("Figers House", not "Fiegers' house").
     """
     named = roster_names.get(subject)
     if named:
         return named
+    if prefer_subject and any(collapsed_text(claim.get("subject_mention")) == subject
+                              for claim in claims):
+        return subject
     for claim in claims:
         mention = collapsed_text(claim.get("subject_mention"))
         if mention:
@@ -2261,6 +2644,13 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
         for was, now_id in _identity_rekeys(claims, owner_ref=owner_ref).items()
         if was not in seeded and now_id not in seeded
     }
+    # One place, one landmark (`landmark_identity.ONE_PLACE_ONE_LANDMARK`): a
+    # duplicate entry merged into the one he gave moved its node id, and a
+    # reading that froze the OLD id in its `event_ref` is carried onto the
+    # entry it merged into, for v350's reason: one fact is never drawn twice.
+    merged_ids = dict(getattr(participation, "merge_aliases", None) or {})
+    rekeys.update({was: now_id for was, now_id in merged_ids.items()
+                   if was not in seeded})
     # Pass one: what each claim's OWN key is, and what the identity layer says
     # about it. Both halves of v342 need the whole set before any group is made
     # — a claim's key can only be redirected once the bind that re-keyed it has
@@ -2583,13 +2973,95 @@ DIAGNOSTIC_AGE_CORROBORATES = "age_corroborates_placement"
 #: both — v340's own ruling, not a second copy of it.
 DIAGNOSTIC_AGE_CONTRADICTS = "age_contradicts_placement"
 
-#: v345, the owner's ruling in one sentence.
+#: v345, the owner's ruling in one sentence. AMENDED by timeline-rules:19
+#: (:data:`AN_ANSWER_IS_THE_PLACEMENT`): it still governs an age on a node the
+#: person did not date in their own words, but an age THEY gave is the
+#: placement, and the date it agrees with is the evidence.
 AN_AGE_AND_A_DATE_CORROBORATE = (
     "an age claim that folds onto a moment the vault already dates is read "
     "against the subject's own birth: a window that CONTAINS the date is "
     "agreeing evidence on the placement and never a rival, and a window that "
     "excludes it stays a rival so the contradiction card names both"
 )
+
+
+#: timeline-rules:19. Reported, never raised: a node the person dated in their
+#: own words is placed by what they said, and the reading the fold would have
+#: drawn without that rule (a resolver's inference, a classifier estimate, a
+#: coarser statement) stood aside. The finding names both, so the move is never
+#: silent.
+DIAGNOSTIC_ANSWER_IS_THE_PLACEMENT = "answer_is_the_placement"
+
+#: The owner's ruling, 2026-09-25: *"if I say 19 to 21 here, that is a placement
+#: because I set it"* and *"if I say it and get precision, any level of
+#: precision, that means I want it placed, given the precision I've given you.
+#: And later information that contradicts it is a question."* It amends v345's
+#: :data:`AN_AGE_AND_A_DATE_CORROBORATE`, which read an agreeing age as
+#: evidence on a date the RESOLVER had inferred and so drew the inference.
+AN_ANSWER_IS_THE_PLACEMENT = (
+    "what the person said places the moment, at the grain they said it: among "
+    "their own statements the finest one that fits inside the best-supported "
+    "one is the placement; every other reading that fits (a coarser statement, "
+    "a resolver's inference, a classifier estimate) is supporting evidence on "
+    "it and never a rival, and nothing the system inferred ever narrows or "
+    "overrides it; a reading that does not fit stays a rival, so the "
+    "contradiction card names both"
+)
+
+
+def _the_person_said_it(claim: dict, record: object) -> bool:
+    """Is this claim's time the PERSON's own words? (:data:`AN_ANSWER_IS_THE_PLACEMENT`)
+
+    Two tests, both existing vocabularies rather than a new one. The claim's
+    epistemic class is ``explicit`` (`temporal_claims.CLAIM_BASES`) — somebody
+    said it out loud, as opposed to ``inferred`` or ``calculated``; and the time
+    itself is either an AGE they gave or a record whose basis is ``stated``
+    (`chronology.BASES`). The resolver files both kinds: an ``inferred`` claim
+    is its own reading and never passes, while an ``explicit`` ``stated`` one is
+    the person's own date carried onto this moment (a spine landmark, a fact
+    they gave — *"Father dies of COVID — March 2020–June 2020 (stated,
+    certain)"*) and passes, because it is their words. A date worked out
+    against an anchor (``anchor``), a printed date (``document``), a relative's
+    memory (``relative``) and a photograph's window (``photo``) are evidence
+    about the moment, not the person's own setting of it, and keep ranking
+    exactly as they did.
+    """
+    if collapsed_text(claim.get("basis")) != "explicit":
+        return False
+    if collapsed_text(claim.get("claim_type")) == "age":
+        return True
+    return getattr(record, "basis", None) == "stated"
+
+
+def _the_persons_placement(said: list) -> object:
+    """The one record the person's own statements place the moment at.
+
+    The best-supported of them first (`chronology.reconcile` — the ranking
+    every statement already had), then NARROWED: while another of their
+    statements fits wholly inside it and is finer, that one is the placement
+    (*"there would be answers that come later and that are more specific"*).
+    A coarser statement that contains it, and one that merely overlaps it, are
+    kept by the caller as agreeing evidence; one that is disjoint is the rival
+    `chronology.conflict_strength` scores.
+    """
+    merged = chrono.merge_claims(said)
+    placed = chrono.reconcile(merged)["best_supported"]
+    if placed is None:
+        return None
+    while True:
+        width = chrono.span_months(placed)
+        finer = [
+            record for record in merged
+            if record is not placed
+            and ec.date_inside_span(record, placed)
+            and (chrono.span_months(record) or 0) > 0
+            and (width is None or (chrono.span_months(record) or 0) < width)
+        ]
+        if not finer:
+            return placed
+        placed = min(finer, key=lambda record: (chrono.span_months(record) or 0,
+                                                -chrono.claim_score(record),
+                                                chrono.to_edtf(record) or ""))
 
 
 def _window_text(record: object) -> str:
@@ -2607,8 +3079,33 @@ def _window_text(record: object) -> str:
     return chrono.to_edtf(parsed) or ""
 
 
+#: v360 (owner, 2026-09-25) (timeline-rules:24). The owner's father died of COVID in
+#: 2020 ("Father dies of COVID", March 2020 to June 2020, stated in three
+#: tellings), and his death was asked as "March 2020–June 2020 and around 2002":
+#: *"what got him sick when we lived in Mesa, Arizona, when I was like 21, was a
+#: comorbidity that led to him dying when he got COVID"* — the 21 dates when he
+#: got SICK, and the classifier filed it on the death. The same node carried
+#: "near-death and death" read at 18 and "right before Etherfuse" read as early
+#: 2022: tellings that mention the death and date something beside it. A death
+#: cornerstone is the death. When his own stated DATE places it, only another
+#: date he stated may be its rival; an age window or an anchor-worked window
+#: that does not fit is kept as a finding (:data:`DIAGNOSTIC_DEATH_RIVAL_IS_NOT_A_DATE`)
+#: and never published as an alternate, so no card asks it.
+A_DEATH_IS_DATED_BY_ITS_DATE = (
+    "a death cornerstone the person's own stated date places is dated by a "
+    "date: another date they stated that does not fit is its rival and a "
+    "question, while an age or anchor-worked window a telling of the death "
+    "carries is a finding and never a rival"
+)
+
+#: The finding :data:`A_DEATH_IS_DATED_BY_ITS_DATE` leaves in place of a rival.
+DIAGNOSTIC_DEATH_RIVAL_IS_NOT_A_DATE = "death_rival_is_not_a_date"
+
+
 def _reconcile_group(group: dict, *, birth: object, diagnostics: list,
-                     birth_of_claim: object = None) -> dict:
+                     birth_of_claim: object = None,
+                     what_they_said_places: bool = True,
+                     a_death_cornerstone: bool = False) -> dict:
     """One node's claims → ``{best, alternates, conflict, ...}``. Never destructive.
 
     §6.5: reconciliation runs in the deterministic derivation, returns the
@@ -2638,6 +3135,7 @@ def _reconcile_group(group: dict, *, birth: object, diagnostics: list,
     """
     records: list[chrono.DateRecord] = []
     ages: list[tuple[dict, chrono.DateRecord]] = []
+    said: list[chrono.DateRecord] = []
     relations: list[dict] = []
     durations: list[dict] = []
     for claim in group["claims"]:
@@ -2646,12 +3144,16 @@ def _reconcile_group(group: dict, *, birth: object, diagnostics: list,
             record = _record_for_dated_claim(claim)
             if record is not None:
                 records.append(record)
+                if _the_person_said_it(claim, record):
+                    said.append(record)
             continue
         if claim_type == "age":
             anchor = birth_of_claim(claim) if callable(birth_of_claim) else birth
             record, finding = _record_for_age_claim(claim, anchor)
             if record is not None:
                 ages.append((claim, record))
+                if _the_person_said_it(claim, record):
+                    said.append(record)
             elif finding:
                 diagnostics.append(
                     {
@@ -2668,6 +3170,15 @@ def _reconcile_group(group: dict, *, birth: object, diagnostics: list,
             value = claim.get("temporal_value")
             if isinstance(value, dict):
                 relations.append({"claim": claim, "relation": value})
+    if said and what_they_said_places and _era_span(group) is None:
+        # What timeline-rules:18 drew, so the finding can name what stood aside.
+        former = _reconcile_group(group, birth=birth, diagnostics=[],
+                                  birth_of_claim=birth_of_claim,
+                                  what_they_said_places=False)["best"]
+        return _placed_by_what_they_said(
+            group, said=said, records=records + [record for _, record in ages],
+            ages=ages, former=former, relations=relations, durations=durations,
+            diagnostics=diagnostics, a_death_cornerstone=a_death_cornerstone)
     agreeing: list[dict] = []
     if ages:
         placed = chrono.reconcile(records)["best_supported"] if records else None
@@ -2702,6 +3213,102 @@ def _reconcile_group(group: dict, *, birth: object, diagnostics: list,
         "best": best,
         "alternates": list(outcome["alternates"]),
         "conflict": float(outcome["conflict"]),
+        "relations": relations,
+        "durations": durations,
+    }
+
+
+def _placed_by_what_they_said(group: dict, *, said: list, records: list,
+                              ages: list, former: object, relations: list,
+                              durations: list, diagnostics: list,
+                              a_death_cornerstone: bool = False) -> dict:
+    """:data:`AN_ANSWER_IS_THE_PLACEMENT` — one node the person dated themselves.
+
+    ``said`` is every record the person's own words gave
+    (:func:`_the_person_said_it`); ``records`` is every record on the node,
+    theirs included. The placement is :func:`_the_persons_placement`. Every
+    other record either FITS it (``chronology.intersect`` is not ``None``) or
+    does not.
+
+    One that fits is agreeing evidence. An age, and every reading that is not
+    one of their own stated dates (the resolver's inference, a classifier
+    estimate), joins the placement's PROVENANCE — v345's treatment of an
+    agreeing age, extended to the reading the placement displaced, because
+    publishing corroboration as a rival is how one fact reads as two answers.
+    Another stated date of theirs that fits stays the alternate it has always
+    been (*"a coarser reading that INTERSECTS is the same claim said less
+    well"*, conflict 0), so a node dated twice by the person reads exactly as
+    it did.
+
+    One that does not fit stays an alternate, so `chronology.conflict_strength`
+    scores it against the placement and the work-item seat mints the
+    contradiction card naming both, exactly as it always has. Nothing is
+    dropped: every record is the placement, in its provenance, or an
+    alternate, in the order `chronology.reconcile` ranks them.
+    """
+    placed = _the_persons_placement(said)
+    everything = chrono.reconcile(records)
+    strongest = everything["best_supported"]
+    theirs = {chrono.claim_identity(record) for record in said
+              if record.basis == "stated"}
+    agreeing: list[dict] = []
+    alternates: list[chrono.DateRecord] = []
+    ranked = ([strongest] if strongest is not None else []) + list(everything["alternates"])
+    for record in ranked:
+        identity = chrono.claim_identity(record)
+        if identity == chrono.claim_identity(placed):
+            agreeing.extend(record.provenance)
+            continue
+        if chrono.intersect(placed, record) is not None and identity not in theirs:
+            agreeing.extend(record.provenance)
+            continue
+        if a_death_cornerstone and placed.basis == "stated" and identity not in theirs:
+            # :data:`A_DEATH_IS_DATED_BY_ITS_DATE`.
+            diagnostics.append({
+                "finding": DIAGNOSTIC_DEATH_RIVAL_IS_NOT_A_DATE,
+                "node_id": group["node_id"],
+                "placed": chrono.to_edtf(placed) or "",
+                "window": _window_text(record),
+                "basis": record.basis,
+                "claim_ids": sorted({collapsed_text(item.get("claim_id"))
+                                     for item in record.provenance
+                                     if isinstance(item, dict) and item.get("claim_id")}),
+            })
+            continue
+        alternates.append(record)
+    provenance = list(placed.provenance)
+    for entry in agreeing:
+        if entry not in provenance:
+            provenance.append(entry)
+    best = replace(placed, provenance=tuple(provenance))
+    for claim, record in ages:
+        if chrono.claim_identity(record) == chrono.claim_identity(placed):
+            continue
+        # v345's two findings, kept: whether an age that is NOT the placement
+        # agrees with it is still said out loud.
+        diagnostics.append({
+            "finding": (DIAGNOSTIC_AGE_CORROBORATES
+                        if chrono.intersect(placed, record) is not None
+                        else DIAGNOSTIC_AGE_CONTRADICTS),
+            "node_id": group["node_id"],
+            "claim_id": collapsed_text(claim.get("claim_id")),
+            "placed": chrono.to_edtf(placed) or "",
+            "age_window": _window_text(record),
+        })
+    if former is not None and chrono.claim_identity(former) != chrono.claim_identity(placed):
+        diagnostics.append({
+            "finding": DIAGNOSTIC_ANSWER_IS_THE_PLACEMENT,
+            "node_id": group["node_id"],
+            "placed": chrono.to_edtf(placed) or "",
+            "placed_basis": placed.basis,
+            "stood_aside": chrono.to_edtf(former) or "",
+            "stood_aside_basis": former.basis,
+            "fits": chrono.intersect(placed, former) is not None,
+        })
+    return {
+        "best": best,
+        "alternates": alternates,
+        "conflict": float(chrono.conflict_strength(best, alternates)),
         "relations": relations,
         "durations": durations,
     }
@@ -2947,6 +3554,25 @@ def _entity_mention_key(text: object, place_refs: dict) -> str:
     if not key:
         return ""
     return place_refs.get(key, key)
+
+
+#: The ambiguity pass's own marker for :data:`A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`
+#: — a node placed across every stay at one place, never a work item.
+ACROSS_THE_STAYS = "across_the_stays"
+
+
+def _is_bare_place_mention(group: dict, name: str) -> bool:
+    """Does this moment name the place in its OWN title and say nothing else
+    about when — every claim an occurrence?"""
+    claims = group.get("claims") or ()
+    if not claims or any(collapsed_text(claim.get("claim_type")) != tc.OCCURRENCE_CLAIM_TYPE
+                         for claim in claims):
+        return False
+    text = collapsed_text(name)
+    if len(text) < 3:
+        return False
+    pattern = re.compile(rf"(?<!\w){re.escape(text)}(?!\w)", re.IGNORECASE)
+    return any(pattern.search(collapsed_text(claim.get("event_mention"))) for claim in claims)
 
 
 def _group_place_mentions(group: dict) -> list[str]:
@@ -3238,6 +3864,27 @@ def _apply_entity_ambiguity(groups: dict, calculated: dict, *,
             continue
         organization = any(entity_kinds.get(key) in ("work", "schools")
                            for key in matched_keys)
+        if not organization and len(matched_keys) == 1:
+            # :data:`A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`: ONE place he
+            # lived at more than once — no "which time?" card. A BARE mention
+            # (the place in the moment's own title, and nothing else said about
+            # when: no date, no age, no order) spans every stay there minus
+            # the gaps; a moment that only names the place beside something
+            # else ("after the Williams foreclosure") is left to that.
+            name = entity_names.get(matched_keys[0], matched_keys[0])
+            bare = _is_bare_place_mention(group, name)
+            diagnostics.append({
+                "finding": "one_place_several_stays_no_card",
+                "node_id": node_id,
+                "places": [name],
+                "episode_node_ids": sorted(matched),
+                "spans_the_stays": bare,
+                "rule": A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS,
+            })
+            if bare:
+                ambiguous[node_id] = {"node_id": node_id, "kind": ACROSS_THE_STAYS,
+                                      "place": name, "episode_node_ids": sorted(matched)}
+            continue
         kind = "tenure_ambiguous" if organization else "place_ambiguous"
         ambiguous[node_id] = {
             "node_id": node_id,
@@ -3342,7 +3989,471 @@ def _resolve_anchor(text: object, index: dict) -> str:
     return matches[0] if len(matches) == 1 else ""
 
 
-def _build_edges(groups: dict, calculated: dict, constraints: object, index: dict):
+# --------------------------------------------------------------------------
+# One place, one landmark: a place a telling names is one of HIS stays
+# --------------------------------------------------------------------------
+
+
+#: Reported, never raised: an anchor or a telling's own words named a place,
+#: and the fold tied it to his stays at the level he named it.
+DIAGNOSTIC_PLACE_ANCHOR_TIED = "place_anchor_tied_to_stays"
+
+#: The prefix of a synthetic anchor: the union of several stays, or one stay's
+#: end. Never a node; it exists only inside one fold's propagation.
+PLACE_ANCHOR_PREFIX = "place:"
+
+
+def _month_floor(value: object) -> str | None:
+    text = collapsed_text(value)
+    return text[:7] if len(text) >= 7 else (text or None)
+
+
+def _residence_stays(groups: dict, calculated: dict, participation: object,
+                     landmark_entries: object) -> list[dict]:
+    """``[{"id", "record", "best"}]`` — every residence stay he gave, dated."""
+    records = {collapsed_text(row.get("source_id")): row
+               for row in landmark_entries or () if isinstance(row, dict)}
+    stays: list[dict] = []
+    for node_id, seed in sorted(getattr(participation, "seeds", {}).items()):
+        if seed.get("participation_domain") != "residences" or node_id not in groups:
+            continue
+        merged: dict = {}
+        for source_id in getattr(participation, "sources_of_node", {}).get(node_id, ()):
+            row = records.get(source_id)
+            if row is None:
+                continue
+            record = row.get("record") if isinstance(row.get("record"), dict) else {}
+            merged = {**merged, **(lp.new_skeleton_only(record, merged)
+                                   if row.get("merged_into") else record)}
+        best = (calculated.get(node_id) or {}).get("best")
+        if not merged or best is None or not (best.earliest and best.latest):
+            continue
+        stays.append({"id": node_id, "record": merged, "best": best})
+    return stays
+
+
+#: v360 follow-up (owner, 2026-09-25) (item 2). "In Arizona" was drawn as the
+#: envelope of his Arizona stays, so "Eagle Scout project" read 1982–2013 —
+#: thirty years, most of them in California, Kentucky and Switzerland. A place
+#: he names is the OUTER bound: the moment is somewhere inside his stays there,
+#: and everything else the vault already holds about it narrows that — the
+#: moment its own handle names ("earning Eagle Scout in Arizona" is the Eagle
+#: Scout he earned), his age, a mission span, a related dated moment. The
+#: result is the intersection, and it is never left reaching into a GAP
+#: between the stays: a window that other evidence narrows is clipped to the
+#: stays it still touches. When other evidence falls wholly inside a gap, the
+#: other evidence stands and the place is reported, never forced.
+A_PLACE_MENTION_IS_AN_OUTER_BOUND = (
+    "a place mention bounds a moment by his stays there and is narrowed by "
+    "the other evidence on the same moment — the event its own handle names, "
+    "his age, a span, a related dated moment — taking the intersection; a "
+    "window is clipped to the stays it touches and never drawn across a gap "
+    "between them, and evidence that falls wholly in a gap stands"
+)
+
+#: v360 follow-up (owner, 2026-09-25) (item 8), owner: *"place the story across both
+#: stays. I was a teenager, then I went on a mission for my church, and then I
+#: came back and lived with my parents."* 701 N Williams is two stays —
+#: 1997-06→2000-08 and 2002-06-07→2005-06, his mission between — and a bare
+#: mention of it was a "Which time in Williams?" card. It is now the union of
+#: the stays minus the gap: as one interval the envelope (1997-06→2005-06) with
+#: the gap recorded in its provenance, and clipped by
+#: :data:`A_PLACE_MENTION_IS_AN_OUTER_BOUND` the moment other evidence narrows
+#: it — a teenager or a high-school telling lands in the first stay, one after
+#: the mission in the second. No "which time?" card is asked for one place he
+#: said nothing more specific about.
+A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS = (
+    "a house he lived at more than once is, named bare, every stay he had "
+    "there minus the gaps between them — one envelope, the gaps in its "
+    "provenance — narrowed by the moment's other evidence to the stay it "
+    "fits; one place with several stays never asks which time"
+)
+
+
+def _place_anchor_resolver(stays: list[dict]):
+    """``(resolve(text) -> ref, synthetic bounds, members, findings, pieces)``.
+
+    ``pieces`` is ``{ref: [stay interval, …]}`` for every synthetic union — the
+    stays the envelope stands for, month-grained, so the propagation can clip a
+    window out of the gaps between them (:data:`A_PLACE_MENTION_IS_AN_OUTER_BOUND`).
+
+    `landmark_identity.A_PLACE_MENTION_TIES_TO_HIS_LANDMARKS`, deterministic.
+    ``resolve`` answers an anchor handle or a telling's place phrase with one
+    of: the stay's own node id (one house, one stay), a synthetic
+    ``place:…`` ref whose bounds are the union of his stays at that level
+    (a city, a state), or ``place:end:<stay>`` for "left <house>". Bounds are
+    month-grained at most, basis ``anchor``. ``""`` when the words name none
+    of his places: a mention never creates one.
+    """
+    import landmark_identity as lid  # noqa: PLC0415
+
+    by_id = {row["id"]: row for row in stays}
+    synthetic: dict[str, chrono.DateRecord] = {}
+    members: dict[str, list[str]] = {}
+    findings: list[dict] = []
+    pieces: dict[str, list[chrono.DateRecord]] = {}
+
+    def stay_pieces(ids: list[str]) -> list[chrono.DateRecord]:
+        out = []
+        for ref in ids:
+            row = by_id.get(ref)
+            if row is None or not row["best"].earliest or not row["best"].latest:
+                continue
+            lo, hi = _month_floor(row["best"].earliest), _month_floor(row["best"].latest)
+            out.append(chrono.DateRecord(best=lo if lo == hi else f"{lo}/{hi}",
+                                         earliest=lo, latest=hi, granularity="range",
+                                         confidence="inferred", basis="anchor"))
+        return sorted(out, key=lambda record: (record.earliest, record.latest))
+
+    def envelope(ids: list[str], label: str, preposition: str = "in") -> chrono.DateRecord | None:
+        rows = [by_id[ref]["best"] for ref in ids if ref in by_id]
+        starts = [_month_floor(row.earliest) for row in rows if row.earliest]
+        ends = [_month_floor(row.latest) for row in rows if row.latest]
+        if not starts or not ends:
+            return None
+        earliest, latest = min(starts), max(ends)
+        provenance = [{"rule": "place_anchor", "text": f"from your stays {preposition} {label}"}]
+        gaps = _gaps_between(stay_pieces(ids))
+        if gaps:
+            provenance.append({
+                "rule": "place_anchor_gap",
+                "text": "not " + ", ".join(
+                    f"{chrono.display_date(gap, with_basis=False)}" for gap in gaps)
+                        + " (between those stays)",
+                "gaps": [f"{gap.earliest}/{gap.latest}" for gap in gaps],
+            })
+        return chrono.DateRecord(
+            best=f"{earliest}/{latest}", earliest=earliest, latest=latest,
+            granularity="range", confidence="inferred", basis="anchor",
+            anchors=(label,), provenance=tuple(provenance),
+        )
+
+    def resolve(text: object, kind: str = "") -> str:
+        raw = collapsed_text(text)
+        phrase = lid.anchor_place_phrase(raw)
+        relation, place = phrase if phrase else ("during", raw)
+        if kind == "telling" and phrase is None:
+            return ""
+        if kind != "telling" and phrase is None:
+            # An anchor HANDLE that ends "… in <place>" names where it was.
+            tail = re.search(r"\bin\s+([A-Z][\w' .-]+)$", raw)
+            place = tail.group(1) if tail else raw
+        found = lid.resolve_place(place, stays)
+        if found is None:
+            return ""
+        ids = [ref for ref in found["ids"] if ref in by_id]
+        if not ids:
+            return ""
+        if relation == "end":
+            if found["level"] != "house" or len(ids) != 1:
+                return ""
+            end = by_id[ids[0]]["best"]
+            month = _month_floor(end.latest)
+            ref = f"{PLACE_ANCHOR_PREFIX}end:{ids[0]}"
+            synthetic[ref] = chrono.DateRecord(
+                best=month, earliest=month, latest=month, granularity="month",
+                confidence="inferred", basis="anchor", anchors=(place,),
+                provenance=({"rule": "place_anchor",
+                             "text": f"when you left {place}"},))
+            members[ref] = ids
+        elif found["level"] == "house" and len(ids) == 1:
+            ref = ids[0]
+        else:
+            # A city, a state — or ONE HOUSE he lived at more than once
+            # (:data:`A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`): the union of
+            # the stays, as an envelope whose gaps the propagation keeps out.
+            ref = f"{PLACE_ANCHOR_PREFIX}{found['level']}:{lid.fold(found['value'])}"
+            record = envelope(ids, place, "at" if found["level"] == "house" else "in")
+            if record is None:
+                return ""
+            synthetic[ref] = record
+            members[ref] = ids
+            pieces[ref] = stay_pieces(ids)
+        findings.append({"finding": DIAGNOSTIC_PLACE_ANCHOR_TIED, "text": raw,
+                         "level": found["level"], "anchor": ref,
+                         "stays": sorted(ids)})
+        return ref
+
+    def union(ids: list[str], label: str) -> str:
+        """The synthetic union of these stays, by their ids — for a bare
+        mention the ambiguity pass found (:data:`A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`)."""
+        known = sorted(ref for ref in ids if ref in by_id)
+        if len(known) < 2:
+            return ""
+        ref = f"{PLACE_ANCHOR_PREFIX}stays:{lid.fold(label)}"
+        if ref not in synthetic:
+            record = envelope(known, label,
+                              "in" if lid.place_level({"label": label}) else "at")
+            if record is None:
+                return ""
+            synthetic[ref] = record
+            members[ref] = known
+            pieces[ref] = stay_pieces(known)
+        findings.append({"finding": DIAGNOSTIC_PLACE_ANCHOR_TIED, "text": label,
+                         "level": "stays", "anchor": ref, "stays": known})
+        return ref
+
+    resolve.union = union
+    return resolve, synthetic, members, findings, pieces
+
+
+def _gaps_between(pieces: list) -> list:
+    """The month stretches between consecutive, non-overlapping stay pieces."""
+    gaps = []
+    reach = None
+    for piece in sorted(pieces, key=lambda record: (record.earliest, record.latest)):
+        if reach is not None:
+            start = _next_month(reach)
+            end = _previous_month(_month_floor(piece.earliest))
+            if start and end and start <= end:
+                gaps.append(chrono.DateRecord(best=start if start == end else f"{start}/{end}",
+                                              earliest=start, latest=end, granularity="range",
+                                              confidence="inferred", basis="anchor"))
+        latest = _month_floor(piece.latest)
+        reach = latest if reach is None or (latest and latest > reach) else reach
+    return gaps
+
+
+def _next_month(month: object) -> str | None:
+    """The period after this one, at its own grain (a year's is the next year)."""
+    text = collapsed_text(month)[:7]
+    if re.fullmatch(r"\d{4}", text):
+        return f"{int(text) + 1:04d}"
+    if not re.fullmatch(r"\d{4}-\d{2}", text):
+        return None
+    year, mon = int(text[:4]), int(text[5:7])
+    return f"{year + (mon == 12):04d}-{(mon % 12) + 1:02d}"
+
+
+def _previous_month(month: object) -> str | None:
+    """The period before this one, at its own grain."""
+    text = collapsed_text(month)[:7]
+    if re.fullmatch(r"\d{4}", text):
+        return f"{int(text) - 1:04d}"
+    if not re.fullmatch(r"\d{4}-\d{2}", text):
+        return None
+    year, mon = int(text[:4]), int(text[5:7])
+    return f"{year - (mon == 1):04d}-{12 if mon == 1 else mon - 1:02d}"
+
+
+def _clip_to_pieces(record: object, pieces: list):
+    """:data:`A_PLACE_MENTION_IS_AN_OUTER_BOUND`'s clip: the window cut back to
+    the stays it touches (the hull of its intersections with them), or
+    ``None`` when it touches none — the other evidence stands."""
+    parsed = record if isinstance(record, chrono.DateRecord) else chrono.from_dict(record)
+    if parsed is None or not pieces:
+        return None
+    hits = [hit for hit in (chrono.intersect(parsed, piece) for piece in pieces) if hit is not None]
+    if not hits:
+        return None
+    lows = [hit.earliest for hit in hits if hit.earliest]
+    highs = [hit.latest for hit in hits if hit.latest]
+    earliest = min(lows, key=lambda v: chrono._ordinal(v, end=False)) if lows else parsed.earliest  # noqa: SLF001
+    latest = max(highs, key=lambda v: chrono._ordinal(v, end=True)) if highs else parsed.latest  # noqa: SLF001
+    if (earliest, latest) == (parsed.earliest, parsed.latest):
+        return parsed
+    note = {"rule": "place_anchor_gap", "text": "kept to the stays it touches"}
+    provenance = parsed.provenance + (() if note in parsed.provenance else (note,))
+    best = earliest if earliest == latest else f"{earliest or '..'}/{latest or '..'}"
+    return chrono.DateRecord(best=best, earliest=earliest, latest=latest,
+                             granularity="range" if earliest != latest else parsed.granularity,
+                             confidence=parsed.confidence, basis=parsed.basis,
+                             anchors=parsed.anchors, provenance=provenance)
+
+
+#: A calculated best of these bases is something he SAID; a place never
+#: second-guesses it. Any other basis (his age, an anchor, a school year) is
+#: arithmetic the place may narrow (:data:`A_PLACE_MENTION_IS_AN_OUTER_BOUND`).
+_PLACE_NEVER_NARROWS_BASES = frozenset({"stated", "document", "connector", "photo"})
+
+
+def _telling_place_edges(groups: dict, calculated: dict, resolve,
+                         seeded: object = (), bounds: object = None) -> list:
+    """A ``within`` edge for each moment whose own words say where he lived
+    ("while living in San Diego", "when I lived in Arizona").
+
+    An undated moment always. Since :data:`A_PLACE_MENTION_IS_AN_OUTER_BOUND`
+    also a moment dated only by ARITHMETIC — his age, an anchor — when the
+    place and that arithmetic overlap, so the intersection is drawn; a date he
+    gave is never second-guessed by a place, and a place that misses the
+    arithmetic entirely adds nothing (it is reported, never forced)."""
+    edges = []
+    skip = set(seeded or ())
+    known = bounds if isinstance(bounds, dict) else {}
+    for node_id in sorted(groups):
+        if node_id in skip:
+            continue
+        best = calculated[node_id]["best"]
+        if best is not None and collapsed_text(getattr(best, "basis", "")) in _PLACE_NEVER_NARROWS_BASES:
+            continue
+        for claim in groups[node_id]["claims"]:
+            texts = [claim.get("event_mention")] + [
+                row.get("quote") for row in claim.get("evidence") or ()
+                if isinstance(row, dict)]
+            ref = ""
+            for text in texts:
+                ref = resolve(text, "telling") if collapsed_text(text) else ""
+                if ref:
+                    break
+            if ref and ref != node_id:
+                if best is not None:
+                    bound = known.get(ref) or (calculated.get(ref) or {}).get("best")
+                    if ":end:" in ref or bound is None or chrono.intersect(best, bound) is None:
+                        break
+                edges.append(_Edge(subject=node_id,
+                                   relation="after" if ":end:" in ref else "within",
+                                   anchors=(ref,),
+                                   claim_refs=(collapsed_text(claim.get("claim_id")),)))
+                break
+    return edges
+
+
+#: A handle ending "… in <Place>" (the place anchor resolver's own tail test).
+_HANDLE_PLACE_TAIL_RE = re.compile(r"^(?P<head>.+?)\s+in\s+(?P<place>[A-Z][\w' .-]+)$")
+
+#: Word endings folded away when a handle's own event is looked up by its
+#: words ("earning Eagle Scout" is "Earned Eagle Scout").
+_STEM_ENDINGS = ("ing", "ed")
+
+
+def _stem_key(text: object) -> str:
+    """A normalized key with verb endings folded and a trailing "in <Place>"
+    dropped — only ever read under the anchor index's uniqueness gate."""
+    raw = collapsed_text(text)
+    tail = _HANDLE_PLACE_TAIL_RE.match(raw)
+    if tail:
+        raw = tail.group("head")
+    words = []
+    for word in normalized_mention_key(raw).split():
+        for ending in _STEM_ENDINGS:
+            if len(word) > len(ending) + 3 and word.endswith(ending):
+                word = word[: -len(ending)]
+                break
+        words.append(word)
+    return " ".join(words)
+
+
+def _stem_anchor_index(groups: dict, displays: dict) -> dict:
+    """``stem key -> node ids`` over each node's display, its own words and
+    every telling's event mention (:func:`_anchor_index`'s own handles)."""
+    index: dict[str, list[str]] = {}
+    for node_id in sorted(groups):
+        group = groups[node_id]
+        texts = [displays.get(node_id, ""), _node_what(group, displays.get(node_id, ""))]
+        texts += [claim.get("event_mention") for claim in group.get("claims") or ()]
+        for text in texts:
+            key = _stem_key(text)
+            if len(key.split()) < 2:
+                continue
+            bucket = index.setdefault(key, [])
+            if node_id not in bucket:
+                bucket.append(node_id)
+    return index
+
+
+def _handle_event_and_place(anchor: object, index: dict, stem_index: dict) -> str:
+    """The node a handle's own EVENT names once its "in <Place>" tail is set
+    aside (:data:`A_PLACE_MENTION_IS_AN_OUTER_BOUND`) — exact first, then by its
+    stemmed words — or ``""``. Unique or nothing, as every anchor rule."""
+    raw = collapsed_text(anchor)
+    tail = _HANDLE_PLACE_TAIL_RE.match(raw)
+    if not tail:
+        return ""
+    head = tail.group("head")
+    found = _resolve_anchor(head, index)
+    if found:
+        return found
+    matches = stem_index.get(_stem_key(head)) or ()
+    return matches[0] if len(matches) == 1 else ""
+
+
+#: v360 follow-up (owner, 2026-09-25) (item 4). "After Dad's death" named nothing
+#: the anchor index knew — no node is called "Dad's death" — so it stood as the
+#: keystone "When was Dad's death?" while the vault held his father's death as a
+#: dated node. A handle that is a cornerstone title (`cornerstones.
+#: milestone_of_label`) names that cornerstone: the milestone, and the person
+#: the words before it name — "Dad" is how he calls person/james-taylor
+#: (`identity_resolution.WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`, through the
+#: roster alias `cornerstones.Relations` reads). Exactly one node must be that
+#: cornerstone; two leave the handle unresolved, as every anchor rule here.
+A_HANDLE_NAMING_A_CORNERSTONE_BINDS_TO_IT = (
+    "an anchor handle titled as a cornerstone — \"Dad's death\", \"Harvey's "
+    "birth\", \"the wedding\" — binds to the one node that is that cornerstone "
+    "of that person, the person read by what the owner calls them"
+)
+
+
+def _cornerstone_anchor_resolver(cornerstone_of_group: dict, relations):
+    """``resolve(handle) -> node id or ""`` (:data:`A_HANDLE_NAMING_A_CORNERSTONE_BINDS_TO_IT`)."""
+    held: dict[tuple, list[str]] = {}
+    for node_id in sorted(cornerstone_of_group):
+        status, milestone, whose = cornerstone_of_group[node_id]
+        if milestone in ("wedding", "divorce") and status == cs.CORNERSTONE:
+            whose = cs.SELF
+        key = cs.SELF if whose == cs.SELF else (whose.key if isinstance(whose, cs.Person) else "")
+        if key:
+            held.setdefault((milestone, key), []).append(node_id)
+    names = cs.name_words_of(relations)
+
+    def resolve(text: object) -> str:
+        raw = collapsed_text(text)
+        milestone = cs.milestone_of_label(raw, subject_words=names)
+        if not milestone:
+            return ""
+        lead = cs.label_lead(raw)
+        lead = " ".join(word for word in lead.split() if word not in ("the", "a", "my", "our"))
+        if milestone in ("wedding", "divorce") and not lead:
+            key = cs.SELF
+        elif not lead:
+            return ""
+        else:
+            whose = relations.person_for(lead)
+            key = cs.SELF if whose == cs.SELF else (
+                whose.key if isinstance(whose, cs.Person) and not whose.key.startswith("relation:")
+                else "")
+        ids = held.get((milestone, key)) if key else None
+        return ids[0] if ids and len(ids) == 1 else ""
+
+    return resolve
+
+
+#: v360 (owner, 2026-09-25), the right place. *"We were living in the Bay Area at
+#: the time in, uh, Santa Clara, by Cupertino"* (Dottie's birth, 2018-01-15)
+#: was linked "within" his Cupertino stay — a month in 2015 — and asked as
+#: "The order given for Dottie's birth does not fit the date claimed for it."
+#: He lived in Santa Clara then; Cupertino is the town he was BY. A place his
+#: words name only after a word of nearness ("by", "near", "close to", "next
+#: to", "outside") is a neighbor, not where the moment happened, and never
+#: anchors a "within": the edge is dropped with a finding, never a card.
+A_PLACE_HE_WAS_ONLY_NEAR_IS_NOT_WHERE_IT_HAPPENED = (
+    "a place a telling names only after a word of nearness (by, near, close "
+    "to, next to, outside) is a neighbor and never the stay a 'within' anchors "
+    "to: the edge is dropped with a finding and asks nothing"
+)
+
+_NEARBY_WORDS = r"(?:by|near|nearby|close to|next to|outside(?: of)?)"
+
+
+def _only_near(claim: object, label: object) -> bool:
+    """:data:`A_PLACE_HE_WAS_ONLY_NEAR_IS_NOT_WHERE_IT_HAPPENED` for one claim
+    and the anchor's own display label."""
+    name = collapsed_text(label)
+    row = claim if isinstance(claim, dict) else {}
+    quotes = [collapsed_text(item.get("quote")) for item in row.get("evidence") or ()
+              if isinstance(item, dict)]
+    if not name or not any(quotes):
+        return False
+    word = re.escape(name)
+    near = re.compile(rf"\b{_NEARBY_WORDS}\s+{word}\b", re.IGNORECASE)
+    anywhere = re.compile(rf"\b{word}\b", re.IGNORECASE)
+    said = [text for text in quotes if anywhere.search(text)]
+    return bool(said) and all(
+        len(anywhere.findall(text)) == len(near.findall(text)) for text in said)
+
+
+def _build_edges(groups: dict, calculated: dict, constraints: object, index: dict,
+                 place_anchor=None, cornerstone_anchor=None, stem_index=None,
+                 labels=None):
     """Ordering claims and drag constraints → resolved edges + what did not resolve.
 
     A relative claim whose anchor names nothing the substrate knows is **kept**:
@@ -3360,12 +4471,43 @@ def _build_edges(groups: dict, calculated: dict, constraints: object, index: dic
             claim_id = collapsed_text(entry["claim"].get("claim_id"))
             anchors: list[str] = []
             missing: list[str] = []
+            places: list[str] = []
+            nearby: list[str] = []
             for anchor in relation.get("anchors") or ():
                 resolved = _resolve_anchor(anchor, index)
+                if not resolved and cornerstone_anchor is not None:
+                    resolved = cornerstone_anchor(anchor)
+                if not resolved and stem_index is not None:
+                    # :data:`A_PLACE_MENTION_IS_AN_OUTER_BOUND`: "earning Eagle
+                    # Scout in Arizona" is the Eagle Scout AND Arizona.
+                    resolved = _handle_event_and_place(anchor, index, stem_index)
+                    if resolved and place_anchor is not None and collapsed_text(
+                            relation.get("relation")) in ("within", "during"):
+                        place = place_anchor(anchor)
+                        if place and place != node_id:
+                            places.append(place)
+                if not resolved and place_anchor is not None:
+                    # One place, one landmark: a handle nothing else answers
+                    # to that names one of HIS places ties to that stay.
+                    resolved = place_anchor(anchor)
+                if resolved and resolved != node_id and labels and collapsed_text(
+                        relation.get("relation")) in ("within", "during") \
+                        and _only_near(entry["claim"], labels.get(resolved)):
+                    # :data:`A_PLACE_HE_WAS_ONLY_NEAR_IS_NOT_WHERE_IT_HAPPENED`.
+                    nearby.append(resolved)
+                    continue
                 if resolved and resolved != node_id:
                     anchors.append(resolved)
                 else:
                     missing.append(collapsed_text(anchor))
+            if nearby:
+                unresolved.append({
+                    "finding": "anchor_only_nearby", "node_id": node_id,
+                    "claim_id": claim_id, "anchors": nearby,
+                    "rule": A_PLACE_HE_WAS_ONLY_NEAR_IS_NOT_WHERE_IT_HAPPENED,
+                })
+                if not anchors and not missing:
+                    continue
             if missing or not anchors:
                 unresolved.append(
                     {
@@ -3385,6 +4527,9 @@ def _build_edges(groups: dict, calculated: dict, constraints: object, index: dic
                     claim_refs=(claim_id,) if claim_id else (),
                 )
             )
+            for place in places:
+                edges.append(_Edge(subject=node_id, relation="within", anchors=(place,),
+                                   claim_refs=(claim_id,) if claim_id else ()))
 
     for value in constraints or ():
         try:
@@ -3509,7 +4654,8 @@ def _credit(contributions: dict, edge: _Edge) -> None:
     bucket.discard(edge.subject)
 
 
-def _propagate(edges, bounds: dict, *, diagnostics: list, rejected: dict, contributions: dict) -> dict:
+def _propagate(edges, bounds: dict, *, diagnostics: list, rejected: dict, contributions: dict,
+               pieces: dict | None = None) -> dict:
     """Narrow every node's interval by every edge, to a bounded fixpoint.
 
     Narrowing is monotone — an interval only ever shrinks — so the loop settles;
@@ -3542,6 +4688,8 @@ def _propagate(edges, bounds: dict, *, diagnostics: list, rejected: dict, contri
     ]
 
     placed = dict(bounds)
+    pieces = pieces or {}
+    outside: set = set()
     settled = False
     for _ in range(MAX_PROPAGATION_ROUNDS):
         changed = False
@@ -3550,12 +4698,26 @@ def _propagate(edges, bounds: dict, *, diagnostics: list, rejected: dict, contri
             if derived is None:
                 continue
             current = placed.get(edge.subject)
+            stays = (pieces.get(edge.anchors[0])
+                     if edge.relation == "within" and edge.anchors else None)
             if current is None:
                 placed[edge.subject] = derived
                 _credit(contributions, edge)
                 changed = True
                 continue
             merged = chrono.intersect(current, derived)
+            if merged is not None and stays:
+                # :data:`A_PLACE_MENTION_IS_AN_OUTER_BOUND`: never across a gap.
+                clipped = _clip_to_pieces(merged, stays)
+                if clipped is None:
+                    if (edge.subject, edge.anchors[0]) not in outside:
+                        outside.add((edge.subject, edge.anchors[0]))
+                        diagnostics.append({"finding": "place_mention_outside_stays",
+                                            "node_id": edge.subject,
+                                            "anchor": edge.anchors[0],
+                                            "rule": A_PLACE_MENTION_IS_AN_OUTER_BOUND})
+                    continue
+                merged = clipped
             if merged is None:
                 # Both are kept. The explicit date keeps the display; the order
                 # this edge asserts becomes an ALTERNATE on the node, so the
@@ -5349,6 +6511,13 @@ def derive_calculated_timeline(
 
     claims = active_claim_rows(active_index)
 
+    # timeline-rules:20 (`identity_resolution
+    # .WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`): what the owner calls each
+    # roster person, read from his own words in the claims this fold holds and
+    # carried on the roster rows every identity reader below is handed. Derived
+    # here, never stored, so a fold stays a pure function of its inputs.
+    roster_snapshot = rr.with_called_by(roster_snapshot, telling_texts(claims))
+
     # v345, `landmark_projection.A_LANDMARK_IS_DRAWN_AS_WHAT_IT_IS`. FIRST,
     # before resolution, identity or grouping, because every one of them reads
     # `event_kind`: a landmark date claim is read as the event its ENTRY dates
@@ -5430,7 +6599,8 @@ def derive_calculated_timeline(
     diagnostics.extend(rekey_alias_findings)
     roster_names = _roster_names(roster_snapshot)
     displays = {
-        node_id: _subject_display(group["subject"], group["claims"], roster_names)
+        node_id: _subject_display(group["subject"], group["claims"], roster_names,
+                                  prefer_subject=bool(group.get("participation_domain")))
         for node_id, group in groups.items()
     }
     # Timeline Fix 07: one derivation of "what is this node, in words", read by
@@ -5454,6 +6624,16 @@ def derive_calculated_timeline(
                                  is_owner=owner_flags[node_id]))
         for node_id, group in groups.items()
     }
+    # CORNERSTONES, who is who (`cornerstones.Relations`), read ONCE per fold
+    # and read here — before the anchors are built — because two v360
+    # follow-up rules need it that early: a cornerstone is titled by its own
+    # name (`cs.A_CORNERSTONE_IS_TITLED_BY_ITS_OWN_NAME`), and a handle naming
+    # one ("Dad's death") binds to it (:data:`A_HANDLE_NAMING_A_CORNERSTONE_BINDS_TO_IT`).
+    relations = cs.Relations(roster_snapshot, landmark_entries, owner_names=owner_names)
+    cornerstone_of_group = _cornerstone_of_groups(groups, labels, relations)
+    _retitle_cornerstones(groups, cornerstone_of_group, relations, labels=labels,
+                          whats=whats, displays=displays, owner_flags=owner_flags,
+                          diagnostics=diagnostics)
     timings["group"] = clock() - mark
 
     mark = clock()
@@ -5529,6 +6709,7 @@ def derive_calculated_timeline(
         node_id: _reconcile_group(
             group, birth=birth_for_group(group), diagnostics=diagnostics,
             birth_of_claim=birth_for_claim(group),
+            a_death_cornerstone=_is_a_death_cornerstone(cornerstone_of_group.get(node_id)),
         )
         for node_id, group in sorted(groups.items())
     }
@@ -5574,9 +6755,29 @@ def derive_calculated_timeline(
 
     mark = clock()
     anchor_index = _anchor_index(groups, displays)
-    edges, unresolved_anchors = _build_edges(groups, calculated, constraints, anchor_index)
+    place_anchor, place_bounds, place_members, place_findings, place_pieces = _place_anchor_resolver(
+        _residence_stays(groups, calculated, participation, landmark_entries))
+    edges, unresolved_anchors = _build_edges(
+        groups, calculated, constraints, anchor_index, place_anchor=place_anchor,
+        cornerstone_anchor=_cornerstone_anchor_resolver(cornerstone_of_group, relations),
+        stem_index=_stem_anchor_index(groups, displays), labels=labels)
+    across = []
+    for node_id in sorted(ambiguity):
+        row = ambiguity[node_id]
+        if row.get("kind") != ACROSS_THE_STAYS:
+            continue
+        ref = place_anchor.union(row.get("episode_node_ids") or (), row.get("place") or "")
+        if ref:
+            across.append(_Edge(subject=node_id, relation="within", anchors=(ref,)))
+    ambiguity = {node_id: row for node_id, row in ambiguity.items()
+                 if row.get("kind") != ACROSS_THE_STAYS}
+    edges = sorted([*edges, *across, *_telling_place_edges(
+        groups, calculated, place_anchor, seeded=participation.seeds, bounds=place_bounds)],
+        key=_Edge.sort_key)
     diagnostics.extend(unresolved_anchors)
+    diagnostics.extend(place_findings)
     seeds = {node_id: calculated[node_id]["best"] for node_id in sorted(groups)}
+    seeds.update(place_bounds)
     rejected: dict[str, list] = {}
     contributions: dict[str, set] = {}
     placed = _propagate(
@@ -5585,7 +6786,16 @@ def derive_calculated_timeline(
         diagnostics=diagnostics,
         rejected=rejected,
         contributions=contributions,
+        pieces=place_pieces,
     )
+    # The synthetic place anchors are bounds, never nodes: they leave the
+    # drawing here, and whatever they placed credits the STAYS they stood for.
+    for ref in place_bounds:
+        placed.pop(ref, None)
+    for bucket in contributions.values():
+        for ref in [ref for ref in bucket if ref in place_members]:
+            bucket.discard(ref)
+            bucket.update(place_members[ref])
     # Timeline Fix 07 D1 — THE ORIGIN FLOOR (lifehug-platform#761). The owner's
     # birth is the origin of the coordinate system, so an interval on the
     # owner's own axis that opens before it is claiming a stretch the system
@@ -5815,6 +7025,14 @@ def derive_calculated_timeline(
                 node["origin_basis"] = birth_origin_basis
                 break
     nodes.extend(frame_nodes)
+    # CORNERSTONES (owner ruling 2026-09-25, `cornerstones`): who is who, read
+    # once per fold off the roster and the landmark entries this fold was
+    # handed. A MARRIAGE is drawn here as the span it is
+    # (:data:`A_MARRIAGE_IS_A_SPAN`), beside the frames and before the
+    # memberships and lanes, which read every node.
+    nodes.extend(_marriage_span_nodes(nodes, relations, owner=owner, as_of=as_of,
+                                      generation=projection_generation,
+                                      diagnostics=diagnostics))
     timings["age_frames"] = clock() - mark
     nodes.sort(key=_node_sort_key)
 
@@ -5854,6 +7072,31 @@ def derive_calculated_timeline(
     timings["memberships"] = clock() - mark
 
     mark = clock()
+    # CORNERSTONES (owner ruling 2026-09-25, `cornerstones`). Read once over
+    # the drawn nodes: which are a cornerstone of the set (and whose), which
+    # are a cornerstone-type event for somebody outside it, and — per
+    # cornerstone — the one best-placed telling a day card would be asked on.
+    cornerstone_rows = {
+        collapsed_text(row.get("node_id")): status
+        for row in nodes
+        for status in (cs.node_status(row, relations),)
+        if status[0]
+    }
+    cornerstone_groups = cs.cornerstone_nodes(nodes, relations)
+    cornerstone_days = {
+        collapsed_text(members[0].get("node_id"))
+        for (milestone, whose), members in cornerstone_groups.items()
+        if (whose == cs.SELF or not whose.startswith("relation:"))
+        and not cs.is_a_day(members[0].get("best_temporal_value"))
+    }
+    #: Every telling of a cornerstone the vault already holds TO THE DAY. Its
+    #: other tellings are the same fact and are never asked about.
+    known_to_the_day = {
+        collapsed_text(row.get("node_id"))
+        for members in cornerstone_groups.values()
+        if cs.is_a_day(members[0].get("best_temporal_value"))
+        for row in members[1:]
+    }
     items, components, reach, anchor_nodes = _derive_work_items(
         groups=groups,
         calculated=calculated,
@@ -5875,7 +7118,13 @@ def derive_calculated_timeline(
         owner=owner,
         owner_names=owner_names,
         now=now,
+        cornerstone_rows=cornerstone_rows,
+        cornerstone_days=cornerstone_days,
     )
+    items = _with_requested_grains(items, cornerstone_rows=cornerstone_rows,
+                                   relations=relations,
+                                   known_to_the_day=known_to_the_day,
+                                   components=components, diagnostics=diagnostics)
     timings["work_items"] = clock() - mark
 
     # ONE GAIN FOR EVERY TIMELINE ROW (Cut 3a, ADR 0027). The dependency graph
@@ -5938,6 +7187,11 @@ def derive_calculated_timeline(
     stakeless: set[str] = set()
     for row in items:
         node_id = collapsed_text(row.get("node_ref"))
+        # `twi.A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`: a cornerstone's day card
+        # keeps its stakes — a separate rule read first, so the gate itself is
+        # untouched.
+        if twi.a_cornerstone_keeps_its_card(row):
+            continue
         # The window the ruling measures is the node's own PLACEMENT — the best
         # value, or the containment window when that is all there is. The
         # resolver's `probable_window` is deliberately not read here: the ledger
@@ -6138,6 +7392,121 @@ def _rival_readings(calculated_row: dict) -> str:
     return " and ".join(shown[:2])
 
 
+#: v360 follow-up (owner, 2026-09-25) (item 4). The owner's father's death was asked
+#: as "Do you know the day for Father dies of COVID?" — the `moment` wildcard's
+#: sentence around a telling's words. A cornerstone has its own sentence row.
+A_CORNERSTONE_IS_ASKED_IN_ITS_OWN_WORDS = (
+    "a cornerstone filed under the moment wildcard is asked in its milestone's "
+    "own sentence (birth, death, wedding, baptism), about the person whose "
+    "milestone it is, named by the relation word he uses for them when the "
+    "title carries one"
+)
+
+#: The classifier's wildcard kind.
+KIND_WILDCARD_MOMENT = "moment"
+
+#: A milestone -> the `KIND_SENTENCES` row that asks it.
+CORNERSTONE_SENTENCE_KIND = {"birth": "birth", "death": "death", "wedding": "married",
+                             "baptism": "baptism"}
+
+
+def _cornerstone_who(whose: object, title: object) -> str:
+    """Who a cornerstone question names: :data:`cornerstones.SELF` for the
+    owner; "my father" when the title's own lead is a relation word that is
+    this person's relationship; else the person's name; ``""`` to keep the
+    fold's display."""
+    if whose == cs.SELF:
+        return cs.SELF
+    if not isinstance(whose, cs.Person):
+        return ""
+    lead = cs.label_lead(title)
+    if lead and lead in ident.RELATIONSHIP_MENTION_WORDS and \
+            whose.relationship in (ident.RELATIONSHIP_MENTION_WORDS.get(lead) or ()):
+        return f"my {lead}"
+    if whose.key.startswith(("relation:", "landmark:")):
+        return ""
+    return collapsed_text(whose.name)
+
+
+def _group_node_view(group: dict, label: str) -> dict:
+    """The fields `cornerstones.node_status` reads, off a group before its node
+    is drawn."""
+    return {"event_kind": group.get("event_kind"), "label": label,
+            "subject_refs": list(group.get("subjects") or ()),
+            "node_kind": group.get("node_kind")}
+
+
+def _is_a_death_cornerstone(status: object) -> bool:
+    """:data:`A_DEATH_IS_DATED_BY_ITS_DATE` — a death of the cornerstone set."""
+    return (isinstance(status, tuple) and len(status) >= 2
+            and status[0] == cs.CORNERSTONE and status[1] == "death")
+
+
+def _cornerstone_of_groups(groups: dict, labels: dict, relations) -> dict:
+    """``{node_id: (status, milestone, whose)}`` for every group that is a
+    cornerstone of the set or a cornerstone-type event outside it."""
+    out: dict = {}
+    for node_id in sorted(groups):
+        group = groups[node_id]
+        if group.get("era_label"):
+            continue
+        status = cs.node_status(_group_node_view(group, labels.get(node_id, "")), relations)
+        if not status[0]:
+            # The fold's own title may be a telling that is not the milestone
+            # ("Father's near-death and death") while its tellings ARE: read
+            # the node through the one milestone its tellings' titles name.
+            status = _cornerstone_through_tellings(group, relations)
+        if status[0]:
+            out[node_id] = status
+    return out
+
+
+def _cornerstone_through_tellings(group: dict, relations) -> tuple:
+    """``node_status`` read through the tellings' own titles, when every title
+    that names a milestone names the same one (`cs.A_CORNERSTONE_IS_TITLED_BY_ITS_OWN_NAME`)."""
+    if collapsed_text(group.get("event_kind")) not in ("", KIND_WILDCARD_MOMENT):
+        return (cs.NOT_A_CORNERSTONE, "", None)
+    found: dict[str, str] = {}
+    for claim in group.get("claims") or ():
+        text = collapsed_text(claim.get("event_mention"))
+        view = _group_node_view(group, text)
+        milestone = cs.milestone_of_node(view)
+        if milestone and milestone not in found:
+            found[milestone] = text
+    if len(found) != 1:
+        return (cs.NOT_A_CORNERSTONE, "", None)
+    return cs.node_status(_group_node_view(group, next(iter(found.values()))), relations)
+
+
+def _retitle_cornerstones(groups: dict, cornerstone_of_group: dict, relations, *,
+                          labels: dict, whats: dict, displays: dict,
+                          owner_flags: dict, diagnostics: list) -> None:
+    """`cornerstones.A_CORNERSTONE_IS_TITLED_BY_ITS_OWN_NAME`, in place on the
+    fold's own ``labels`` and ``whats`` — so the title and every question about
+    the node read the same words."""
+    names = cs.name_words_of(relations)
+    for node_id in sorted(cornerstone_of_group):
+        status, milestone, _whose = cornerstone_of_group[node_id]
+        if status != cs.CORNERSTONE:
+            continue
+        group = groups[node_id]
+        subject_words = [collapsed_text(ref).rpartition("/")[2].replace("-", " ")
+                         for ref in group.get("subjects") or ()]
+        title = cs.cornerstone_title(group.get("claims") or (), milestone,
+                                     subject_words=subject_words, name_words=names)
+        if not title or title == whats.get(node_id):
+            continue
+        label = _node_label(displays[node_id], group["event_kind"], what=title,
+                            is_owner=owner_flags.get(node_id, False))
+        if not label:
+            continue
+        diagnostics.append({"finding": "cornerstone_titled_by_its_own_name",
+                            "node_id": node_id, "was": labels.get(node_id),
+                            "now": label, "rule": cs.A_CORNERSTONE_IS_TITLED_BY_ITS_OWN_NAME})
+        whats[node_id] = title
+        labels[node_id] = label
+
+
 def _node_what(group: dict, display: str) -> str:
     """The node's own HUMAN text — what a person would call this thing.
 
@@ -6200,6 +7569,34 @@ def _place_keys(roster_snapshot: object) -> tuple[set, set]:
 def _is_place_subject(group: dict, display: str, refs: set, keys: set) -> bool:
     if collapsed_text(group.get("subject")) in refs:
         return True
+    return normalized_mention_key(display) in keys
+
+
+def _person_keys(roster_snapshot: object) -> set:
+    """Every mention key a roster PERSON answers to — name, slug or alias.
+
+    v360. This fold's ``roster_snapshot`` is the person roster in every
+    production caller (`_roster_names`, `identity_work_item`,
+    `candidates_for` already read it that way) — but not in every TEST
+    caller, some of which hand this same parameter a PLACE roster instead
+    (`tests/test_one_item_per_node.py`'s ``PLACES``). Reading it regardless
+    of type once made "San Diego" answer to `is_person` there, exactly the
+    same roster-declared-type discipline :func:`_place_keys` already
+    documents for the opposite domain: never a guess from the words, and
+    never one roster's entities mistaken for the other's.
+    """
+    if not isinstance(roster_snapshot, dict):
+        return set()
+    if collapsed_text(roster_snapshot.get("type")) != "person":
+        return set()
+    try:
+        index = ident.roster_index(roster_snapshot)
+    except TemporalContractError:
+        return set()
+    return set(index.by_name_key) | set(index.by_alias_key)
+
+
+def _is_person_subject(display: str, keys: set) -> bool:
     return normalized_mention_key(display) in keys
 
 
@@ -6341,11 +7738,213 @@ def _dated_node_for(groups: dict, placed: dict, ref: str, event_kind: str) -> st
     return ""
 
 
+#: Owner ruling, 2026-09-25: *"And yes marriages should become spans and stay
+#: open while you're married."* (*"I'm still married to Katie and will be till
+#: I die."*)
+#:
+#: The owner's wedding is a CORNERSTONE — a point, a day — and it stays one.
+#: What his tellings of it did not draw is the MARRIAGE: the stretch that
+#: starts on that day and is still going. It is drawn here as its own episode
+#: node, the way an ongoing residence already is (a range whose far end is
+#: absent, ``"<start>/.."``), starting at the wedding cornerstone and ending
+#: only at a divorce cornerstone or a death — his own, or his spouse's.
+#: Nothing is stored: it is a pure function of the wedding it opens on, so a
+#: corrected wedding moves it and a filed divorce closes it on the next draw.
+A_MARRIAGE_IS_A_SPAN = (
+    "a marriage is drawn as a span that opens on the owner's wedding "
+    "cornerstone and stays open while he is married, closing only at a divorce "
+    "cornerstone or a death (his or his spouse's); the wedding itself stays a "
+    "point at the span's start"
+)
+
+#: The event kind the drawn marriage carries. Not a `temporal_claims.EVENT_KINDS`
+#: word on purpose: no claim ever files it — it is drawn, never told — and it
+#: is not a milestone, so `cornerstones` never reads it as a wedding.
+MARRIAGE_SPAN_EVENT_KIND = "marriage"
+
+
+def _marriage_span_nodes(nodes: list, relations, *, owner: str, as_of: str,
+                         generation: int, diagnostics: list) -> list[dict]:
+    """:data:`A_MARRIAGE_IS_A_SPAN` — one open (or closed) span per wedding."""
+    groups = cs.cornerstone_nodes(nodes, relations)
+    weddings = [row for row in groups.get(("wedding", cs.SELF), ())
+                if chrono.from_dict(row.get("best_temporal_value")) is not None]
+    divorces = [chrono.from_dict(row.get("best_temporal_value"))
+                for row in groups.get(("divorce", cs.SELF), ())
+                if chrono.from_dict(row.get("best_temporal_value")) is not None]
+    spouses = [person for person in relations.people if person.relationship == "spouse"]
+    owner_deaths = [
+        chrono.from_dict(row.get("best_temporal_value")) for row in nodes
+        if cs.milestone_of_node(row) == "death"
+        and relations.whose(row.get("subject_refs") or ()) == cs.SELF
+        and not cs.label_lead(row.get("label"))
+        and chrono.from_dict(row.get("best_temporal_value")) is not None
+    ]
+    # One wedding per cluster of tellings whose dates agree, best-placed first
+    # (`cornerstones.cornerstone_nodes` already ranks them).
+    clusters: list[list[dict]] = []
+    for row in weddings:
+        record = chrono.from_dict(row.get("best_temporal_value"))
+        for cluster in clusters:
+            if chrono.dates_agree(chrono.from_dict(cluster[0].get("best_temporal_value")),
+                                  record):
+                cluster.append(row)
+                break
+        else:
+            clusters.append([row])
+    out: list[dict] = []
+    for index, cluster in enumerate(clusters):
+        start = chrono.from_dict(cluster[0].get("best_temporal_value"))
+        spouse = _spouse_of(cluster, spouses, relations)
+        later = [cluster_start for cluster_start in (
+            chrono.from_dict(other[0].get("best_temporal_value")) for other in clusters[index + 1:])]
+        ends = [record for record in [*divorces, *owner_deaths,
+                                      *_spouse_deaths(nodes, spouse, relations)]
+                if _starts_after(record, start)
+                and not any(_starts_after(record, nxt) for nxt in later)]
+        end = min(ends, key=lambda record: record.earliest or "") if ends else None
+        best = chrono.DateRecord(
+            best=f"{chrono.to_edtf(start).split('/')[0]}/"
+                 f"{chrono.to_edtf(end).split('/')[-1] if end else '..'}",
+            earliest=start.earliest,
+            latest=end.latest if end else None,
+            granularity="range",
+            confidence=start.confidence,
+            basis=start.basis,
+            anchors=(),
+            provenance=tuple(start.provenance) + (tuple(end.provenance) if end else ()),
+        )
+        name = spouse.name if spouse is not None else ""
+        refs = sorted({collapsed_text(ref) for row in cluster
+                       for ref in (row.get("input_claim_refs") or ()) if collapsed_text(ref)})
+        if not refs:
+            continue
+        subject_refs = [owner, *([spouse.key] if spouse is not None else [])]
+        node_id = tp.derive_node_id(node_kind=efc.EPISODE_NODE_KIND,
+                                    event_kind=MARRIAGE_SPAN_EVENT_KIND,
+                                    subject_refs=subject_refs,
+                                    discriminator=start.earliest)
+        try:
+            out.append(tp.validate_calculated_timeline_node({
+                "node_id": node_id,
+                "node_kind": efc.EPISODE_NODE_KIND,
+                "event_kind": MARRIAGE_SPAN_EVENT_KIND,
+                "subject_refs": subject_refs,
+                "label": f"Marriage to {name}" if name else "Marriage",
+                "best_temporal_value": best.to_dict(),
+                "input_claim_refs": refs,
+                "input_fingerprint": tp.derive_input_fingerprint(
+                    claim_ids=refs, constraint_ids=(),
+                    calculation_rule_version=CALCULATION_RULE_VERSION,
+                    epoch=f"marriage:{end.earliest if end else 'open'}"),
+                "basis": "calculated",
+                "confidence": _node_confidence(best, 0.0),
+                "calculation_rule_version": CALCULATION_RULE_VERSION,
+                "projection_generation": generation,
+                "conflict_state": "none",
+                "provenance_summary": "from your wedding" + (
+                    "" if end is None else ", to its end"),
+                "life_view": _life_view(best.to_dict(), as_of),
+                "occurrence_subject_scope": "owner",
+                "owner_timeline_relation": "participated",
+                axm.AXIS_MEMBERSHIP_FIELD: tp.AXIS_MEMBERSHIP_OWNER,
+                axm.AXIS_MEMBERSHIP_REASON_FIELD: tp.AXIS_REASON_LIVED,
+            }))
+        except TemporalContractError:
+            continue
+        diagnostics.append({
+            "finding": "marriage_span_drawn",
+            "node_id": node_id,
+            "wedding_node_id": collapsed_text(cluster[0].get("node_id")),
+            "open_ended": end is None,
+        })
+    return out
+
+
+def _starts_after(record: object, start: object) -> bool:
+    if record is None or start is None:
+        return False
+    return (record.earliest or record.latest or "") > (start.latest or start.earliest or "")
+
+
+def _spouse_of(cluster: list, spouses: list, relations) -> object:
+    """The spouse a wedding's tellings name, else the vault's only spouse."""
+    named = set()
+    for row in cluster:
+        whose = relations.whose(row.get("subject_refs") or ())
+        if isinstance(whose, cs.Person) and whose.relationship == "spouse":
+            named.add(whose.key)
+        # "Married Katie": the spouse's own given name in the label.
+        tokens = set(cs._tokens(row.get("label")))  # noqa: SLF001 - one tokenizer
+        for spouse in spouses:
+            if tokens & set(cs._tokens(spouse.name)[:1]):  # noqa: SLF001
+                named.add(spouse.key)
+    if len(named) == 1:
+        return next(person for person in spouses if person.key in named)
+    return spouses[0] if len(spouses) == 1 else None
+
+
+def _spouse_deaths(nodes: list, spouse: object, relations) -> list:
+    if spouse is None:
+        return []
+    return [chrono.from_dict(row.get("best_temporal_value")) for row in nodes
+            if cs.milestone_of_node(row) == "death"
+            and getattr(cs.node_status(row, relations)[2], "key", None) == spouse.key
+            and chrono.from_dict(row.get("best_temporal_value")) is not None]
+
+
+#: The two work-item kinds that ask WHEN, and so carry a requested grain.
+DATE_CARD_KINDS = ("precision_gap", "missing_anchor")
+
+
+def _with_requested_grains(items, *, cornerstone_rows, relations, known_to_the_day,
+                           components, diagnostics) -> list:
+    """Stamp every date card with the grain it may ask for, and drop the ones
+    asking a cornerstone the vault already holds to the day.
+
+    `twi.A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`, applied: ``day`` for a
+    cornerstone, ``year`` for a cornerstone-type event outside the set,
+    otherwise the kind's own target and never finer than ``month``. An anchor
+    card with no node ("When was Dad's death?") is read off its own handle.
+    Work items only: no node's placement moves.
+    """
+    rows = list(items.values()) if isinstance(items, dict) else list(items)
+    kept: list = []
+    for row in rows:
+        kind = collapsed_text(row.get("kind"))
+        if kind not in DATE_CARD_KINDS:
+            kept.append(row)
+            continue
+        node_id = collapsed_text(row.get("node_ref"))
+        if node_id and node_id in known_to_the_day:
+            work_item_id = collapsed_text(row.get("work_item_id"))
+            components.pop(work_item_id, None)
+            diagnostics.append({"finding": "cornerstone_known_to_the_day",
+                                "node_id": node_id, "work_item_id": work_item_id})
+            continue
+        if node_id:
+            status = (cornerstone_rows.get(node_id) or ("",))[0]
+        elif collapsed_text(row.get("requested_field")) == twi.REQUESTED_FIELD_BIRTH_DATE:
+            status = cs.CORNERSTONE  # the birth origin: his own birth
+        else:
+            handle = collapsed_text(row.get("subject_ref")).partition(":")[2]
+            milestone = cs.milestone_of_label(handle)
+            lead = cs.label_lead(handle)
+            whose = relations.person_for(lead) if lead else None
+            status = cs.status_of(milestone, whose) if milestone else ""
+            if status == cs.CORNERSTONE and not cs.is_known_person(whose):
+                status = cs.OUTSIDE_THE_SET
+        kept.append({**row, twi.REQUESTED_GRAIN_KEY: twi.precision_card_grain(
+            status=status, target=_precision_target(row.get("event_kind")))})
+    return kept
+
+
 def _derive_work_items(
     *, groups, calculated, placed, possibilities, edges, diagnostics, records, by_mention, displays,
     whats=None, owner_flags=None, place_flags=None, roster_snapshot=(),
     ambiguity=None, residence_overlaps=None, containment_conflicts=None,
-    axis_rows=None, owner, owner_names=(), now
+    axis_rows=None, owner, owner_names=(), now, cornerstone_rows=None,
+    cornerstone_days=None,
 ):
     """Everything the substrate currently implies a question about (§5.4, D2).
 
@@ -6401,15 +8000,43 @@ def _derive_work_items(
         """
         return _decided_off_owner_axis(axis_rows.get(node_id))
 
+    # v360. This roster IS the person roster (`identity_work_item`,
+    # `candidates_for` and every other reader of it here already read it that
+    # way) — its own name/alias keys, read once, are `compose_question`'s
+    # `is_person`: a bare name is somebody only when the roster says so.
+    person_name_keys = _person_keys(roster_snapshot)
+
     def sentence(item_kind, node_id, group, **extra):
-        """This node's question through the ONE composer (D3)."""
+        """This node's question through the ONE composer (D3).
+
+        v360 follow-up (:data:`A_CORNERSTONE_IS_ASKED_IN_ITS_OWN_WORDS`): a
+        cornerstone the classifier filed under the ``moment`` wildcard is asked
+        in its milestone's own sentence, about the person it belongs to —
+        "Do you know the day of your father's death?", never "Do you know the
+        day for Father dies of COVID?"."""
+        kind = group.get("event_kind")
+        who = displays.get(node_id, group.get("subject"))
+        is_owner = bool(owner_flags.get(node_id))
+        status = (cornerstone_rows or {}).get(node_id) or ("",)
+        if status[0] == cs.CORNERSTONE and collapsed_text(kind) in ("", KIND_WILDCARD_MOMENT):
+            kind = CORNERSTONE_SENTENCE_KIND.get(status[1], kind)
+            spoken = _cornerstone_who(status[2], whats.get(node_id))
+            if spoken == cs.SELF:
+                is_owner = True
+            elif spoken:
+                # Somebody else's cornerstone: never "your death" because a
+                # telling of his father's death was filed under ``self``.
+                who, is_owner = spoken, False
         return compose_question(
             item_kind,
-            group.get("event_kind"),
-            who=displays.get(node_id, group.get("subject")),
+            kind,
+            who=who,
             what=whats.get(node_id) or displays.get(node_id, group.get("subject")),
-            is_owner=bool(owner_flags.get(node_id)),
+            is_owner=is_owner,
             is_place=bool(place_flags.get(node_id)),
+            is_person=_is_person_subject(
+                displays.get(node_id, group.get("subject")), person_name_keys,
+            ),
             **extra,
         )
 
@@ -6465,13 +8092,27 @@ def _derive_work_items(
         if row is None:
             continue
         raw = len(refs)
+        # v360. `identity_work_item` decides WHICH candidates survive (that
+        # stays entirely its own seat); this only re-words the sentence over
+        # them — see `compose_identity_uncertain_question`. Its own
+        # `prompt_intent` is the fallback if the reword ever comes back empty.
+        current = (
+            record if isinstance(record, ident.ResolutionRecord)
+            else ident.record_from_dict(record)
+        )
+        reworded = (
+            compose_identity_uncertain_question(
+                current.mention, current.candidates, roster_snapshot=roster_snapshot,
+            )
+            if current is not None else None
+        )
         item_id = _mint_work_item(
             items,
             components,
             kind="identity_uncertain",
             subject_ref=row.get("subject_ref"),
             requested_field=row.get("requested_field"),
-            prompt_intent=row.get("prompt_intent"),
+            prompt_intent=reworded or row.get("prompt_intent"),
             claim_refs=row.get("claim_refs") or (),
             evidence_refs=row.get("evidence_refs") or (),
             system_value=min(1.0, raw / REACH_SATURATION),
@@ -6522,6 +8163,9 @@ def _derive_work_items(
                 })
                 continue
         if len(cands) > 1:
+            # v360. Same reword as the mention-resolution path, over the SAME
+            # candidates this rung already chose (`ident.candidates_for`
+            # decides who is on the list; this only re-words the question).
             names = " or ".join(c["name"] or c["ref"] for c in cands)
             item_id = _mint_work_item(
                 items,
@@ -6529,7 +8173,12 @@ def _derive_work_items(
                 kind="identity_uncertain",
                 subject_ref=ident.unresolved_subject_ref(text),
                 requested_field=ident.IDENTITY_REQUESTED_FIELD,
-                prompt_intent=f"Which {name} is this: {names}?",
+                prompt_intent=(
+                    compose_identity_uncertain_question(
+                        name, cands, roster_snapshot=roster_snapshot,
+                    )
+                    or f"Which {name} is this: {names}?"
+                ),
                 claim_refs=refs,
                 system_value=min(1.0, raw / REACH_SATURATION),
                 by_node=by_node,
@@ -6671,7 +8320,14 @@ def _derive_work_items(
         # theirs. The owner ruled there is no person-page question feature, so
         # nothing else is minted in its place; the node keeps its claims, its
         # evidence and its place on that person's page.
-        if not raw and off_owner_axis_by_ruling(node_id):
+        # Owner ruling 2026-09-25 (`twi.A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`):
+        # a cornerstone-type event he mentions for someone else — "when did
+        # your sister get divorced?" — is worth ONE question, and a cornerstone
+        # of the set (his parents' births are before his own) always is. It is
+        # asked once, accepted at any grain, and a placed one is never asked
+        # again, which is what the unplaced-only loop already guarantees.
+        asked_once = bool((cornerstone_rows or {}).get(node_id, ("",))[0])
+        if not raw and not asked_once and off_owner_axis_by_ruling(node_id):
             diagnostics.append({
                 "finding": "off_owner_axis_no_question",
                 "node_ids": [node_id],
@@ -6700,6 +8356,45 @@ def _derive_work_items(
             claim_refs=_dated_claim_refs(group),
             evidence_refs=_evidence_refs(group),
             system_value=min(1.0, raw / REACH_SATURATION),
+            by_node=by_node,
+            diagnostics=diagnostics,
+            now=now,
+        )
+        if item_id:
+            reach[item_id] = raw
+
+    # -- cornerstones, to the day (owner ruling 2026-09-25) -----------------
+    #
+    # `twi.A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`. A cornerstone the fold has
+    # PLACED but coarser than a day ("Father dies of COVID", March–June 2020)
+    # is worth a card that asks for the day — the one case a placed node is
+    # asked again. ONE node per cornerstone (`cornerstone_days` names the
+    # best-placed telling of each), and never one the vault cannot name. An
+    # unplaced cornerstone is the ordinary precision gap above, asked at the
+    # same grain. Its rank starts where the birth origin's does: a cornerstone
+    # is what other moments are measured from, whatever its own reach.
+    for node_id in sorted(cornerstone_days or ()):
+        group = groups.get(node_id)
+        best = placed.get(node_id) or possibilities.get(node_id)
+        if group is None or best is None or cs.is_a_day(best):
+            continue
+        raw = node_reach.get(node_id, 0)
+        item_id = _mint_work_item(
+            items,
+            components,
+            kind="precision_gap",
+            event_ref=node_id,
+            node_ref=node_id,
+            event_kind=group["event_kind"],
+            subject_ref=group["subject"],
+            requested_field="date",
+            subject_resolved=group["resolved"],
+            prompt_intent=sentence("precision_gap_coarse", node_id, group,
+                                   target=cs.CORNERSTONE_GRAIN),
+            claim_refs=_dated_claim_refs(group),
+            evidence_refs=_evidence_refs(group),
+            system_value=max(twi.BIRTH_ORIGIN_SCAFFOLD_VALUE,
+                             min(1.0, raw / REACH_SATURATION)),
             by_node=by_node,
             diagnostics=diagnostics,
             now=now,
@@ -6969,6 +8664,9 @@ def _derive_work_items(
 
 
 __all__ = [
+    "A_PLACE_HE_WAS_ONLY_NEAR_IS_NOT_WHERE_IT_HAPPENED",
+    "A_DEATH_IS_DATED_BY_ITS_DATE",
+    "DIAGNOSTIC_DEATH_RIVAL_IS_NOT_A_DATE",
     "CALCULATION_RULE_VERSION",
     "COLOCATION_RETIRED",
     "DEFAULT_OWNER_REF",

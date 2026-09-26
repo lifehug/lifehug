@@ -131,8 +131,10 @@ Per-turn context is assembled from an interaction's files in a fixed
 order — identity first (stable, cacheable), turn instructions last
 (freshest, turn-specific) — exactly as each interaction's own
 `context/manifest.md` specifies. The reference example, `conversation/context/manifest.md`:
-`identity → behavior → examples → profile → record → session →
-turn_instructions`. `question_judgment`'s is `identity → behavior →
+`identity → behavior → examples → how_words_arrive → profile → record →
+asking_supply → session → turn_instructions` (`how_words_arrive` is the one
+framework-wide `interactions/how-words-arrive.md`, shared by every builder
+that reads the person's words). `question_judgment`'s is `identity → behavior →
 learned → examples → profile → turn_instructions`; `focus_curation`'s,
 the simplest of the three (no learning file, no per-user profile signal
 relevant to an identity judgment), is `identity → behavior → examples →
