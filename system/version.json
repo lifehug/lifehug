@@ -1,7 +1,7 @@
 {
-  "version": 363,
+  "version": 364,
   "released": "2026-09-26",
-  "changelog": "v363: the person a Timeline card is about is named the way he calls them, from his real roster. Found by rendering v362's card block over the owner's own generation-202 projection before it reached staging. WHAT HE WILL NOTICE: a card about Harvey says \u201cyour son Harvey\u201d (his Cornerstones row reads \u201cSon\u201d, which is his relation, not his name \u2014 v362 would have said \u201cSon (your son)\u201d); a card about James is about his son James (born 10 May 2013), never his brother AJ, whose relation-word spellings include \u201cjames\u201d (owner ruling 2026-09-25, \u201cwhen I talk about James, I'm talking about my son\u201d); \u201cGrandma Betty Jo (your grandparent)\u201d rather than \u201cyour grandparent Grandma Betty Jo\u201d; and a card whose subject is not a person (his company, Etherfuse) names it without the someone-else rule, so \u201cyou\u201d stays right for the moments he lived. `timeline_interaction.subject_view` finds the PERSON first (the Cornerstones row he is known by) and then that person's own relation-word row by ref, falls back to word-row name matching only for a subject no person row names, prefers the given name when the display name is only the relation word, and returns `is_person`; `_subject_lines` and `timeline_gates.right_person` apply the third-person rule to people only. Tests: tests/test_v362_a_timeline_action_does_one_job.py `TheOwnersRosterTests`.",
+  "changelog": "v364: the binder no longer times out on a large vault. R1 condition 7 (\u201cnot joining two mature episodes\u201d) counted the telling's own episode by walking every active binding, once for every candidate of every telling, so `bind-episodes` was quadratic in the vault: on the owner's vault (1,261 nodes, ~1,330 bound tellings) 111 million `grouping_binding` calls were 456 s of a 572 s `bind-episodes --apply`, and the hosted binder hit its 600 s budget on every run from 2026-09-25 on \u2014 holding the vault lease while his form saves and card answers waited, and filing none of its own work. WHAT HE WILL NOTICE: answers and edits file promptly again after a commit, and the binder's backlog (envelopes, proposals, same-event questions) lands. `episode_binder.episode_member_counts` takes the count once per plan and `_pairs_for`/`r1_conditions`/`_home_is_mature` read it; the counts and every verdict are exactly the old loop's (same keys, same `grouping_binding`, same collapsed episode id). Tests: tests/test_v364_binder_condition_seven_counted_once.py.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -625,6 +625,7 @@
     "tests/test_v360_views.py",
     "tests/test_v360_edit_forms.py",
     "tests/test_v360_daily_sweep_cleanups.py",
-    "tests/test_v361_a_guess_never_replaces_a_guess.py"
+    "tests/test_v361_a_guess_never_replaces_a_guess.py",
+    "tests/test_v364_binder_condition_seven_counted_once.py"
   ]
 }
