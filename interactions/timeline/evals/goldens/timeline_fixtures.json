@@ -830,5 +830,311 @@
         "expected_retire": []
       }
     ]
+  },
+  {
+    "fixture_id": "timeline-card-answer-ends-at-noted",
+    "context": "The owner's real exchange (staging, 2026-09-26 15:03Z). He pressed ▸ on \"About Charlee · What year did Charlee switch from flag football to track?\" and answered it. The reply he got was \"Football to track, freshman year, January 2026 — noted. What pulled you toward track?\" — a story beat, about the wrong person (he typed \"This is Charlee not me\"). The card has no related moments, so its FIRST reply is its last: confirm in one line, about Charlee, and ask nothing (v362, A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB).",
+    "action": "card",
+    "subject": {
+      "ref": "Charlee",
+      "name": "Charlee",
+      "word": "child",
+      "phrase": "your child Charlee",
+      "pronoun": "",
+      "born": "21 December 2010",
+      "is_owner": false
+    },
+    "card": {
+      "work_item_id": "work:5926ea22785ec451f327a1ee",
+      "question": "What year did Charlee switch from flag football to track?",
+      "label": "Charlee moved from football to track",
+      "subject": {
+        "ref": "Charlee",
+        "name": "Charlee",
+        "word": "child",
+        "phrase": "your child Charlee",
+        "pronoun": "",
+        "born": "21 December 2010",
+        "is_owner": false
+      },
+      "placement": "not placed yet — the system only guessed 2019–October 2021; their answer replaces that guess, never argue with it",
+      "related": []
+    },
+    "unknown": {
+      "kind": "precision_gap",
+      "label": "Charlee moved from football to track",
+      "anchors": [],
+      "known_years": [
+        "2026"
+      ]
+    },
+    "work_item": {
+      "kind": "work_item",
+      "work_item_id": "work:5926ea22785ec451f327a1ee",
+      "item_kind": "precision_gap",
+      "label": "work:5926ea22785ec451f327a1ee",
+      "readings": [],
+      "candidates": [],
+      "evidence": [],
+      "anchors": [],
+      "resolvable_claim_ids": [],
+      "prompt_intent": "What year did Charlee switch from flag football to track?",
+      "requested_field": "date",
+      "subject_ref": "Charlee",
+      "event_ref": "node:2457fc165fcb61619b2bb15b",
+      "node_ref": "node:2457fc165fcb61619b2bb15b"
+    },
+    "turns": [
+      {
+        "stage": "close",
+        "probe_step": null,
+        "user": "Charlee switched from football to track her freshmen year January 2026",
+        "expected_placed": {
+          "best": "2026-01",
+          "earliest": "2026-01",
+          "latest": "2026-01",
+          "granularity": "month",
+          "confidence": "certain",
+          "basis": "stated",
+          "anchors": [],
+          "provenance": []
+        },
+        "expected_retire": []
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-card-related-question-is-about-the-subject",
+    "context": "The Charlee card with one related open moment its answer would also place (its `resolves`). The first reply confirms and may ask ONE question about that moment — about Charlee, in the third person, never \"you\". \"I don't remember\" ends it: the second reply is the card's `close`.",
+    "action": "card",
+    "subject": {
+      "ref": "Charlee",
+      "name": "Charlee",
+      "word": "child",
+      "phrase": "your child Charlee",
+      "pronoun": "",
+      "born": "21 December 2010",
+      "is_owner": false
+    },
+    "card": {
+      "work_item_id": "work:charlee-track-related",
+      "question": "What year did Charlee switch from flag football to track?",
+      "label": "Charlee moved from football to track",
+      "subject": {
+        "ref": "Charlee",
+        "name": "Charlee",
+        "word": "child",
+        "phrase": "your child Charlee",
+        "pronoun": "",
+        "born": "21 December 2010",
+        "is_owner": false
+      },
+      "placement": "not placed yet — the system only guessed 2019–October 2021; their answer replaces that guess, never argue with it",
+      "related": [
+        {
+          "node_id": "node:charlee-first-meet",
+          "label": "Charlee's first track meet",
+          "about": "Charlee"
+        }
+      ]
+    },
+    "unknown": {
+      "kind": "precision_gap",
+      "label": "Charlee moved from football to track",
+      "anchors": [],
+      "known_years": [
+        "2026"
+      ]
+    },
+    "work_item": {
+      "kind": "work_item",
+      "work_item_id": "work:charlee-track-related",
+      "item_kind": "precision_gap",
+      "label": "work:charlee-track-related",
+      "readings": [],
+      "candidates": [],
+      "evidence": [],
+      "anchors": [],
+      "resolvable_claim_ids": [],
+      "prompt_intent": "What year did Charlee switch from flag football to track?",
+      "requested_field": "date",
+      "subject_ref": "Charlee",
+      "event_ref": "node:2457fc165fcb61619b2bb15b",
+      "node_ref": "node:2457fc165fcb61619b2bb15b"
+    },
+    "turns": [
+      {
+        "stage": "work_item",
+        "probe_step": null,
+        "user": "Charlee switched from football to track her freshmen year January 2026",
+        "expected_placed": {
+          "best": "2026-01",
+          "earliest": "2026-01",
+          "latest": "2026-01",
+          "granularity": "month",
+          "confidence": "certain",
+          "basis": "stated",
+          "anchors": [],
+          "provenance": []
+        },
+        "expected_retire": []
+      },
+      {
+        "stage": "close",
+        "probe_step": "defer",
+        "user": "I don't remember that one",
+        "expected_placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-card-subject-is-someone-else",
+    "context": "The owner's 2026-09-23 incident (staging): a card on his father's mission to New Zealand, answered \"19-21 years old\". The reply placed the OWNER at nineteen (\"What comes to mind first when you think back to those years?\") and he had to type \"He was 19-21 not me. I wasn't born yet.\" The age is his dad's, read against his dad's birth (4 June 1954), confirmed in one line, and nothing is asked about a time he did not live.",
+    "action": "card",
+    "subject": {
+      "ref": "James Taylor",
+      "name": "Dad",
+      "word": "father",
+      "phrase": "Dad (your father)",
+      "pronoun": "he",
+      "born": "4 June 1954",
+      "is_owner": false
+    },
+    "card": {
+      "work_item_id": "work:dad-mission",
+      "question": "What year (or about how old was your dad) did he serve his mission to New Zealand?",
+      "label": "Father's mission to New Zealand",
+      "subject": {
+        "ref": "James Taylor",
+        "name": "Dad",
+        "word": "father",
+        "phrase": "Dad (your father)",
+        "pronoun": "he",
+        "born": "4 June 1954",
+        "is_owner": false
+      },
+      "placement": "not placed yet",
+      "related": []
+    },
+    "unknown": {
+      "kind": "precision_gap",
+      "label": "Father's mission to New Zealand",
+      "anchors": [],
+      "known_years": [
+        "1954"
+      ]
+    },
+    "work_item": {
+      "kind": "work_item",
+      "work_item_id": "work:dad-mission",
+      "item_kind": "precision_gap",
+      "label": "work:dad-mission",
+      "readings": [],
+      "candidates": [],
+      "evidence": [],
+      "anchors": [],
+      "resolvable_claim_ids": [],
+      "prompt_intent": "What year (or about how old was your dad) did he serve his mission to New Zealand?",
+      "requested_field": "date",
+      "subject_ref": "James Taylor",
+      "node_ref": "node:dad-mission"
+    },
+    "turns": [
+      {
+        "stage": "close",
+        "probe_step": null,
+        "user": "19-21 years old",
+        "expected_placed": {
+          "best": "1973-06/1976-06",
+          "earliest": "1973-06",
+          "latest": "1976-06",
+          "granularity": "range",
+          "confidence": "approximate",
+          "basis": "stated",
+          "anchors": [],
+          "provenance": []
+        },
+        "expected_retire": []
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-move-confirmed-is-noted",
+    "context": "Owner, 2026-09-26: after a move on the Timeline the conversation that opened asked him why he had made the move. A move needs no reason. The conversation opens with the move's own confirmation line; \"Yes\" is \"Noted.\" and nothing else.",
+    "action": "move",
+    "move": {
+      "kind": "moved",
+      "node_id": "node:robotech-at-the-larsons",
+      "label": "Robotech nights at the Larsons'",
+      "relation": "within",
+      "anchors": [
+        "the Horsepools house"
+      ],
+      "inside": "",
+      "range": "June 1990–June 1991",
+      "subject_ref": ""
+    },
+    "expected_opener": "Moved “Robotech nights at the Larsons'” to June 1990–June 1991, inside the Horsepools house. Right?",
+    "unknown": {
+      "kind": "moment",
+      "label": "Robotech nights at the Larsons'",
+      "anchors": [],
+      "known_years": [
+        "1990",
+        "1991"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "moved",
+        "probe_step": null,
+        "user": "Yes",
+        "expected_placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-move-correction-is-the-move",
+    "context": "The same move, corrected. The correction IS the move: one line in his words, `placed` filled from what he said, and nothing asked — never why.",
+    "action": "move",
+    "move": {
+      "kind": "moved",
+      "node_id": "node:robotech-at-the-larsons",
+      "label": "Robotech nights at the Larsons'",
+      "relation": "within",
+      "anchors": [
+        "the Horsepools house"
+      ],
+      "inside": "",
+      "range": "June 1990–June 1991",
+      "subject_ref": ""
+    },
+    "expected_opener": "Moved “Robotech nights at the Larsons'” to June 1990–June 1991, inside the Horsepools house. Right?",
+    "unknown": {
+      "kind": "moment",
+      "label": "Robotech nights at the Larsons'",
+      "anchors": [],
+      "known_years": [
+        "1990",
+        "1991"
+      ]
+    },
+    "turns": [
+      {
+        "stage": "moved",
+        "probe_step": null,
+        "user": "No, it was more like spring 1991",
+        "expected_placed": {
+          "best": "1991-21",
+          "earliest": "1991-03",
+          "latest": "1991-05",
+          "granularity": "season",
+          "confidence": "approximate",
+          "basis": "stated",
+          "anchors": [],
+          "provenance": []
+        }
+      }
+    ]
   }
 ]

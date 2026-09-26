@@ -1830,6 +1830,38 @@ def _work_item_context_block(target: object) -> str:
     return f"\n\n## WORK ITEM\n\n{body}\n" if body else ""
 
 
+def _card_for_turn(work_item: object, vault_root: str | Path | None) -> dict:
+    """`timeline_interaction.card_view` for a card conversation's target, read
+    from THIS vault's published files — the bare published row (it carries
+    ``resolves`` and ``probable_window``), the projection's nodes and aliases,
+    its ``relation_words`` and its ``cornerstones_view``. Never raises: a vault
+    that has not published degrades to a card built from the target alone,
+    which still names the question and the person it is about."""
+    import timeline_interaction as _ti  # noqa: PLC0415
+
+    target = _ti.work_item_target(work_item) or {}
+    try:
+        import temporal_publication as _pub  # noqa: PLC0415
+
+        root = vault_root if vault_root is not None else VAULT_ROOT
+        published = _pub.read_work_items(root) or {}
+        projection = _pub.read_projection(root) or {}
+    except Exception:  # noqa: BLE001 — a context read never costs a turn
+        published, projection = {}, {}
+    wanted = str(target.get("work_item_id") or "")
+    item = next((row for row in (published.get("work_items") or ())
+                 if isinstance(row, dict) and str(row.get("work_item_id") or "") == wanted),
+                None) or (work_item if isinstance(work_item, dict) else {})
+    return _ti.card_view(
+        item,
+        nodes=projection.get("nodes") or (),
+        node_aliases=projection.get("node_aliases"),
+        relation_words=projection.get("relation_words") or (),
+        people=projection.get("cornerstones_view") or (),
+        target=target,
+    )
+
+
 def _file_work_item_resolution(target: object, placed: object, *,
                                answer_text: str, session_id: str,
                                vault_root: str | Path | None = None) -> bool:
@@ -1855,6 +1887,22 @@ def _file_work_item_resolution(target: object, placed: object, *,
             return False
         wanted = str(kwargs.pop("work_item_id"))
         root = vault_root if vault_root is not None else VAULT_ROOT
+        if kwargs.get("correction_kind") == _ti.CORRECTION_KIND_PLACE:
+            # v362 `AN_ANSWER_WITH_NOTHING_TO_RETIRE_IS_PLACED`: a card with no
+            # rival readings is placed now, through the card seat — the same
+            # call the hosted platform's `resolve-work-item` driver makes.
+            import answer_placement  # noqa: PLC0415
+
+            placed_now = answer_placement.place_card_answer(
+                root,
+                session_ref="conversation:cand:"
+                + answer_placement.SESSION_WORK_ITEM_MARKER + wanted,
+                text=str(kwargs["resolution_text"]),
+            )
+            if placed_now["card"] is None:
+                _diagnostic("work_item_resolve", placed_now["refused"] or
+                            "work_item_not_published", session_id)
+            return bool(placed_now["report"].get("filed"))
         item = next(
             (row for row in mirror_work.load_work_items(root)
              if isinstance(row, dict) and str(row.get("work_item_id") or "") == wanted),
@@ -1891,8 +1939,13 @@ def run_post_answer_turn(
     rotation_updater: Callable[[str], None] | None = None,
     fallback: Callable[..., None] | None = None,
     work_item: object = None,
+    card: dict | None = None,
 ) -> TurnOutcome:
     """Run ONE conversation turn for a durable answer, or degrade to today.
+
+    ``work_item`` makes this a CARD conversation (v234); ``card`` (v362) is the
+    host's own `timeline_interaction.card_view` of it when the host already
+    read the projection — absent, it is read here from the published files.
 
     Called from ``process_answer.run_post_answer_delivery`` in place of the
     acknowledgment + separate-follow-up pair. Every failure mode either
@@ -2023,13 +2076,32 @@ def run_post_answer_turn(
     # no output key of its own: `placed` is the lane's existing one, and the
     # claims come from the general listener hearing the same message.
     work_item_row = None
+    card_block = ""
     if work_item is not None:
         import timeline_interaction as _ti  # noqa: PLC0415
 
         work_item_row = _ti.work_item_target(work_item)
         if work_item_row is not None:
             timeline_item = None
-    if timeline_item is not None or work_item_row is not None:
+    if work_item_row is not None:
+        # v362 `timeline_interaction.A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB`:
+        # a conversation opened from a card is the CARD's — its stage is the
+        # card rule (`card_stage_for_session`, never `MAX_PROBES`), a closing
+        # reply may not carry a question at all (`action_question_allowed`
+        # on the turn shape, so a question the model writes anyway is
+        # blocked), and the prompt carries the card block: the question, the
+        # moment, where it stands, WHO it is about and the one job. The same
+        # four calls the hosted platform makes.
+        card = card if isinstance(card, dict) else _card_for_turn(work_item, vault_root)
+        stage = _ti.card_stage_for_session(session, related=card.get("related") or ())
+        shape = replace(
+            shape,
+            timeline_stage=stage,
+            question_allowed=_ti.action_question_allowed(stage),
+        )
+        card_block = "\n\n" + _ti.render_card_context(
+            card, answered=_ti.card_answered(session), closing=stage == "close") + "\n"
+    elif timeline_item is not None:
         import timeline_interaction as _ti  # noqa: PLC0415
 
         shape = replace(
@@ -2041,6 +2113,7 @@ def run_post_answer_turn(
         prompt = (
             builder({"session": session})
             + _work_item_context_block(work_item_row)
+            + card_block
             + _output_contract_block(shape)
         )
         generated = (ai_call or call_ai)(prompt, model)
@@ -2212,11 +2285,19 @@ def run_post_answer_turn(
     if work_item_row is not None:
         # The quiet case is the common one and it writes nothing at all:
         # `work_item_resolution` returns None unless the person named one of
-        # the readings already on the table (§2.5).
+        # the readings already on the table (§2.5), or (v362) dated a card
+        # that has none.
         _file_work_item_resolution(
             work_item_row, placed_record, answer_text=answer_text,
             session_id=session_id, vault_root=vault_root,
         )
+        if shape.timeline_stage == "close":
+            # v362: the card's last reply is sent — the conversation is done.
+            try:
+                conversation.close_session(session_id, {"reason": "done"},
+                                           vault_root=vault_root)
+            except Exception:  # noqa: BLE001 — the reply is already delivered
+                _diagnostic("session_record", "close_failed", session_id)
     elif placed_record and timeline_item is not None:
         _file_placement(
             timeline_item, placed_record, session_id=session_id,

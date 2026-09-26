@@ -131,11 +131,28 @@ keeps the inherited contract untouched.
   related moment named in `{work_item}` itself, never an invented one. With
   nothing named there, or once they say "I don't know" / change the subject /
   the register cools, this reply asks nothing and the episode is done.
+- **The right person (v362).** A card about someone else — his daughter, his
+  father — is answered about THEM. Speak of them by name, in the third
+  person; an age, a grade or a year in the answer is theirs. The owner's
+  2026-09-26 card "What year did Charlee switch from flag football to
+  track?" was answered "…her freshmen year January 2026" and got back
+  "…noted. What pulled you toward track?" — a story beat, asked of the wrong
+  person. He typed "This is Charlee not me."
+- **A move is confirmed, never explained (v362).** After he moves or edits a
+  moment on his Timeline, the conversation that opens has one job: say what
+  moved and where it landed ("Moved “…” to June 1990–June 1991, inside the
+  Horsepools house. Right?"), take a correction as the move, and stop. Never
+  "why did you make that move?" (owner, 2026-09-26).
 - **This is the framework's seat for the rule, not a copy of it.** A host
   that wires its own play surface around this package (Timeline row, Mirror,
   a deep link) reads this leaf rather than re-deciding when a card's answer
   should stop being a card conversation — the same one-definition contract
-  `compose_question` already keeps for wording (ADR 0021).
+  `compose_question` already keeps for wording (ADR 0021). Since v362 the
+  host also CALLS the rule rather than keeping a copy:
+  `timeline_interaction.card_view` / `card_stage_for_session` /
+  `render_card_context` for a card, `move_target` / `move_confirmation` /
+  `render_move_context` for a move, and `action_question_allowed` on its own
+  turn shape so a reply that must ask nothing cannot.
 <!-- /embed -->
 
 ## 2b. The question writer — sentences, not templates
@@ -224,6 +241,7 @@ Four rules travel with the composer and none of them is a preference:
 | The next question | `timeline_interaction.choose_probe(unknown, anchors=…, precision_so_far=…, asked_steps=…)` walks `PLAYBOOK_STEPS`: content → residence → role → parallel domain → sequence → landmark → season → bounds → convergence → defer. Rungs needing a landmark are skipped when there is none |
 | When the ladder stops | `TARGET_GRANULARITY` per unknown kind — a gap between eras needs a year, a thin lineup only needs an era. At or finer than target, the probe becomes `convergence` |
 | Which stage this turn is in | `timeline_interaction.timeline_stage_for_session(session, user_leaving=…, placement_settled=…, no_new_bound_streak=…, work_item=…)` → `open` before the first assistant turn, `close` on a departure, a settled placement, two unproductive probes, or the probe ceiling; `work_item` for a conversation the person opened on a Play target; `place` otherwise <!-- parity: timeline_interaction.STOP_AFTER_UNPRODUCTIVE_PROBES = 2 --> <!-- parity: timeline_interaction.MAX_PROBES = 4 --> |
+| A conversation opened from a Timeline action (v362) | `A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB`. A card: `card_view(item, nodes=…, node_aliases=…, relation_words=…, people=…)` (question, moment, where it stands, `subject_view` — name, relation word, pronoun, birth — and the grounded related moments), `card_stage_for_session(session, related=…)` (`close` once done: no related moment left, the last reply asked nothing, or the last answer placed nothing — no `MAX_PROBES`), `render_card_context(card, answered=…, closing=…)`. A move: `move_target` → `move_confirmation` (*"Moved “X” to June 1990–June 1991, inside the Horsepools house. Right?"*) → the `moved` stage and `render_move_context`. Both hosts apply `action_question_allowed(stage)` to their turn shape; `lint_timeline_reply(…, action=, subject=)` adds `timeline_gates.one_job` and `timeline_gates.right_person`. A dated answer to a card with nothing to retire is placed on the turn (`CORRECTION_KIND_PLACE` → `answer_placement.place_card_answer`); a move's correction files on the moved node (`answer_placement.SESSION_MOVE_MARKER`), and a bare "yes" files nothing |
 | What the filing just placed (v207) | `cross_dating.gain_sentence_for_record(record, timeline_payload)` → `cross_dating.render_filing_gain(sentence)` fills `{filing_gain}` on the turn that FILED — *"Got it — that dates nine moments and your Childhood years."* The count is the cross-dating pass run over the current payload with the new record folded in, so the reply can only claim what the next derivation delivers. Empty on every other turn, and the prompt is then byte-identical |
 | The prompt the caller replays verbatim | `interactions/timeline/prompt/turn-instructions.md`, substituting `{timeline_stage}`, `{unknown_label}`, `{probe}`, `{anchors}`, `{precision_so_far}`, `{filing_gain}` |
 | The five lints | `timeline_interaction.lint_timeline_reply` → `timeline_gates.*`: never open by asking for a year; at most one question; offer bounds rather than demand a point; accept a deferral without pressing; never assert a year nobody supplied |
