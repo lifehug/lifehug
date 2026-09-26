@@ -548,8 +548,17 @@ WORK_ITEM_STAGE = "work_item"
 #: stage and the two cannot drift.
 ERA_STAGE = "era"
 
+#: The stage a conversation opened right after a MOVE on the Timeline runs in
+#: (v361, owner 2026-09-26: "after I make an edit or a move… it asks me why I
+#: made that move"). Like `work_item` and `era` it is a stage of this child,
+#: not a new child: it mints no output field (`placed` is the lane's own, and a
+#: correction that carries a time fills it), and a correction files through the
+#: card seat (`answer_placement.SESSION_MOVE_MARKER`). See
+#: :data:`A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB`.
+MOVE_STAGE = "moved"
+
 VALID_TIMELINE_STAGES = frozenset({"open", "place", "close", WORK_ITEM_STAGE,
-                                   ERA_STAGE})
+                                   ERA_STAGE, MOVE_STAGE})
 
 #: Playbook stop rule §6.10 — "stop when two probes in a row return no new
 #: bound". The caller counts; this module decides.
@@ -1234,6 +1243,19 @@ def work_item_retire_ids(target: object, placed: object) -> tuple[str, ...]:
     return tuple(retire)
 
 
+#: v361: the `correction_kind` of an answer that PLACES a card with nothing to
+#: retire. A host routes it to `answer_placement.place_card_answer` (the card
+#: seat), never to `mirror_work.resolve_mirror_item`, which retires readings.
+CORRECTION_KIND_PLACE = "place"
+
+#: The rule, in one sentence (v361).
+AN_ANSWER_WITH_NOTHING_TO_RETIRE_IS_PLACED = (
+    "an answer that dates a card with no rival readings (a precision gap, a "
+    "missing anchor) is placed on the turn through the card seat, so the card "
+    "leaves Needs placing now rather than after the daily sweep"
+)
+
+
 def work_item_resolution(target: object, placed: object, *,
                          resolution_text: str) -> dict | None:
     """The kwargs for `mirror.resolve_actionable_item`, or `None` to write nothing.
@@ -1257,6 +1279,21 @@ def work_item_resolution(target: object, placed: object, *,
     text = " ".join(str(resolution_text or "").split())
     if not text:
         return None
+    if not row["readings"]:
+        # v361 (:data:`AN_ANSWER_WITH_NOTHING_TO_RETIRE_IS_PLACED`): a card with
+        # no rival readings — a precision gap, a missing anchor — has nothing
+        # to retire, and before this its answer filed NOTHING on the turn and
+        # waited for the daily sweep while the card stayed in front of him.
+        # When the reply actually dated it, the answer is PLACED now, through
+        # the card seat (`answer_placement.place_card_answer`).
+        if chrono.from_dict(placed) is None:
+            return None
+        return {
+            "work_item_id": row["work_item_id"],
+            "resolution_text": text,
+            "retire_claim_ids": [],
+            "correction_kind": CORRECTION_KIND_PLACE,
+        }
     retire = work_item_retire_ids(row, placed)
     if not retire:
         return None
@@ -1266,6 +1303,647 @@ def work_item_resolution(target: object, placed: object, *,
         "retire_claim_ids": list(retire),
         "correction_kind": "supersede",
     }
+
+
+# --------------------------------------------------------------------------
+# A conversation opened from a Timeline ACTION does one job (v361)
+# --------------------------------------------------------------------------
+#
+# Owner, 2026-09-26 (staging): he pressed ▸ on "About Charlee · What year did
+# Charlee switch from flag football to track?", typed "Charlee switched from
+# football to track her freshmen year January 2026", and was answered
+# "Football to track, freshman year, January 2026 — noted. What pulled you
+# toward track?" — a story beat, about the wrong person. He typed "This is
+# Charlee not me". And after a move on the Timeline, the conversation that
+# opened asked him why he had made the move. His words: "when I actually make
+# an edit on the timeline, it doesn't have context… when we're answering
+# questions it is aware of all the context and it's specifically trying to
+# answer the timely question."
+#
+# Everything below is the ONE definition of that rule, for every host. The
+# hosted platform used to keep its own copy (`work_item_walk.card_is_done` /
+# `render_card_aside`, Timeline Fix 10); owner ruling 2026-09-25 ("the Lifehug
+# platform and the Lifehug OSS should work exactly the same") moves it here,
+# and a host now calls these functions rather than re-deciding them:
+#
+# * WHAT the conversation is about — :func:`card_view` (a card: its question,
+#   its node, the person it is about, where it stands now, the grounded
+#   related moments) and :func:`move_target` (a move: what moved, what he
+#   asserted, where it landed);
+# * WHO it is about — :func:`subject_view`, read off the published
+#   ``relation_words`` and ``cornerstones_view`` rows, so the model is told
+#   "your child Charlee, born 21 December 2010", in words, and told to speak
+#   of her in the third person;
+# * WHEN it is done — :func:`card_is_done` / :func:`move_is_done`, pure over the
+#   transcript, and :func:`action_question_allowed`, which a host applies to
+#   its own turn shape so a closing reply cannot carry a question at all;
+# * WHAT the model reads — :func:`render_card_context` /
+#   :func:`render_move_context`, the whole block, and :func:`move_confirmation`,
+#   the one line a move conversation opens with.
+
+#: The rule, in one sentence, so a reader and a test name the same thing.
+A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB = (
+    "a conversation opened from a Timeline action (a card's answer, a move or "
+    "an edit just saved) carries its target, the person it is about, where it "
+    "stands and what the action changed, and does that one job: confirm in one "
+    "line and stop, or ask ONE related question grounded in a real open item, "
+    "about the right person; never a story beat and never why they did it"
+)
+
+#: The headings the two blocks open with — one spelling, so a host that
+#: asserts an ordinary prompt carries no action text asserts the same bytes.
+CARD_HEADING = "## This conversation came from a Timeline card"
+MOVE_HEADING = "## This conversation came from a move on the Timeline"
+
+#: Relationship -> the neutral relation word, used only when no word was
+#: published for the person (a gendered word always wins when one is known,
+#: owner ruling 2026-09-25 "Relationship words").
+_NEUTRAL_RELATION_WORDS = {
+    "child": "child", "parent": "parent", "sibling": "sibling",
+    "spouse": "spouse", "grandparent": "grandparent",
+    "grandchild": "grandchild",
+}
+_SHE_WORDS = frozenset({"daughter", "mother", "wife", "sister", "grandmother",
+                        "granddaughter", "mom", "aunt", "niece"})
+_HE_WORDS = frozenset({"son", "father", "husband", "brother", "grandfather",
+                       "grandson", "dad", "uncle", "nephew"})
+#: Names that are themselves kinship words — what he calls his father ("Dad")
+#: or his grandfather ("Grandpa") — so the phrase does not say it twice.
+_KINSHIP_NAMES = _SHE_WORDS | _HE_WORDS | frozenset({
+    "grandpa", "grandma", "papa", "mama", "nana", "granny", "gramps", "mum",
+})
+
+
+def _fold(text: object) -> str:
+    return " ".join(str(text or "").split()).strip()
+
+
+def _fold_key(text: object) -> str:
+    return _fold(text).lower().rstrip(".")
+
+
+def _subject_is_the_owner(subject: str) -> bool:
+    if not subject or subject.lower() == "self":
+        return True
+    try:
+        from temporal_timeline import is_owner_reference_only  # noqa: PLC0415
+    except Exception:  # noqa: BLE001 — a context read never costs a turn
+        return False
+    return bool(is_owner_reference_only(subject))
+
+
+def _subject_is_a_handle(subject: str) -> bool:
+    try:
+        import identity_resolution as _ident  # noqa: PLC0415
+        import temporal_work_items as _twi  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(_ident.is_unresolved_ref(subject) or _twi.is_anchor_handle_ref(subject))
+
+
+def _row_names(row: dict) -> set[str]:
+    names = {_fold_key(row.get(key)) for key in ("subject_ref", "person_ref", "name",
+                                                  "display_name")}
+    names |= {_fold_key(s) for s in (row.get("spellings") or ()) if isinstance(s, str)}
+    full = _fold(row.get("name"))
+    if full:
+        names.add(_fold_key(full.split()[0]))
+    return {name for name in names if name}
+
+
+def _people_rows(people: object) -> list[dict]:
+    """``cornerstones_view`` people, whether handed the whole view (its
+    ``groups[].people``) or the flat list."""
+    if isinstance(people, dict):
+        rows: list[dict] = []
+        for group in people.get("groups") or ():
+            if isinstance(group, dict):
+                rows.extend(p for p in (group.get("people") or ()) if isinstance(p, dict))
+        rows.extend(p for p in (people.get("others") or ()) if isinstance(p, dict))
+        return rows
+    return [p for p in (people or ()) if isinstance(p, dict)]
+
+
+def subject_view(subject_ref: object, *, relation_words: object = (),
+                 people: object = ()) -> dict:
+    """WHO a card or a move is about, as the model must be told it.
+
+    ``{"ref", "name", "word", "phrase", "pronoun", "born", "is_owner"}``:
+
+    * the OWNER (``self``, a bare owner pronoun, or no subject) —
+      ``is_owner: True`` and nothing else to say;
+    * a binder HANDLE nobody resolved ("unresolved:…", "anchor:…") — ``{}``:
+      a handle is not a person to attribute an age to;
+    * anyone else — their name as he calls them, the relation word the
+      projection published (``relation_words``, gendered when known), the
+      phrase "your child Charlee", a pronoun when the word says one, and their
+      birth when the Cornerstones view has it — so "freshman year" and
+      "January 2026" are read as Charlee's, at Charlee's age.
+
+    ``relation_words`` is the calculated projection's own list (v358) and
+    ``people`` its ``cornerstones_view`` (v360); either may be empty. A person
+    neither lists still gets their name and ``is_owner: False``, which is the
+    whole of the 2026-09-26 fix: the model is told it is not the person typing.
+    """
+    subject = _fold(subject_ref)
+    if _subject_is_the_owner(subject):
+        return {"ref": subject or "self", "is_owner": True}
+    if _subject_is_a_handle(subject):
+        return {}
+    wanted = _fold_key(subject)
+    word_row = next((row for row in (relation_words or ())
+                     if isinstance(row, dict) and wanted in _row_names(row)), None)
+    person = next((row for row in _people_rows(people) if wanted in _row_names(row)),
+                  None)
+    name = subject
+    if person is not None and _fold(person.get("display_name")):
+        name = _fold(person.get("display_name"))
+    elif word_row is not None and _fold(word_row.get("name")) and "/" in subject:
+        name = _fold(word_row.get("name"))
+    word = ""
+    gender = ""
+    if word_row is not None:
+        word = _fold_key(word_row.get("word"))
+        gender = _fold_key(word_row.get("relation_gender"))
+    if not word and person is not None:
+        word = (_fold_key(person.get("relation_word"))
+                or _NEUTRAL_RELATION_WORDS.get(_fold_key(person.get("relationship")), ""))
+    pronoun = ""
+    if gender == "female" or word in _SHE_WORDS:
+        pronoun = "she"
+    elif gender == "male" or word in _HE_WORDS:
+        pronoun = "he"
+    born = ""
+    if person is not None and isinstance(person.get("born"), dict):
+        born = _fold(person["born"].get("display"))
+    if not word:
+        phrase = name
+    elif _fold_key(name) in _KINSHIP_NAMES:
+        # What he calls them IS a kinship word ("Dad", "Grandpa"): "Dad (your
+        # father)", never "your father Dad".
+        phrase = f"{name} (your {word})"
+    else:
+        phrase = f"your {word} {name}"
+    return {
+        "ref": subject,
+        "name": name,
+        "word": word,
+        "phrase": phrase,
+        "pronoun": pronoun,
+        "born": born,
+        "is_owner": False,
+    }
+
+
+def _node_index(nodes: object) -> dict[str, dict]:
+    index: dict[str, dict] = {}
+    for node in nodes if isinstance(nodes, (list, tuple)) else ():
+        if isinstance(node, dict):
+            node_id = _fold(node.get("node_id"))
+            if node_id and node_id not in index:
+                index[node_id] = node
+    return index
+
+
+def _node_label(node: object) -> str:
+    row = node if isinstance(node, dict) else {}
+    return _fold(row.get("label") or row.get("headline"))
+
+
+def _placement_text(node: object, item: object) -> str:
+    """Where the card's moment stands NOW, in words: the node's own placement
+    at its grain, or "not placed yet" plus the system's guess — labelled as a
+    guess, because his answer replaces it (owner ruling 2026-09-25: a system
+    inference never overrides what he said)."""
+    row = node if isinstance(node, dict) else {}
+    record = chrono.from_dict(row.get("best_temporal_value")) if row else None
+    if record is not None and row.get("usable_placement") is not False:
+        shown = chrono.display_date(record, with_basis=False)
+        if shown:
+            return f"placed at {shown}"
+    window = (item or {}).get("probable_window") if isinstance(item, dict) else None
+    if not isinstance(window, dict):
+        window = row.get("probable_window") if isinstance(row.get("probable_window"), dict) else None
+    if isinstance(window, dict):
+        earliest = _fold(window.get("earliest"))
+        latest = _fold(window.get("latest"))
+        guess = None
+        if earliest and latest:
+            guess = chrono.parse_edtf(f"{earliest}/{latest}")
+        elif earliest or latest:
+            guess = chrono.parse_edtf(earliest or latest)
+        shown = chrono.display_date(guess, with_basis=False) if guess is not None else ""
+        if shown:
+            return (f"not placed yet — the system only guessed {shown}; their "
+                    f"answer replaces that guess, never argue with it")
+    return "not placed yet"
+
+
+def card_related(item: object, nodes: object, *, node_aliases: object = None,
+                 relation_words: object = (), people: object = ()) -> tuple[dict, ...]:
+    """The moments THIS card's answer would also place — its ``resolves``
+    (`timeline_gain.item_gain`, what the Timeline renders as "could place N
+    stories") labelled off the projection's own nodes, each with WHO it is
+    about.
+
+    Grounded, never invented: an id the projection no longer publishes is
+    skipped, a node with no label is skipped (a node id is a machine spelling,
+    never a question), duplicates collapse, and a former node id resolves
+    through ``node_aliases`` first. Moved here from the platform's
+    `work_item_walk.card_constellation` (v361), unchanged in what it keeps.
+    """
+    if not isinstance(item, dict):
+        return ()
+    aliases = node_aliases if isinstance(node_aliases, dict) else {}
+    index = _node_index(nodes)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for ref in item.get("resolves") or ():
+        node_id = _fold(ref)
+        if not node_id:
+            continue
+        node_id = _fold(aliases.get(node_id, node_id)) or node_id
+        if node_id in seen:
+            continue
+        node = index.get(node_id)
+        label = _node_label(node)
+        if not label:
+            continue
+        seen.add(node_id)
+        refs = [_fold(r) for r in (node.get("subject_refs") or ()) if _fold(r)]
+        who = subject_view(refs[0], relation_words=relation_words,
+                           people=people) if len(refs) == 1 else {}
+        out.append({"node_id": node_id, "label": label,
+                    "about": "" if not who or who.get("is_owner") else who["name"]})
+    return tuple(out)
+
+
+def card_view(item: object, *, nodes: object = (), node_aliases: object = None,
+              relation_words: object = (), people: object = (),
+              target: object = None) -> dict:
+    """Everything a card conversation must know, from the published row.
+
+    ``item`` is the bare published work item (it carries ``resolves`` and
+    ``probable_window``, which the normalized Play target drops); ``target``
+    is the normalized target when the host has one, read first for the
+    question. Keys: ``work_item_id``, ``question``, ``label`` (the moment the
+    card is about), ``subject`` (:func:`subject_view`), ``placement`` (where it
+    stands now, in words) and ``related`` (:func:`card_related`).
+    """
+    row = item if isinstance(item, dict) else {}
+    normalized = target if isinstance(target, dict) else {}
+    question = _fold(normalized.get("prompt_intent") or row.get("prompt_intent"))
+    aliases = node_aliases if isinstance(node_aliases, dict) else {}
+    node_ref = _fold(row.get("node_ref") or row.get("event_ref")
+                     or normalized.get("node_ref") or normalized.get("event_ref"))
+    node_ref = _fold(aliases.get(node_ref, node_ref)) or node_ref
+    node = _node_index(nodes).get(node_ref)
+    subject_ref = _fold(normalized.get("subject_ref") or row.get("subject_ref"))
+    if not subject_ref and isinstance(node, dict):
+        refs = [_fold(r) for r in (node.get("subject_refs") or ()) if _fold(r)]
+        subject_ref = refs[0] if len(refs) == 1 else ""
+    return {
+        "work_item_id": _fold(row.get("work_item_id") or normalized.get("work_item_id")),
+        "question": question,
+        "label": _node_label(node) or _fold(normalized.get("label")),
+        "subject": subject_view(subject_ref, relation_words=relation_words, people=people),
+        "placement": _placement_text(node, row),
+        "related": card_related(row, nodes, node_aliases=aliases,
+                                relation_words=relation_words, people=people),
+    }
+
+
+def _turn_rows(session: object) -> list[dict]:
+    if isinstance(session, dict):
+        turns = session.get("turns") or []
+    else:
+        turns = session or []
+    return [turn for turn in turns if isinstance(turn, dict)] if isinstance(
+        turns, (list, tuple)) else []
+
+
+def card_answered(session: object) -> bool:
+    """Has the person typed? The card's question is shown by the tab, never as
+    a lifehug turn, so the first user turn IS the answer to the card."""
+    return any(turn.get("role") == "user" for turn in _turn_rows(session))
+
+
+def card_is_done(session: object, *, related: object = 0) -> bool:
+    """Is THIS reply the card conversation's last one? Pure over the
+    PRE-reply transcript (``session`` is the session dict or its turn list).
+
+    * Nobody has answered yet -> not done: there is nothing to confirm.
+    * Nothing related remains -> done. The card's grounded related moments are
+      the ceiling on further questions, one per reply, so with none left the
+      reply confirms and stops — a card with none is done on the FIRST reply.
+    * The previous reply asked nothing -> done: it judged that nothing related
+      followed, or the person did not know, and wrapped up.
+    * The previous answer fed no placement -> done: a "no idea" or an
+      off-topic reply leaves the previous reply's ``placed`` null, and the
+      conversation ends there rather than pressing on.
+
+    ``related`` is a count or the related rows themselves. There is no
+    `MAX_PROBES` here (owner amendment 2026-09-22, "no hard cap"): the related
+    moments bound it. Moved from the platform's `work_item_walk.card_is_done`
+    (v361), unchanged.
+    """
+    turns = _turn_rows(session)
+    if not any(turn.get("role") == "user" for turn in turns):
+        return False
+    try:
+        ceiling = len(related) if isinstance(related, (list, tuple)) else int(related or 0)
+    except (TypeError, ValueError):
+        ceiling = 0
+    replies = [turn for turn in turns if turn.get("role") == "lifehug"]
+    if ceiling - len(replies) <= 0:
+        return True
+    if not replies:
+        return False
+    last = replies[-1]
+    if "?" not in str(last.get("text") or ""):
+        return True
+    return not last.get("placed")
+
+
+def card_stage_for_session(session: object, *, related: object = 0) -> str:
+    """`close` when :func:`card_is_done`, else :data:`WORK_ITEM_STAGE`."""
+    return "close" if card_is_done(session, related=related) else WORK_ITEM_STAGE
+
+
+def action_question_allowed(stage: object) -> bool:
+    """May THIS reply of a Timeline-action conversation carry a question?
+
+    ``False`` for a card's closing reply and for every reply of a move
+    conversation: a host applies it to its own turn shape
+    (`conversation_delivery.TurnShape.question_allowed`, the platform's
+    `shape_question_allowed`), so a question the model writes anyway is
+    withheld by the machinery that already withholds one — never left to the
+    model's good behaviour.
+    """
+    return str(stage or "") not in ("close", MOVE_STAGE)
+
+
+def card_known_years(target: object, session: object) -> tuple[str, ...]:
+    """Every year a card reply may say: the target's own
+    (:func:`work_item_known_years`) plus every year the person typed in this
+    conversation — "January 2026" is his, so confirming it invents nothing."""
+    years = list(work_item_known_years(target))
+    for turn in _turn_rows(session):
+        if turn.get("role") != "user":
+            continue
+        for match in chrono.YEAR_RE.finditer(str(turn.get("text") or "")):
+            if match.group(0) not in years:
+                years.append(match.group(0))
+    return tuple(years)
+
+
+def _subject_lines(subject: object) -> list[str]:
+    who = subject if isinstance(subject, dict) else {}
+    if not who or who.get("is_owner") or not who.get("name"):
+        return []
+    name = who["name"]
+    lines = [f"**This moment is about {who.get('phrase') or name}, not about the "
+             "person you are talking with.**"]
+    facts = []
+    if who.get("born"):
+        facts.append(f"{name} was born {who['born']}")
+    if facts:
+        lines.append("- " + "; ".join(facts) + ".")
+    pronoun = who.get("pronoun")
+    third = f'"{name}"' + (f' or "{pronoun}"' if pronoun else "")
+    lines += [
+        f"- Speak of {name} in the third person — {third} — never \"you\" or",
+        f'  "your" for {name}\'s life. "What drew you to it?" asks the wrong',
+        "  person.",
+        "- An age, a grade, a year, a season or a before/after in their answer",
+        f'  belongs to {name} unless they say otherwise — "19" is how old {name} was,',
+        "  never how old they were; \"freshman year\" is "
+        f"{name}'s freshman year.",
+        "- Never ask what they themselves remember of a time they may not have",
+        "  lived.",
+    ]
+    return lines
+
+
+#: The replies the owner has ruled out after a Timeline action — said once,
+#: read by the block and by `lint_timeline_reply`'s `timeline_gates.one_job`.
+STORY_BEAT_EXAMPLES = (
+    "what pulled you toward…",
+    "what led you to…",
+    "tell me what happened",
+    "what do you remember about…",
+    "what comes to mind…",
+    "that's worth sitting with",
+    "why did you move it?",
+)
+
+
+def render_card_context(card: object, *, answered: bool, closing: bool) -> str:
+    """The card block a card conversation's prompt carries, for THIS reply.
+
+    Three phases, chosen by two transcript facts the host already has
+    (:func:`card_answered` and :func:`card_is_done`):
+
+    * not ``answered`` — ask the card's question and nothing else;
+    * ``answered``, not ``closing`` — confirm in one line, then at most ONE
+      question about one of the related moments, only if it follows;
+    * ``closing`` (or nothing related) — confirm in one line and ask nothing.
+
+    The block names the target (the question and the moment), the person it
+    is about (:func:`subject_view`, third person), where it stands now, and the
+    one job. It is the platform's former Timeline Fix 10 aside made the
+    package's, with the 2026-09-26 context added.
+    """
+    view = card if isinstance(card, dict) else {}
+    asked = _fold(view.get("question")) or "(the card carried no question in words)"
+    lines = [
+        CARD_HEADING,
+        "",
+        "They pressed ▸ on ONE card on their Timeline, and the card's question was",
+        "already in front of them when they typed:",
+        "",
+        f"  «{asked}»",
+        "",
+    ]
+    if _fold(view.get("label")):
+        lines.append(f"- The moment: {_fold(view['label'])}")
+    lines.append(f"- Where it stands now: {_fold(view.get('placement')) or 'not placed yet'}")
+    lines.append("")
+    subject_lines = _subject_lines(view.get("subject"))
+    if subject_lines:
+        lines += subject_lines + [""]
+    lines += [
+        "Your ONE job is this card's answer. This is NOT a story conversation: no",
+        "reflective beat, no invitation to keep telling, no thread opened, and never",
+        "a question about why — not " + ", ".join(f'"{x}"' for x in STORY_BEAT_EXAMPLES[:5])
+        + ".",
+        "",
+    ]
+    if not answered:
+        lines += [
+            "- They have not answered yet. Ask the card's question, in your own words,",
+            "  and nothing else.",
+        ]
+        return "\n".join(lines)
+    lines += [
+        "- **Confirm in ONE line** what was filed, naming it in their own words and",
+        '  using "placed", "filed" or "noted" — "Noted — <the moment>, <what they',
+        '  said>." A grade, an age, a season or a stretch is a real landing. Never a',
+        "  year they did not give you.",
+        '- **"I don\'t know", a shrug, or a change of subject ends it.** Confirm',
+        "  whatever still stands in one small true line and ask nothing.",
+    ]
+    related = [row for row in (view.get("related") or ()) if isinstance(row, dict)
+               and _fold(row.get("label"))]
+    if closing or not related:
+        lines += [
+            "- **Ask nothing.** This is the last reply of this conversation: the",
+            "  one-line confirmation is the whole message.",
+        ]
+        return "\n".join(lines)
+    lines += [
+        "- **Then, ONLY if it follows from what they just said, ask ONE question",
+        "  about one of these open moments — the same answer would also place them:**",
+    ]
+    for row in related:
+        about = _fold(row.get("about"))
+        lines.append(f"  - {_fold(row['label'])}" + (f" (about {about})" if about else ""))
+    lines += [
+        "  One per reply, about the person that moment is about. Skip any you have",
+        "  already asked about. Never a moment that is not on this list. If none",
+        "  follows naturally, ask nothing.",
+    ]
+    return "\n".join(lines)
+
+
+# -- a MOVE ------------------------------------------------------------------
+
+#: The relations a move can assert (the web's `OrderGesture` / membership /
+#: containment acts), read into words for the confirmation line.
+MOVE_RELATIONS = ("before", "after", "between", "within", "part_of",
+                  "associated_with", "display")
+
+
+def move_target(value: object) -> dict | None:
+    """Normalize what a host knows about a move it just saved, or ``None``.
+
+    A gesture carries no date by design (`docs/design/eras.md` §2.6 on the
+    platform), so the facts are: the node and its label, the relation he
+    asserted and the moments or landmark it names, and — only when the host
+    computed one — the range it now spans (``range``, display text) and the
+    landmark it landed inside (``inside``). ``None`` without a node id or a
+    label: a confirmation about "node:…" is a machine spelling, never a line
+    to show a person.
+    """
+    if not isinstance(value, dict):
+        return None
+    node_id = _fold(value.get("node_id") or value.get("key") or value.get("ref"))
+    label = _fold(value.get("label"))
+    if not node_id or not label or label == node_id:
+        return None
+    relation = _fold_key(value.get("relation"))
+    if relation not in MOVE_RELATIONS:
+        relation = ""
+    anchors = [_fold(a) for a in (value.get("anchors") or ()) if _fold(a)][:2]
+    return {
+        "kind": MOVE_STAGE,
+        "node_id": node_id,
+        "label": label,
+        "relation": relation,
+        "anchors": anchors,
+        "inside": _fold(value.get("inside")),
+        "range": _fold(value.get("range")),
+        "subject_ref": _fold(value.get("subject_ref")),
+    }
+
+
+def move_confirmation(move: object) -> str:
+    """The one line a move conversation opens with — what moved and where it
+    landed, then "Right?". Composed from facts only, never a date the host did
+    not supply:
+
+    * ``Moved “X” to June 1990–June 1991, inside Beauchamps. Right?``
+    * ``Moved “X” inside Beauchamps. Right?``
+    * ``Moved “X” — now before “Y”. Right?``
+    * ``Moved “X”. Right?`` (nothing else known)
+    """
+    row = move_target(move) if not (isinstance(move, dict) and move.get("kind") == MOVE_STAGE) else move
+    if not isinstance(row, dict):
+        return ""
+    text = f"Moved “{row['label']}”"
+    inside = row.get("inside") or ""
+    if not inside and row.get("relation") in ("within", "part_of", "associated_with") and row.get("anchors"):
+        inside = row["anchors"][0]
+    if row.get("range"):
+        text += f" to {row['range']}"
+        if inside:
+            text += f", inside {inside}"
+    elif inside:
+        text += f" inside {inside}"
+    elif row.get("relation") in ("before", "after") and row.get("anchors"):
+        text += f" — now {row['relation']} “{row['anchors'][0]}”"
+    elif row.get("relation") == "between" and len(row.get("anchors") or ()) == 2:
+        text += (f" — now between “{row['anchors'][0]}” and "
+                 f"“{row['anchors'][1]}”")
+    return text + ". Right?"
+
+
+def move_is_done(session: object) -> bool:
+    """A move conversation is done once the person has replied at all: the
+    reply to that reply confirms or takes the correction, and stops."""
+    return card_answered(session)
+
+
+def move_stage_for_session(session: object) -> str:
+    """Always :data:`MOVE_STAGE` — the conversation has one reply to write."""
+    return MOVE_STAGE
+
+
+def render_move_context(move: object, *, subject: object = None) -> str:
+    """The block a move conversation's prompt carries.
+
+    Names what moved, what he asserted, where it landed, the confirmation line
+    he was already shown, and the one job: a yes is "Noted." and stop; a
+    correction IS the move — take it in one line, fill ``placed`` when it
+    carries a time, and stop. Never why he moved it.
+    """
+    row = move_target(move) if not (isinstance(move, dict) and move.get("kind") == MOVE_STAGE) else move
+    if not isinstance(row, dict):
+        return ""
+    lines = [
+        MOVE_HEADING,
+        "",
+        f"They just moved “{row['label']}” on their Timeline, and it is already",
+        "saved. The line in front of them when they typed was:",
+        "",
+        f"  «{move_confirmation(row)}»",
+        "",
+    ]
+    if row.get("range"):
+        lines.append(f"- Where it landed: {row['range']}")
+    if row.get("inside"):
+        lines.append(f"- Inside: {row['inside']}")
+    if row.get("relation") and row.get("anchors"):
+        lines.append(f"- What they asserted: {row['relation'].replace('_', ' ')} "
+                     + " and ".join(f"“{a}”" for a in row["anchors"]))
+    lines.append("")
+    subject_lines = _subject_lines(subject)
+    if subject_lines:
+        lines += subject_lines + [""]
+    lines += [
+        "Your ONE job is to confirm the move. The move was theirs to make and it",
+        "needs no reason: NEVER ask why they moved it, what made them change it, or",
+        "anything about the story behind it.",
+        "",
+        '- **They agree** ("yes", "right", "correct"): reply "Noted." or one short',
+        "  line that says the move stands. Nothing else.",
+        "- **They correct it** (a different time, place or order): the correction IS",
+        "  the move. Say in ONE line where it now goes, in their words (\"Got it —",
+        "  spring 1991 instead.\"), and fill `placed` if the correction carries a",
+        "  time. Never a year they did not give you.",
+        "- **Ask nothing.** This is the only reply of this conversation.",
+    ]
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------
@@ -1768,7 +2446,39 @@ TIMELINE_LINT_CLASSES = (
     # (`landmarks_interaction.LANDMARK_LINT_CLASSES`) — one definition, two
     # callers (recurring-defect doctrine).
     "never_proposes_a_date",
+    # v361 (owner, 2026-09-26, `A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB`):
+    # a conversation opened from a Timeline action does ONE job. After a
+    # card's answer or a move, a story beat ("What pulled you toward
+    # track?"), a question about why, or any question where the stage allows
+    # none is the defect. Scored only on turns that name the action.
+    "one_job",
+    # v361: a card or a move about SOMEONE ELSE is spoken of in the third
+    # person. A question that says "you"/"your" about a life that is not the
+    # person typing's ("What pulled you toward track?" on a card about his
+    # daughter) asks the wrong person. Scored only when the subject is not
+    # the owner.
+    "right_person",
 )
+
+#: v361: the replies the owner has ruled out after a Timeline action — a
+#: reflective story beat, an invitation to keep telling, a question about why.
+#: Matched anywhere in the reply, and only on a turn that names its action.
+ONE_JOB_STORY_BEAT_RES = (
+    re.compile(r"\bwhat\s+(?:pulled|drew|led|made|brought|got|inspired|prompted)\s+"
+               r"(?:you|him|her|them|[A-Z][a-z]+)\s+(?:to|toward|towards|into|in)\b",
+               re.IGNORECASE),
+    re.compile(r"\bwhat\s+led\s+you\b", re.IGNORECASE),
+    re.compile(r"\bworth\s+sitting\s+with\b", re.IGNORECASE),
+    re.compile(r"\btell\s+me\s+(?:more|what\s+happened|about)\b", re.IGNORECASE),
+    re.compile(r"\bwhat\s+do\s+you\s+remember\b", re.IGNORECASE),
+    re.compile(r"\bwhat\s+comes\s+to\s+mind\b", re.IGNORECASE),
+    re.compile(r"\bhow\s+did\s+(?:that|it)\s+feel\b", re.IGNORECASE),
+    re.compile(r"\bwhy\s+(?:did|would)\s+you\b", re.IGNORECASE),
+    re.compile(r"\bwhat\s+made\s+you\s+(?:move|change|put|drag|decide|want)\b",
+               re.IGNORECASE),
+)
+_SECOND_PERSON_RE = re.compile(r"\b(?:you|your|yours|yourself)\b", re.IGNORECASE)
+_QUESTION_SENTENCE_RE = re.compile(r"[^.!?\n]*\?")
 
 #: The banned move: naming a date the person did not name and inviting a yes.
 #: Reporting back a date the ARITHMETIC produced is different and allowed —
@@ -1847,7 +2557,9 @@ def _span_of(text: str, needle: str) -> list[int]:
 
 def lint_timeline_reply(text: str, *, stage: str, probe_step: str | None = None,
                         known_years: object = (),
-                        timeline_asks_so_far: int = 0) -> list[dict]:
+                        timeline_asks_so_far: int = 0,
+                        action: str | None = None,
+                        subject: object = None) -> list[dict]:
     """Deterministic findings for the five ``timeline_gates.*`` classes.
 
     Pure — no model, no I/O. `stage` is the same `{timeline_stage}` the leaf
@@ -1861,11 +2573,19 @@ def lint_timeline_reply(text: str, *, stage: str, probe_step: str | None = None,
 
     Findings share `conversation_lints.lint_turn`'s shape so a caller can
     merge them with the inherited Conversation findings uniformly.
+
+    v361: ``action`` ("card" or "move") names a conversation opened from a
+    Timeline action and turns on ``timeline_gates.one_job``; ``subject`` (a
+    :func:`subject_view` dict, or a name) turns on
+    ``timeline_gates.right_person`` when it is not the owner. Absent, both
+    are silent and every existing caller's findings are unchanged.
     """
     body = text or ""
     if stage not in VALID_TIMELINE_STAGES:
         stage = "place"
     findings: list[dict] = []
+    findings += _one_job_findings(body, stage=stage, action=action)
+    findings += _right_person_findings(body, subject=subject)
 
     if stage == "open" or probe_step in (None, "content", "residence", "role"):
         for pattern in _YEAR_DEMAND_RES:
@@ -1951,6 +2671,54 @@ def lint_timeline_reply(text: str, *, stage: str, probe_step: str | None = None,
             break
 
     return findings
+
+
+def _one_job_findings(body: str, *, stage: str, action: str | None) -> list[dict]:
+    """`timeline_gates.one_job` — see :data:`TIMELINE_LINT_CLASSES`."""
+    if action not in ("card", "move"):
+        return []
+    for pattern in ONE_JOB_STORY_BEAT_RES:
+        match = pattern.search(body)
+        if match:
+            return [{
+                "lint": "timeline_gates.one_job",
+                "detail": "a Timeline action's conversation confirms and stops — "
+                          "never a story beat or a question about why "
+                          f"({match.group(0)!r})",
+                "span": [match.start(), match.end()],
+            }]
+    if not action_question_allowed(stage) and "?" in body:
+        return [{
+            "lint": "timeline_gates.one_job",
+            "detail": "this reply confirms and asks nothing — the action's one "
+                      "job is done",
+            "span": [0, min(len(body), _SPAN_LIMIT)],
+        }]
+    return []
+
+
+def _right_person_findings(body: str, *, subject: object) -> list[dict]:
+    """`timeline_gates.right_person` — see :data:`TIMELINE_LINT_CLASSES`."""
+    if isinstance(subject, dict):
+        if not subject or subject.get("is_owner"):
+            return []
+        name = str(subject.get("name") or "").strip()
+    else:
+        name = str(subject or "").strip()
+        if not name or _subject_is_the_owner(name):
+            return []
+    if not name:
+        return []
+    for match in _QUESTION_SENTENCE_RE.finditer(body):
+        sentence = match.group(0)
+        if _SECOND_PERSON_RE.search(sentence) and name.lower() not in sentence.lower():
+            return [{
+                "lint": "timeline_gates.right_person",
+                "detail": f"this moment is about {name}: speak of {name} in the "
+                          "third person, never \"you\"",
+                "span": [match.start(), match.end()],
+            }]
+    return []
 
 
 # --------------------------------------------------------------------------

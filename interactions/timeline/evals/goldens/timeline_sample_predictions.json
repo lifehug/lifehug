@@ -277,5 +277,86 @@
         }
       }
     ]
+  },
+  {
+    "fixture_id": "timeline-card-answer-ends-at-noted",
+    "turns": [
+      {
+        "message": "Noted — Charlee switched from flag football to track in January 2026, her freshman year.",
+        "placed": {
+          "best": "2026-01",
+          "earliest": "2026-01",
+          "latest": "2026-01",
+          "granularity": "month",
+          "confidence": "certain",
+          "basis": "stated",
+          "anchors": []
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-card-related-question-is-about-the-subject",
+    "turns": [
+      {
+        "message": "Noted — Charlee switched to track in January 2026, her freshman year. When did Charlee run her first track meet?",
+        "placed": {
+          "best": "2026-01",
+          "earliest": "2026-01",
+          "latest": "2026-01",
+          "granularity": "month",
+          "confidence": "certain",
+          "basis": "stated",
+          "anchors": []
+        }
+      },
+      {
+        "message": "That's fine — the switch to track stays placed at January 2026.",
+        "placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-card-subject-is-someone-else",
+    "turns": [
+      {
+        "message": "Noted — Dad served his mission to New Zealand from age 19 to 21.",
+        "placed": {
+          "best": "1973-06/1976-06",
+          "earliest": "1973-06",
+          "latest": "1976-06",
+          "granularity": "range",
+          "confidence": "approximate",
+          "basis": "stated",
+          "anchors": []
+        }
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-move-confirmed-is-noted",
+    "turns": [
+      {
+        "message": "Noted.",
+        "placed": null
+      }
+    ]
+  },
+  {
+    "fixture_id": "timeline-move-correction-is-the-move",
+    "turns": [
+      {
+        "message": "Got it — spring 1991 instead.",
+        "placed": {
+          "best": "1991-21",
+          "earliest": "1991-03",
+          "latest": "1991-05",
+          "granularity": "season",
+          "confidence": "approximate",
+          "basis": "stated",
+          "anchors": []
+        }
+      }
+    ]
   }
 ]

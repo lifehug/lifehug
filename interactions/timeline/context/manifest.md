@@ -46,6 +46,19 @@ is an ordinary message, `placed` is the same optional field, and any further
 temporal facts in the same breath are heard by the general listener exactly as
 they are in any other conversation.
 
+The card block (v361, `timeline_interaction.render_card_context` over
+`card_view`) rides a `work_item` turn opened from a Timeline card: the card's
+question, the moment, where it stands now (the node's placement, or "not placed
+yet" with the system's guess labelled as a guess), WHO it is about
+(`subject_view`: the name he uses, the published relation word, a pronoun when
+the word gives one, and their birth from the Cornerstones view — so an age or a
+grade is read as theirs), and the card's grounded related moments, each with
+who it is about. The move block (`render_move_context` over `move_target`)
+rides the `moved` stage: what moved, what he asserted, where it landed and the
+`move_confirmation` line he was shown. Both are the empty string on every
+other turn. A host applies `action_question_allowed(stage)` to its turn shape,
+so a card's closing reply and a move's only reply cannot carry a question.
+
 The complete exact transcript is caller-held. Prompt trimming never changes
 which unknown is being placed, what the anchors are, or what a placement files
 against.

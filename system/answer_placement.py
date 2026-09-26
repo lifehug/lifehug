@@ -169,6 +169,20 @@ EXTRACTOR_NAME = "answer-placement"
 #: definition; `resolver` reads it from here rather than keeping a second copy.
 SESSION_WORK_ITEM_MARKER = "work_item:"
 
+#: v361 (owner, 2026-09-26: after a move the conversation "asks me why I made
+#: that move"). The marker a MOVE conversation's session carries —
+#: ``conversation:cand:timeline:moved:node:<hex>`` — naming the node he just
+#: moved. A reply there is a confirmation or a correction of that move, and a
+#: correction is filed exactly as a card's answer is (:func:`card_for_move`).
+SESSION_MOVE_MARKER = "timeline:moved:"
+
+#: The rule, in one sentence (v361).
+A_MOVE_CORRECTION_IS_THE_MOVE = (
+    "a reply promoted with a session_ref naming a move is a confirmation or a "
+    "correction of that move: a correction is filed on the moved node exactly as "
+    "a card's answer is, and a reply that only agrees files nothing"
+)
+
 #: The DAY-SCOPED sibling the platform opens when the plain session for a card
 #: has already closed (`app.conversation.store`'s
 #: ``…:work:<hex>:<YYYY-MM-DD>``). It is the same card, so the suffix is
@@ -242,6 +256,8 @@ AN_ANSWER_OUTLIVES_ITS_CARD = (
 #: one :data:`AN_ANSWER_OUTLIVES_ITS_CARD` re-derived.
 CARD_PUBLISHED = "published"
 CARD_CLOSED = "closed"
+#: v361: the card a MOVE conversation's reply answers (:func:`card_for_move`).
+CARD_MOVE = "move"
 
 #: The event kind a card's node falls back to when the projection names none.
 #: `temporal_claims.EVENT_KINDS`' own generic, and the same fallback
@@ -262,6 +278,8 @@ REFUSED_NODE_NOT_DRAWN = "card_node_not_drawn"
 REFUSED_SUBJECT_UNRESOLVED = "card_subject_unresolved"
 REFUSED_NO_WORDS = "reply_has_no_words"
 REFUSED_SOURCE_UNREADABLE = "reply_source_unreadable"
+#: v361: a move conversation's reply that only agreed ("Yes") — nothing to file.
+REFUSED_MOVE_CONFIRMED = "move_confirmed"
 REFUSALS = (
     REFUSED_NO_WORK_ITEM,
     REFUSED_CARD_NOT_PUBLISHED,
@@ -270,6 +288,7 @@ REFUSALS = (
     REFUSED_SUBJECT_UNRESOLVED,
     REFUSED_NO_WORDS,
     REFUSED_SOURCE_UNREADABLE,
+    REFUSED_MOVE_CONFIRMED,
 )
 
 #: How the three readings are named on a report and on the receipt's extractor
@@ -288,6 +307,70 @@ READINGS = (READING_DATE, READING_AGE, READING_GRADE, READING_RECENCY, READING_T
 # --------------------------------------------------------------------------
 # 1. The join: a session names a work item; a work item names a node
 # --------------------------------------------------------------------------
+
+def node_of_move_session(session_ref: object) -> str:
+    """``conversation:cand:timeline:moved:node:<hex>`` → ``node:<hex>``, else
+    ``""`` (v361, :data:`A_MOVE_CORRECTION_IS_THE_MOVE`). A day-scoped sibling
+    (``…:2026-09-26``) is the same move."""
+    text = collapsed_text(session_ref)
+    if SESSION_MOVE_MARKER not in text:
+        return ""
+    tail = text.split(SESSION_MOVE_MARKER, 1)[1].strip()
+    return _SESSION_DAY_SUFFIX_RE.sub("", tail)
+
+
+def answers_a_card(session_ref: object) -> bool:
+    """Does a promoted reply answer something this module places — a card's
+    work item, or the move a move conversation confirmed (v361)?"""
+    return bool(work_item_of_session(session_ref) or node_of_move_session(session_ref))
+
+
+#: v361: the replies a move conversation hears when the person simply agrees.
+#: A reply made ONLY of these words carries no correction, and files nothing —
+#: it is not a telling of the moment, and filing "yes" as one would be noise
+#: on the node he just moved.
+_CONFIRMATION_WORDS = frozenset({
+    "yes", "yeah", "yep", "yup", "right", "correct", "exactly", "ok", "okay",
+    "sure", "good", "great", "perfect", "thanks", "thank", "you", "that's",
+    "thats", "it", "is", "looks", "sounds", "fine", "all", "that", "y", "k",
+})
+
+
+def is_bare_confirmation(text: object) -> bool:
+    """Is this reply nothing but agreement ("Yes", "Right, thanks")?"""
+    words = re.findall(r"[a-z']+", collapsed_text(text).lower())
+    return bool(words) and all(word in _CONFIRMATION_WORDS for word in words)
+
+
+def card_for_move(node_ref: object, *, projection: object,
+                  redirects: object = None) -> tuple[dict | None, str]:
+    """The card-shaped target a move conversation's reply answers (v361).
+
+    Same keys as :func:`card_for_work_item`, built from the moved NODE itself —
+    a move has no work item, and the node is exactly what the correction is
+    about. ``work_item_id`` is ``""``; ``card`` and ``kind`` are ``"move"``.
+    """
+    node = _node_view(projection, collapsed_text(node_ref), redirects)
+    if node is None:
+        return None, REFUSED_NODE_NOT_DRAWN
+    # A node with no single subject is his own moment (the owner's lived axis),
+    # exactly as an owner-subject card would be; an unresolved handle is not.
+    subject = _node_subject(node, "") or twi.OWNER_SUBJECT_REF
+    if subject.startswith(UNRESOLVED_SUBJECT_PREFIX):
+        return None, REFUSED_SUBJECT_UNRESOLVED
+    return {
+        "work_item_id": "",
+        "node_ref": collapsed_text(node.get("node_id")),
+        "subject_ref": subject,
+        "event_kind": collapsed_text(node.get("event_kind")) or DEFAULT_EVENT_KIND,
+        "label": collapsed_text(node.get("label")),
+        "question": "",
+        "requested_field": "date",
+        "kind": CARD_MOVE,
+        "card": CARD_MOVE,
+        "asked_node_ref": collapsed_text(node_ref),
+    }, ""
+
 
 def work_item_of_session(session_ref: object) -> str:
     """``conversation:cand:work_item:work:<hex>`` → ``work:<hex>``, else ``""``.
@@ -554,7 +637,14 @@ def card_for_answer(vault_root: str | Path, session_ref: object, *,
     """
     wanted = work_item_of_session(session_ref)
     if not wanted:
-        return None, REFUSED_NO_WORK_ITEM
+        moved = node_of_move_session(session_ref)
+        if not moved:
+            return None, REFUSED_NO_WORK_ITEM
+        if projection is None:
+            projection = pub.read_projection(vault_root) or {}
+        if redirects is None:
+            redirects = duplicate_redirects(vault_root)
+        return card_for_move(moved, projection=projection, redirects=redirects)
     if work_items is None:
         work_items = pub.read_work_items(vault_root) or {}
     if projection is None:
@@ -1155,7 +1245,7 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
     report = empty_report()
     report["dry_run"] = bool(dry_run)
     answers = [row for row in promoted_answers(root, sources=sources)
-               if work_item_of_session(row["session_ref"])]
+               if answers_a_card(row["session_ref"])]
     if not answers:
         return report
     work_items = pub.read_work_items(root) or {}
@@ -1165,8 +1255,15 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
     redirects = duplicate_redirects(root)
     for row in answers:
         report["answers"] += 1
-        relation = _relation_answer(root, row, work_items=work_items, dry_run=dry_run,
-                                    report=report)
+        moved = node_of_move_session(row["session_ref"]) and not work_item_of_session(
+            row["session_ref"])
+        if moved and is_bare_confirmation(row["text"]):
+            # v361 :data:`A_MOVE_CORRECTION_IS_THE_MOVE`: "Yes" to "Moved X to
+            # June 1990. Right?" is the move standing — nothing to file.
+            _refuse(report, row, REFUSED_MOVE_CONFIRMED, closed=closed)
+            continue
+        relation = (not moved) and _relation_answer(root, row, work_items=work_items,
+                                                    dry_run=dry_run, report=report)
         if relation:
             continue
         card, refusal = card_for_answer(root, row["session_ref"],
@@ -1201,6 +1298,44 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
     return report
 
 
+def place_card_answer(vault_root: str | Path, *, session_ref: object, text: object,
+                      publish: bool = True, now: object = None) -> dict:
+    """Place ONE answer on its card NOW — the on-change seat (v361,
+    `timeline_interaction.AN_ANSWER_WITH_NOTHING_TO_RETIRE_IS_PLACED`).
+
+    The same rule as :func:`place_answers`, for one reply, called by a host the
+    moment the reply is heard rather than by the daily sweep: the card the
+    ``session_ref`` names is derived by :func:`card_for_answer` (a work item's
+    card, a closed card, or a move's node), the reply's promoted source is
+    REUSED when the host already promoted it (same card, same words — so the
+    sweep that runs later files nothing twice) and promoted here otherwise,
+    and the projection is republished when anything was filed.
+
+    ``{"card", "refused", "source_path", "report"}``; ``card`` is ``None`` and
+    ``refused`` names the reason when no card could be derived.
+    """
+    root = Path(str(vault_root))
+    words = collapsed_text(text)
+    card, refusal = card_for_answer(root, session_ref)
+    if card is None or not words:
+        return {"card": None, "refused": refusal or REFUSED_NO_WORDS,
+                "source_path": "", "report": empty_report()}
+    wanted = (work_item_of_session(session_ref), node_of_move_session(session_ref))
+    existing = [row for row in promoted_answers(root)
+                if (work_item_of_session(row["session_ref"]),
+                    node_of_move_session(row["session_ref"])) == wanted
+                and row["text"] == words]
+    if existing:
+        source_path = existing[-1]["source_path"]
+    else:
+        source_path = store.promote_conversational_source(
+            root, words, {"session_ref": collapsed_text(session_ref)}).source_path
+    report = place_answers(root, sources=[source_path], now=now)
+    if publish and report.get("filed"):
+        pub.publish(root)
+    return {"card": card, "refused": "", "source_path": source_path, "report": report}
+
+
 def _closed_cards_of(root: Path, answers: list[dict], *, work_items: object,
                      projection: object) -> dict[str, dict]:
     """v359: the cards this run's answers name that the generation no longer
@@ -1208,7 +1343,7 @@ def _closed_cards_of(root: Path, answers: list[dict], *, work_items: object,
     — and nothing read at all when every card is still published."""
     unpublished = sorted({wid for wid in (work_item_of_session(row["session_ref"])
                                           for row in answers)
-                          if _published_card(wid, work_items)[0] is None})
+                          if wid and _published_card(wid, work_items)[0] is None})
     if not unpublished:
         return {}
     return closed_cards(unpublished, projection=projection, claims=read_claims(root))

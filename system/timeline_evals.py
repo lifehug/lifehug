@@ -55,8 +55,16 @@ _EARLY_RUNGS = frozenset({"content", "residence", "role"})
 
 
 def _applicable(stage: str, probe_step: str | None,
-                timeline_asks_so_far: int = 0) -> frozenset[str]:
+                timeline_asks_so_far: int = 0, *, action: str | None = None,
+                subject: object = None) -> frozenset[str]:
     applicable = set(_ALWAYS_APPLICABLE_LINTS)
+    # v361: a conversation opened from a Timeline action is scored on its one
+    # job, and a moment about someone else on speaking of them in the third
+    # person. Only the turns that name them — every other golden is unchanged.
+    if action in ("card", "move"):
+        applicable.add("one_job")
+    if subject and not (isinstance(subject, dict) and subject.get("is_owner")):
+        applicable.add("right_person")
     if stage == "open" or probe_step in _EARLY_RUNGS or probe_step is None:
         applicable.add("no_year_opener")
     if probe_step == "bounds":
@@ -113,6 +121,41 @@ def load_gates(*, framework_root: str | Path | None = None) -> dict[str, float]:
     }
 
 
+#: v361: the keys a Timeline-ACTION golden may add — the action it came from,
+#: the person it is about (`timeline_interaction.subject_view`), the card
+#: (`card_view`) or the move (`move_target`) the conversation carried, and the
+#: one line a move conversation opens with.
+_ACTION_FIXTURE_KEYS = frozenset({"action", "subject", "card", "move", "expected_opener"})
+
+
+def _action_fixture_errors(row: dict, index: int) -> list[str]:
+    errors: list[str] = []
+    action = row.get("action")
+    if action is not None and action not in ("card", "move"):
+        errors.append(f"fixture[{index}] action invalid")
+    if "move" in row:
+        move = timeline_interaction.move_target(row["move"])
+        if move is None:
+            errors.append(f"fixture[{index}] move is not a usable move target")
+        elif row.get("expected_opener") is not None and \
+                timeline_interaction.move_confirmation(move) != row["expected_opener"]:
+            errors.append(f"fixture[{index}] expected_opener is not the move's own line")
+    if "card" in row and not isinstance(row["card"], dict):
+        errors.append(f"fixture[{index}] card invalid")
+    return errors
+
+
+def _action_stage(fixture: dict, turns_so_far: list[dict]) -> str | None:
+    """The stage the ONE rule gives this turn of an action golden, or None
+    when the golden is not an action golden."""
+    if isinstance(fixture.get("card"), dict):
+        return timeline_interaction.card_stage_for_session(
+            {"turns": turns_so_far}, related=fixture["card"].get("related") or ())
+    if "move" in fixture:
+        return timeline_interaction.move_stage_for_session({"turns": turns_so_far})
+    return None
+
+
 def validate_fixtures(fixtures: list[dict]) -> list[str]:
     """Deterministic fixture-shape errors for the timeline goldens."""
     errors: list[str] = []
@@ -122,7 +165,7 @@ def validate_fixtures(fixtures: list[dict]) -> list[str]:
         # golden lives in — additive, so every v195 fixture stays valid.
         if not isinstance(row, dict) or not {"fixture_id", "unknown", "turns"} <= set(row) \
                 or not set(row) <= {"fixture_id", "unknown", "turns", "context",
-                                    "work_item"}:
+                                    "work_item", *_ACTION_FIXTURE_KEYS}:
             errors.append(f"fixture[{index}] keys invalid")
             continue
         fixture_id = row["fixture_id"]
@@ -156,6 +199,7 @@ def validate_fixtures(fixtures: list[dict]) -> list[str]:
         if "work_item" in row and timeline_interaction.work_item_target(target) is None:
             errors.append(f"fixture[{index}] work_item is not a usable Play target")
             continue
+        errors += _action_fixture_errors(row, index)
         turns = row["turns"]
         if not isinstance(turns, list) or not turns:
             errors.append(f"fixture[{index}] turns must be non-empty")
@@ -166,6 +210,7 @@ def validate_fixtures(fixtures: list[dict]) -> list[str]:
             } <= set(turn) or not set(turn) <= {
                 "stage", "probe_step", "expected_placed",
                 "timeline_asks_so_far", "expected_raised", "expected_retire",
+                "user", "action",
             }:
                 errors.append(f"fixture[{index}].turns[{position}] keys invalid")
                 continue
@@ -225,6 +270,8 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
     raised_total = 0
     retire_correct = 0
     retire_total = 0
+    stage_correct = 0
+    stage_total = 0
     unmatched: list[str] = []
     for fixture in fixtures:
         prediction = by_id.get(fixture["fixture_id"])
@@ -232,10 +279,23 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
             unmatched.append(fixture["fixture_id"])
             continue
         unknown = fixture["unknown"]
+        transcript: list[dict] = []
         for turn, pred_turn in zip(fixture["turns"], prediction.get("turns") or []):
             stage = turn["stage"]
+            # v361: the stage an ACTION golden's turn is in is not the
+            # fixture's to assert — it is the one rule's
+            # (`card_stage_for_session` / `move_stage_for_session`) over the
+            # transcript so far, and the golden is scored on agreeing with it.
+            if turn.get("user") is not None:
+                transcript.append({"role": "user", "text": turn["user"]})
+            ruled = _action_stage(fixture, transcript)
+            if ruled is not None:
+                stage_total += 1
+                stage_correct += ruled == stage
             step = turn["probe_step"]
             asks = int(turn.get("timeline_asks_so_far", 0) or 0)
+            action = turn.get("action") or fixture.get("action")
+            subject = fixture.get("subject")
             findings = {
                 item["lint"].split(".", 1)[1]
                 for item in timeline_interaction.lint_timeline_reply(
@@ -244,9 +304,12 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
                     probe_step=step,
                     known_years=unknown["known_years"],
                     timeline_asks_so_far=asks,
+                    action=action,
+                    subject=subject,
                 )
             }
-            for lint_class in _applicable(stage, step, asks):
+            for lint_class in _applicable(stage, step, asks, action=action,
+                                          subject=subject):
                 counts[lint_class][1] += 1
                 counts[lint_class][0] += lint_class not in findings
             if turn.get("expected_raised") is not None:
@@ -260,6 +323,8 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
             )
             field_total += 1
             field_correct += validated == turn["expected_placed"]
+            transcript.append({"role": "lifehug", "text": pred_turn.get("message", ""),
+                               "placed": validated})
             # v234: the filing DECISION is scored beside the field, because a
             # work-item conversation that reads the right date and retires the
             # wrong claim is not a pass. `work_item_retire_ids` is pure, so the
@@ -279,6 +344,7 @@ def score_goldens(fixtures: list[dict], predictions: list[dict]) -> dict:
     scores["_placed_accuracy"] = field_correct / field_total if field_total else 0.0
     scores["_raised_accuracy"] = raised_correct / raised_total if raised_total else 1.0
     scores["_retire_accuracy"] = retire_correct / retire_total if retire_total else 1.0
+    scores["_action_stage_accuracy"] = stage_correct / stage_total if stage_total else 1.0
     scores["_unmatched_fixtures"] = unmatched
     return scores
 

@@ -1,0 +1,74 @@
+{
+ "fixture_id": "timeline-action-story-beat-bad-01",
+ "note": "INTENTIONALLY BROKEN (v361, owner 2026-09-26). The replies a conversation opened from a Timeline action must never give — the first three are the owner's real staging replies of 2026-09-26, word for word. NOT a correct reference, so deliberately NOT in timeline_fixtures.json, whose gates are all 1.0. tests/test_timeline_action_conversation.py runs timeline_interaction.lint_timeline_reply over every case and asserts every named class fires.",
+ "subject": {
+  "ref": "Charlee",
+  "name": "Charlee",
+  "word": "child",
+  "phrase": "your child Charlee",
+  "pronoun": "",
+  "born": "21 December 2010",
+  "is_owner": false
+ },
+ "known_years": [
+  "2026"
+ ],
+ "cases": [
+  {
+   "case_id": "a-story-beat-about-the-wrong-person",
+   "stage": "close",
+   "action": "card",
+   "user": "Charlee switched from football to track her freshmen year January 2026",
+   "reply": "Football to track, freshman year, January 2026 — noted. What pulled you toward track?",
+   "expected_lints": [
+    "timeline_gates.one_job",
+    "timeline_gates.right_person"
+   ],
+   "why": "\"noted\" and then a story beat, and the beat asks the owner about his daughter's choice as if it were his own."
+  },
+  {
+   "case_id": "the-story-beat-survives-the-correction",
+   "stage": "close",
+   "action": "card",
+   "user": "This is Charlee not me",
+   "reply": "Got it — this is Charlee's story, not yours. Thanks for the clarification, that matters. So, what pulled Charlee toward track that January?",
+   "expected_lints": [
+    "timeline_gates.one_job"
+   ],
+   "why": "Right person now, still the wrong job: the card was answered; this is a story conversation the card never opened."
+  },
+  {
+   "case_id": "an-invitation-to-keep-telling",
+   "stage": "close",
+   "action": "card",
+   "user": "this was during etherfuse",
+   "reply": "Etherfuse — good to have that as the backdrop. Tell me what happened there.",
+   "expected_lints": [
+    "timeline_gates.one_job"
+   ],
+   "why": "The card asked when; the answer said when. \"Tell me what happened\" is the Conversation default the card overrides."
+  },
+  {
+   "case_id": "asks-why-he-moved-it",
+   "stage": "moved",
+   "action": "move",
+   "user": "Yes",
+   "reply": "What made you decide to move it there?",
+   "expected_lints": [
+    "timeline_gates.one_job"
+   ],
+   "why": "A move needs no reason. The only job is to confirm it."
+  },
+  {
+   "case_id": "a-question-where-none-is-allowed",
+   "stage": "moved",
+   "action": "move",
+   "user": "Yes",
+   "reply": "Noted. Anything else you'd like to move while we're here?",
+   "expected_lints": [
+    "timeline_gates.one_job"
+   ],
+   "why": "The move conversation has ONE reply and it asks nothing."
+  }
+ ]
+}
