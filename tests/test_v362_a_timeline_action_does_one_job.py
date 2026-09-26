@@ -539,3 +539,72 @@ class TheOssHostTests(EngineTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------------------
+# v363 — the owner's real roster, as the published projection names it
+# --------------------------------------------------------------------------
+
+#: The shapes his generation-202 `relation_words` and `cornerstones_view`
+#: carry for the people his live cards are about (synthetic copy of the
+#: shapes; the words are his).
+ROSTER_WORDS = [
+    {"name": "Anthon James Taylor", "word": "brother", "relation_gender": "male",
+     "subject_ref": "person/anthon-james-taylor",
+     "spellings": ["aj", "anthon james taylor", "james"]},
+    {"name": "Harvey", "word": "son", "relation_gender": "male",
+     "subject_ref": "person/harvey", "spellings": ["harvey"]},
+    {"name": "James Everett Taylor", "word": "son", "relation_gender": "male",
+     "subject_ref": "person/james-everett-taylor", "spellings": ["james everett taylor"]},
+]
+ROSTER_PEOPLE = {"groups": [
+    {"group": "children", "people": [
+        {"display_name": "James", "name": "James Everett Taylor", "relation_word": "Son",
+         "relationship": "child", "person_ref": "person/james-everett-taylor",
+         "born": {"display": "10 May 2013"}},
+        {"display_name": "Son", "name": "Harvey", "relation_word": "Son",
+         "relationship": "child", "person_ref": "person/harvey",
+         "born": {"display": "11 October 2021"}}]},
+    {"group": "siblings", "people": [
+        {"display_name": "AJ", "name": "Anthon James Taylor", "relation_word": "Brother",
+         "relationship": "sibling", "person_ref": "person/anthon-james-taylor"}]},
+    {"group": "grandparents", "people": [
+        {"display_name": "Grandma Betty Jo", "name": "Grandma Betty Jo",
+         "relation_word": None, "relationship": "grandparent",
+         "person_ref": "person/grandma-betty-jo"}]},
+]}
+
+
+class TheOwnersRosterTests(unittest.TestCase):
+    def view(self, ref):
+        return ti.subject_view(ref, relation_words=ROSTER_WORDS, people=ROSTER_PEOPLE)
+
+    def test_a_display_name_that_is_only_the_relation_word_gives_way_to_the_name(self):
+        """Harvey's Cornerstones row reads "Son" — his relation, not his name."""
+        self.assertEqual(self.view("person/harvey")["phrase"], "your son Harvey")
+
+    def test_bare_james_is_his_son_not_the_brother_whose_spellings_include_it(self):
+        """Owner ruling 2026-09-25: "When I talk about James, I'm talking about
+        my son." AJ's word row lists "james" as a spelling; the person comes
+        first and their own word row follows."""
+        who = self.view("James")
+        self.assertEqual(who["phrase"], "your son James")
+        self.assertEqual(who["born"], "10 May 2013")
+
+    def test_a_name_that_starts_with_a_kinship_word_is_not_said_twice(self):
+        self.assertEqual(self.view("person/grandma-betty-jo")["phrase"],
+                         "Grandma Betty Jo (your grandparent)")
+
+    def test_a_subject_that_is_not_a_person_gets_no_person_rule(self):
+        """His company is not "someone else" with an age of its own."""
+        who = self.view("Etherfuse")
+        self.assertFalse(who["is_person"])
+        card = ti.card_view(dict(CHARLEE_ITEM, subject_ref="Etherfuse"),
+                            nodes=[dict(CHARLEE_NODE, subject_refs=["Etherfuse"])],
+                            relation_words=ROSTER_WORDS, people=ROSTER_PEOPLE)
+        block = ti.render_card_context(card, answered=True, closing=True)
+        self.assertIn("- It is about: Etherfuse.", block)
+        self.assertNotIn("third person", block)
+        self.assertEqual(ti.lint_timeline_reply("Noted. When did you sign it?",
+                                                stage=ti.WORK_ITEM_STAGE, action="card",
+                                                subject=who), [])

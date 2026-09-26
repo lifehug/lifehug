@@ -1451,10 +1451,20 @@ def subject_view(subject_ref: object, *, relation_words: object = (),
     if _subject_is_a_handle(subject):
         return {}
     wanted = _fold_key(subject)
-    word_row = next((row for row in (relation_words or ())
-                     if isinstance(row, dict) and wanted in _row_names(row)), None)
+    # v363: the PERSON first, then THEIR word row. A bare name can be a
+    # spelling on several rows ("james" is also on AJ's — Anthon James), and
+    # the Cornerstones view names each person the way he calls them (owner
+    # ruling 2026-09-25: "when I talk about James, I'm talking about my son"),
+    # so the word row is the one whose ref IS that person's, and only a
+    # subject no person row names falls back to matching word rows by name.
     person = next((row for row in _people_rows(people) if wanted in _row_names(row)),
                   None)
+    words = [row for row in (relation_words or ()) if isinstance(row, dict)]
+    person_ref = _fold_key((person or {}).get("person_ref"))
+    word_row = next((row for row in words
+                     if person_ref and _fold_key(row.get("subject_ref")) == person_ref), None)
+    if word_row is None and person is None:
+        word_row = next((row for row in words if wanted in _row_names(row)), None)
     name = subject
     if person is not None and _fold(person.get("display_name")):
         name = _fold(person.get("display_name"))
@@ -1473,6 +1483,18 @@ def subject_view(subject_ref: object, *, relation_words: object = (),
     if not word and person is not None:
         word = (_fold_key(person.get("relation_word"))
                 or _NEUTRAL_RELATION_WORDS.get(_fold_key(person.get("relationship")), ""))
+    if person is not None and word and _fold_key(name) in {
+            word, _fold_key(person.get("relation_word"))}:
+        # v363: the Cornerstones view shows a person by the word he said for
+        # them when it has nothing else — Harvey's row reads "Son". That is
+        # his RELATION, not what he calls him: the model is told "your son
+        # Harvey", never "Son (your son)". What he calls his father ("Dad")
+        # is not the word "father", so it stays.
+        given = _fold(person.get("name")) or (_fold(word_row.get("name"))
+                                              if word_row is not None else "")
+        if given:
+            name = given.split()[0] if len(given.split()) > 1 and _fold_key(
+                given.split()[0]) not in _KINSHIP_NAMES else given
     pronoun = ""
     if gender == "female" or word in _SHE_WORDS:
         pronoun = "she"
@@ -1483,9 +1505,9 @@ def subject_view(subject_ref: object, *, relation_words: object = (),
         born = _fold(person["born"].get("display"))
     if not word:
         phrase = name
-    elif _fold_key(name) in _KINSHIP_NAMES:
-        # What he calls them IS a kinship word ("Dad", "Grandpa"): "Dad (your
-        # father)", never "your father Dad".
+    elif _fold_key(name) in _KINSHIP_NAMES or _fold_key(name.split()[0]) in _KINSHIP_NAMES:
+        # What he calls them IS (or starts with) a kinship word ("Dad",
+        # "Grandma Betty Jo"): "Dad (your father)", never "your father Dad".
         phrase = f"{name} (your {word})"
     else:
         phrase = f"your {word} {name}"
@@ -1497,6 +1519,12 @@ def subject_view(subject_ref: object, *, relation_words: object = (),
         "pronoun": pronoun,
         "born": born,
         "is_owner": False,
+        # v363: a PERSON this vault knows — a roster word row, a Cornerstones
+        # row, or a `person/` ref. A subject that is none of those (his
+        # company, "Etherfuse") is named, but the third-person / "their age
+        # is theirs" rule is a rule about people and is not applied to it.
+        "is_person": bool(person is not None or word_row is not None
+                          or subject.lower().startswith("person/")),
     }
 
 
@@ -1707,6 +1735,8 @@ def _subject_lines(subject: object) -> list[str]:
     if not who or who.get("is_owner") or not who.get("name"):
         return []
     name = who["name"]
+    if who.get("is_person") is False:
+        return [f"- It is about: {name}."]
     lines = [f"**This moment is about {who.get('phrase') or name}, not about the "
              "person you are talking with.**"]
     facts = []
@@ -2712,7 +2742,7 @@ def _one_job_findings(body: str, *, stage: str, action: str | None) -> list[dict
 def _right_person_findings(body: str, *, subject: object) -> list[dict]:
     """`timeline_gates.right_person` — see :data:`TIMELINE_LINT_CLASSES`."""
     if isinstance(subject, dict):
-        if not subject or subject.get("is_owner"):
+        if not subject or subject.get("is_owner") or subject.get("is_person") is False:
             return []
         name = str(subject.get("name") or "").strip()
     else:
