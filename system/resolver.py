@@ -1943,12 +1943,35 @@ def _source_sha256(root: Path, source_path: str) -> str:
     return hashlib.sha256(_read_bytes(root / source_path)).hexdigest()
 
 
-def _targets_digest(node_ids: list[str], by_node: dict) -> str:
-    """The moments an item was planned for AND the raw handles it would retire.
+#: v361 (the A14bc churn, 2026-09-26). On the owner's hosted vault every
+#: "Classify archive chunk" commit starts its own placement chain, and each
+#: chain's leg A planned the SAME vault-wide item (answers/A14bc.md, "Going to
+#: James's baseball games") from the SAME ledger. The first envelope filed an
+#: estimate; the second and third, bought minutes earlier, still matched
+#: `targets_digest` — an estimate is filed BESIDE the handle
+#: (:data:`AN_ESTIMATE_NEVER_RETIRES_HIS_WORDS`) and a placed-by-estimate node
+#: stays a target — so each filed again as if nobody had answered: a different
+#: month guess, a correction, a new claim, a republish (2018-01 -> 2018-05 ->
+#: 2019-05 in 23 minutes), and one silent envelope wiped a filed estimate's
+#: ledger row back to `no_answer_returned`, which re-queued it.
+A_PLAN_IS_FILED_AGAINST_THE_LEDGER_IT_READ = (
+    "a plan item is filed only against the ledger rows it was planned from: "
+    "once another filing has settled or changed one of its moments, the item "
+    "is stale and files nothing"
+)
+
+
+def _targets_digest(node_ids: list[str], by_node: dict, ledger: dict | None = None) -> str:
+    """The moments an item was planned for, the raw handles it would retire,
+    and (v361, :data:`A_PLAN_IS_FILED_AGAINST_THE_LEDGER_IT_READ`) the ledger
+    row each moment had when it was planned.
 
     Empty when a node is no longer a target at all — something else placed it,
-    and an answer to a question that is already settled must not be filed.
+    and an answer to a question that is already settled must not be filed. A
+    different digest when another filing wrote one of these moments' rows since:
+    the question this item asked has already been answered by someone else.
     """
+    rows = (ledger or {}).get("nodes") or {}
     values: list[str] = []
     for node_id in node_ids:
         found = by_node.get(node_id)
@@ -1957,6 +1980,8 @@ def _targets_digest(node_ids: list[str], by_node: dict) -> str:
         values.append(node_id)
         values.extend(collapsed_text(h.get("claim_id")) for h in found[1].get("handles") or ()
                       if h.get("claim_id"))
+        if ledger is not None:
+            values.append(f"ledger:{node_id}:{_digest(rows.get(node_id) or {})}")
     return _digest(sorted(set(values)))
 
 
@@ -1988,6 +2013,10 @@ class _Read:
         # reachable, so a story that carries the exact date can sharpen them.
         # v360 (owner, 2026-09-25): a moment placed by the resolver's own ESTIMATE stays reachable
         # the same way, so a story that carries its date replaces the estimate.
+        # v361: reachable is not pending. Such a moment is a TARGET (so a revisit can
+        # find it and leg C can file it), and `_still_asking` offers it to no plan
+        # unless a dated story or his card answer re-opened it
+        # (:data:`AN_ESTIMATE_IS_REVISITED_ONLY_BY_A_DATED_STORY`).
         wide = frozenset(node_id for node_id, row in (self.ledger.get("nodes") or {}).items()
                          if _wide_resolution(row) or isinstance(row.get("placed_by_estimate"), dict))
         if wide:
@@ -2107,6 +2136,25 @@ def _work_item_of_session(session_ref: object) -> str:
     return ap.work_item_of_session(session_ref)
 
 
+def _dated_triggers(read: "_Read") -> frozenset:
+    """The triggering stories that carry a date at all (`chronology.YEAR_RE`), cached."""
+    cached = read.__dict__.get("_dated_triggers")
+    if cached is None:
+        cached = frozenset(t for t in read.triggers
+                           if (read.root / t).is_file() and chrono.YEAR_RE.search(_read(read.root / t)))
+        read.__dict__["_dated_triggers"] = cached
+    return cached
+
+
+def _revisit_is_dated(read: "_Read", info: object) -> bool:
+    """v361. Did this revisit bring new DATED evidence: a trigger that carries a
+    year, or the person's own answer to the moment's card (the conversation
+    signal — his answer is his placement, `temporal_timeline.AN_ANSWER_IS_THE_PLACEMENT`)?"""
+    if not isinstance(info, dict):
+        return False
+    return info.get("why") == "conversation" or info.get("trigger") in _dated_triggers(read)
+
+
 def revisit_targets(read: "_Read") -> dict[str, dict]:
     """v325. ``node_id -> {"trigger", "why"}``: the settled unknowns a new story re-opens.
 
@@ -2132,12 +2180,17 @@ def revisit_targets(read: "_Read") -> dict[str, dict]:
     (`chronology.YEAR_RE`): a broad life story that merely mentions the same
     words cannot sharpen anything, and on the owner's vault one such story
     bought three re-asks that all kept the standing answer (v326).
+
+    v361: a moment placed by the resolver's own ESTIMATE has the same gate on
+    both signals — a trigger that carries a year, or the person's own answer to
+    that moment's card (:data:`AN_ESTIMATE_IS_REVISITED_ONLY_BY_A_DATED_STORY`).
     """
     if not read.triggers:
         return {}
     import temporal_work_items as twi  # noqa: PLC0415
 
     out: dict[str, dict] = {}
+    dated_triggers = _dated_triggers(read)
 
     def add(node_id: str, trigger: str, why: str) -> None:
         if node_id in out or node_id not in read.by_node:
@@ -2147,10 +2200,14 @@ def revisit_targets(read: "_Read") -> dict[str, dict]:
         row = read.row(node_id)
         if trigger in (row.get("revisited_by") or ()) or trigger in (row.get("refine_attempted_by") or ()):
             return  # asked once with this story already
+        # v361 (:data:`AN_ESTIMATE_IS_REVISITED_ONLY_BY_A_DATED_STORY`): the
+        # system's own guess is re-opened by a story that carries a date, or by
+        # the person answering that moment's own card — never by a story that
+        # merely shares its words.
+        if _placed_by_estimate(row) and not _revisit_is_dated(read, {"trigger": trigger, "why": why}):
+            return
         out[node_id] = {"trigger": trigger, "why": why}
 
-    dated_triggers = {t for t in read.triggers
-                      if (read.root / t).is_file() and chrono.YEAR_RE.search(_read(read.root / t))}
     items = [row for row in (read.work_items.get("work_items") or ()) if isinstance(row, dict)]
     aliases = read.work_items.get("work_item_aliases") if isinstance(read.work_items.get("work_item_aliases"), dict) else {}
     for trigger in sorted(read.triggers):
@@ -2186,16 +2243,94 @@ def revisit_targets(read: "_Read") -> dict[str, dict]:
         refine = _wide_resolution(row)
         if status not in ("unknown", "unverified") and not refine:
             continue
+        estimated = _placed_by_estimate(row)
         for doc in read.fts.search(_query(target), exclude_path=source):
             if doc.get("path") not in read.triggers:
                 continue
-            if refine and doc["path"] not in dated_triggers:
+            if (refine or estimated) and doc["path"] not in dated_triggers:
                 continue  # nothing to sharpen with: the story names no date
             before = len(out)
             add(node_id, doc["path"], "refine" if refine else "retrieval")
             by_retrieval += len(out) - before
             break
     return out
+
+
+#: v361 (the A14bc churn, 2026-09-26). v360 kept a moment the resolver placed
+#: by its own estimate reachable "the same way" a wide reading is, and the one
+#: gate that makes a refine safe — the new story must carry a date — was on the
+#: refine rung only. An estimate is a guess about a story that carries no date;
+#: re-reading that same undated story (or one that merely shares its words)
+#: buys another guess, never a better one.
+AN_ESTIMATE_IS_REVISITED_ONLY_BY_A_DATED_STORY = (
+    "a moment placed by the resolver's own estimate is never planned again by "
+    "the vault-wide ordering; it is re-opened only by a new story that carries "
+    "a date, or by the person's own answer to its card"
+)
+
+#: v361. Each guess at an undated moment lands somewhere slightly different
+#: (the model is sampling, not reading), and v360 retired the standing
+#: estimate and filed the new one whenever the months differed: a correction,
+#: a claim and a republish per guess, and a dot that walked across the page.
+A_GUESS_NEVER_REPLACES_A_GUESS = (
+    "a standing estimate is replaced only by a verified answer, by an estimate "
+    "read from new dated evidence, or by one materially narrower inside it; a "
+    "different guess from the same undated evidence files nothing"
+)
+
+#: v361. A re-ask the model answered with silence says nothing about the moment:
+#: v325's `_unanswered` overwrote the whole ledger row, so a silent envelope
+#: erased a settled reading — its question, its estimate, and the pointer to
+#: the estimate claim it had filed (left active, now unowned) — and reset it
+#: to `no_answer_returned` with one attempt, which the vault-wide ordering
+#: then planned again.
+A_SILENCE_NEVER_UNSETTLES_A_READING = (
+    "a model that returns nothing for a moment that already has a reading "
+    "leaves that reading exactly as it stood"
+)
+
+#: "Materially narrower": the new window holds at most three quarters of the
+#: standing one's months and lies wholly inside it. Monotone and bounded, so a
+#: run of narrowing estimates converges instead of walking.
+MATERIALLY_NARROWER = 0.75
+
+
+def _placed_by_estimate(row: object) -> bool:
+    return isinstance(row, dict) and isinstance(row.get("placed_by_estimate"), dict)
+
+
+def estimate_is_materially_narrower(standing: object, estimate: object) -> bool:
+    """:data:`A_GUESS_NEVER_REPLACES_A_GUESS`'s one exception without new
+    evidence: a window inside the standing one, and at most
+    :data:`MATERIALLY_NARROWER` of its months."""
+    old = standing if isinstance(standing, dict) else {}
+    new = estimate if isinstance(estimate, dict) else {}
+    old_months, new_months = estimate_months(old), estimate_months(new)
+    if not old_months or not new_months:
+        return False
+    old_lo, old_hi = collapsed_text(old.get("earliest"))[:7], collapsed_text(old.get("latest"))[:7]
+    new_lo, new_hi = collapsed_text(new.get("earliest"))[:7], collapsed_text(new.get("latest"))[:7]
+    start_old, end_old = _approx_years(old_lo), _approx_years(old_hi)
+    start_new, end_new = _approx_years(new_lo), _approx_years(new_hi)
+    if None in (start_old, end_old, start_new, end_new):
+        return False
+    # A year-grained bound covers its whole year: "2018" ends in December.
+    if len(old_hi) == 4:
+        end_old += 11 / 12
+    if len(new_hi) == 4:
+        end_new += 11 / 12
+    inside = start_new >= start_old and end_new <= end_old
+    return inside and new_months <= old_months * MATERIALLY_NARROWER
+
+
+def a_guess_replaces_the_standing_one(standing: object, estimate: object, *, dated_evidence: bool) -> bool:
+    """:data:`A_GUESS_NEVER_REPLACES_A_GUESS` — may ``estimate`` retire the
+    standing placed-by-estimate record ``standing``?"""
+    if not isinstance(standing, dict):
+        return True
+    if dated_evidence:
+        return True
+    return isinstance(estimate, dict) and estimate_is_materially_narrower(standing, estimate)
 
 
 def _attempts(row: dict) -> int:
@@ -2217,6 +2352,12 @@ def _still_asking(row: dict, *, retry_failed: bool, force: bool, revisit: bool =
     status = collapsed_text(row.get("status"))
     if not status:
         return True
+    if _placed_by_estimate(row) and not revisit:
+        # v361, :data:`AN_ESTIMATE_IS_REVISITED_ONLY_BY_A_DATED_STORY`: whatever
+        # its status says, a moment the system placed by its own guess is not
+        # a question the vault-wide ordering asks again. A dated story or his
+        # answer to its card re-opens it (``revisit``); nothing else does.
+        return False
     if revisit and (status in ("unknown", "unverified") or _wide_resolution(row)):
         return True
     if estimate_missing and status in ("unknown", "unverified") and not isinstance(row.get("estimate"), dict):
@@ -2361,7 +2502,7 @@ def plan_items(root: Path, *, limit: int = 1, only_sources=None, retry_failed: b
                 "identity": {
                     "source_sha256": _source_sha256(root, source_path),
                     "spine_digest": read.spine_digest,
-                    "targets_digest": _targets_digest(node_ids, read.by_node),
+                    "targets_digest": _targets_digest(node_ids, read.by_node, read.ledger),
                 },
             })
         if len(items) >= cap:
@@ -2409,9 +2550,29 @@ def write_plan(plan: dict, out: object, *, vault_root: Path) -> Path:
 
 def _unanswered(read: _Read, target: dict, *, source_path: str, model: str, now: str,
                 spine_changed: bool) -> None:
-    """The model returned nothing for this moment. Remember that it was asked."""
+    """The model returned nothing for this moment. Remember that it was asked.
+
+    v361 (:data:`A_SILENCE_NEVER_UNSETTLES_A_READING`): a moment that already
+    has a reading — resolved, unknown with its question, unverified, not an
+    event, or placed by an estimate — keeps it. A revisit that came back
+    silent is remembered on the row (``revisited_by``) so the same story does
+    not re-ask it; nothing else about the row moves.
+    """
+    previous = read.row(target["node_id"])
+    status = collapsed_text(previous.get("status"))
+    if status and status not in ("no_answer_returned", "file_error") or _placed_by_estimate(previous):
+        revisit = read.revisit.get(target["node_id"])
+        if revisit:
+            kept = dict(previous)
+            if previous.get("status") == "resolved":
+                kept["refine_attempted_by"] = sorted({*(previous.get("refine_attempted_by") or ()),
+                                                      revisit["trigger"]})
+            else:
+                kept["revisited_by"] = sorted({*(previous.get("revisited_by") or ()), revisit["trigger"]})
+            read.ledger["nodes"][target["node_id"]] = kept
+        return
     entry = {"label": target["label"], "source_path": source_path, "model": model, "at": now,
-             "status": "no_answer_returned", "attempts": _attempts(read.row(target["node_id"])) + 1}
+             "status": "no_answer_returned", "attempts": _attempts(previous) + 1}
     if spine_changed:
         entry["spine_changed"] = True
     read.ledger["nodes"][target["node_id"]] = entry
@@ -2519,11 +2680,34 @@ def _absorb(read: _Read, report: dict, rows: list[dict], *, text: str, story: st
                                   "basis": [{"kind": "story", "text": (collapsed_text(item.get("reason"))
                                                                         or "the resolver's own reading, not verified")[:MAX_ESTIMATE_TEXT]}]}},
                     sp=read.spine, subject=target.get("subject"))
+            dated_evidence = _revisit_is_dated(read, revisit)
+            if _placed_by_estimate(previous) and not a_guess_replaces_the_standing_one(
+                    previous["placed_by_estimate"].get("record"), estimate, dated_evidence=dated_evidence):
+                # v361, :data:`A_GUESS_NEVER_REPLACES_A_GUESS`: another guess from
+                # the same undated evidence (or none at all) leaves the standing
+                # estimate, its claim and its row exactly as they were — no
+                # correction, no claim, no republish. A revisit is remembered so
+                # the same story does not buy it twice.
+                kept = dict(previous)
+                if revisit:
+                    kept["revisited_by"] = revisited_by
+                binds = verify_handle_binds(item, target=target, known_nodes=read.known_nodes)
+                for bind in binds:
+                    try:
+                        kept.setdefault("handle_binds", []).append(file_handle_bind(
+                            read.root, target, bind, story_path=source_path, model=model, now=now))
+                        report["bound"] += 1
+                    except Exception as exc:  # noqa: BLE001
+                        kept.setdefault("bind_errors", []).append(f"{type(exc).__name__}: {str(exc)[:160]}")
+                report["outcomes"]["kept_estimate"] += 1
+                read.ledger["nodes"][node_id] = kept
+                continue
             if estimate is not None:
                 entry["estimate"] = estimate
                 report["estimates"] += 1
                 _place_estimate(read, report, entry, target, estimate, previous=previous,
-                                source_path=source_path, model=model, now=now)
+                                source_path=source_path, model=model, now=now,
+                                dated_evidence=dated_evidence)
             else:
                 entry["estimate_dropped"] = estimate_why
                 if isinstance(previous.get("placed_by_estimate"), dict):
@@ -2558,11 +2742,20 @@ def _age_anchor(target: dict, sp: dict) -> str:
 
 
 def _place_estimate(read: "_Read", report: dict, entry: dict, target: dict, estimate: dict, *,
-                    previous: dict, source_path: str, model: str, now: str) -> None:
+                    previous: dict, source_path: str, model: str, now: str,
+                    dated_evidence: bool = False) -> None:
     """:data:`AN_ESTIMATE_PLACES_AS_THE_SYSTEMS_INFERENCE` for one ledger entry.
 
-    The same estimate as the one already filed files nothing; a different one
-    retires the old claim and files the new one."""
+    The same estimate as the one already filed files nothing. v361
+    (:data:`A_GUESS_NEVER_REPLACES_A_GUESS`): a different one retires the old
+    claim and files the new one only when it was read from new dated evidence
+    or is materially narrower inside it; otherwise the standing one stays."""
+    standing_row = previous.get("placed_by_estimate") if _placed_by_estimate(previous) else None
+    if standing_row and not a_guess_replaces_the_standing_one(
+            standing_row.get("record"), estimate, dated_evidence=dated_evidence):
+        entry["placed_by_estimate"] = standing_row
+        entry["estimate"] = previous.get("estimate")
+        return
     if not estimate_places(estimate, target):
         entry["estimate_not_placed"] = ("residence" if collapsed_text(target.get("node_event_kind")) == "residence"
                                         else "person_dated" if target.get("person_dated")
@@ -2700,7 +2893,7 @@ def file_envelope(root: Path, envelope: object, *, now: str, model: str | None =
         if collapsed_text(identity.get("source_sha256")) != _source_sha256(root, source_path):
             report["refused_items"].append({"key": key, "reason": "stale_source"})
             continue
-        if collapsed_text(identity.get("targets_digest")) != _targets_digest(node_ids, read.by_node):
+        if collapsed_text(identity.get("targets_digest")) != _targets_digest(node_ids, read.by_node, read.ledger):
             report["refused_items"].append({"key": key, "reason": "stale_targets"})
             continue
         spine_changed = collapsed_text(identity.get("spine_digest")) != read.spine_digest

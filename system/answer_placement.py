@@ -657,6 +657,57 @@ def age_is_the_narrators(text: object, age: object) -> bool:
     return chrono.age_is_first_person(collapsed_text(text), wanted)
 
 
+#: v361 (the owner's Charlee card, 2026-09-26). Asked "What year did Charlee
+#: switch from flag football to track?", he answered *"Charlee switched from
+#: football to track her freshmen year January 2026"* — the WHEN inside a
+#: sentence that also restates the WHAT. `chronology.parse_stated_date` reads
+#: the whole reply and refuses prose, so the reply filed as a telling and the
+#: resolver's own 2019–2021 window stayed drawn over what he said.
+A_DATE_HE_SAID_IN_A_SENTENCE_IS_A_DATE_HE_SAID = (
+    "a reply to a card that names exactly one date — a year, a month and year, "
+    "or a season and year — is that date, read by the one date parser; a reply "
+    "naming several, or one behind an ordering word (after, before, since), "
+    "stays a telling"
+)
+
+_MONTH_WORDS = (r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
+                r"sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?")
+#: One date phrase: an optional approximation word, an optional month or
+#: season (with an optional "of"), and a four-digit year from 1800 to 2099.
+_DATE_PHRASE_RE = re.compile(
+    r"(?<![\w$-])((?:(?:about|around|circa|approximately|roughly)\s+)?"
+    r"(?:(?:" + _MONTH_WORDS + r"|spring|summer|fall|autumn|winter)\.?\s+(?:of\s+)?)?"
+    r"(?:18|19|20)\d{2})(?![\w-])"
+    # A number that is an address or a quantity is not a year: "1998 Elm
+    # Street", "2000 miles".
+    r"(?!\s+(?:\w+\s+)?(?:street|st|avenue|ave|road|rd|lane|ln|drive|dr|way|court|ct|"
+    r"boulevard|blvd|place|pl|circle|cir|highway|hwy|miles?|feet|ft|dollars?|bucks|people|"
+    r"pounds?|lbs?|km|meters?|acres?|square)\b)",
+    re.IGNORECASE)
+#: The words that make a year an ORDERING rather than a date (`chronology`'s
+#: own before/after prefixes): *"after Dad died in 2021"* dates Dad's death.
+_ORDERING_BEFORE_RE = re.compile(
+    r"\b(?:after|before|since|until|till|prior\s+to|later\s+than|earlier\s+than|from|between|by)"
+    r"(?:\s+\S+){0,3}\s*$", re.IGNORECASE)
+
+
+def date_in_words(text: object):
+    """:data:`A_DATE_HE_SAID_IN_A_SENTENCE_IS_A_DATE_HE_SAID` — the one date a
+    reply names, as a `chronology.DateRecord`, or ``None``."""
+    body = collapsed_text(text)
+    if not body:
+        return None
+    found = list(_DATE_PHRASE_RE.finditer(body))
+    if len({collapsed_text(m.group(1)).lower() for m in found}) != 1:
+        return None
+    if len({m.group(1)[-4:] for m in found}) != 1:
+        return None
+    match = found[0]
+    if _ORDERING_BEFORE_RE.search(body[:match.start()]):
+        return None
+    return chrono.parse_stated_date(match.group(1))
+
+
 def answer_reading(text: object, *, captured: object = None,
                    question: object = None) -> dict | None:
     """What time this reply carries: ``{claim_type, temporal_value, basis,
@@ -690,7 +741,9 @@ def answer_reading(text: object, *, captured: object = None,
     body = collapsed_text(text)
     if not body:
         return None
-    record = chrono.parse_stated_date(body)
+    # v361: the whole reply first, then the one date inside it
+    # (:data:`A_DATE_HE_SAID_IN_A_SENTENCE_IS_A_DATE_HE_SAID`).
+    record = chrono.parse_stated_date(body) or date_in_words(body)
     if record is not None:
         return {
             "claim_type": "date",

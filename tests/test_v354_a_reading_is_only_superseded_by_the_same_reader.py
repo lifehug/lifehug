@@ -181,11 +181,16 @@ class OwnersMessage:
         }, now=LISTENER_HEARD)
 
     def file_the_answer(self) -> dict:
-        """Through the real seat, with the real reading the sweep computes."""
-        reading = ap.answer_reading(REPLY, captured=CAPTURED,
-                                   question=owners_card()["question"])
+        """Through the real seat, with the reading his vault filed.
+
+        v352-v360 read this reply as a telling (no rung read a date inside a
+        sentence), and that telling is the receipt his vault holds, so the
+        fixture files exactly it and his ids fall out. v361
+        (`answer_placement.A_DATE_HE_SAID_IN_A_SENTENCE_IS_A_DATE_HE_SAID`)
+        reads the 2006 — see `test_the_answer_is_the_telling_his_vault_filed`.
+        """
         return ap.file_answer(self.root, source_path=SOURCE_PATH,
-                              card=owners_card(), reading=reading or ap.telling_reading(),
+                              card=owners_card(), reading=ap.telling_reading(),
                               text=REPLY, now=NOW)
 
     def index(self) -> dict:
@@ -229,12 +234,14 @@ class TheFixtureIsTheOwnersOwnMessageTests(unittest.TestCase):
         self.assertEqual(self.filed["node_ref"], CARD_NODE)
 
     def test_the_answer_is_the_telling_his_vault_filed(self):
-        """It carried no time his rungs could read, so it filed as a telling —
-        which is what made the loss silent: one occurrence replaced a dated
-        reading of the same sentence."""
+        """It carried no time his v352-v360 rungs could read, so it filed as a
+        telling — which is what made the loss silent: one occurrence replaced a
+        dated reading of the same sentence. Since v361 the one date inside his
+        sentence is read as the answer to the card it names."""
         self.assertEqual(self.filed["reading"], ap.READING_TELLING)
-        self.assertIsNone(ap.answer_reading(
-            REPLY, captured=CAPTURED, question=owners_card()["question"]))
+        reading = ap.answer_reading(REPLY, captured=CAPTURED, question=owners_card()["question"])
+        self.assertEqual((reading["reading"], reading["temporal_value"]["best"]),
+                         (ap.READING_DATE, "2006"))
 
     def test_the_two_receipts_share_one_source_revision(self):
         """The defect's precondition, ASSERTED rather than assumed: the answer's
@@ -630,9 +637,13 @@ class TheWholeActKeepsEveryPlacementTests(unittest.TestCase):
             self.nodes = payload.get("nodes") or []
             self.node_aliases = payload.get("node_aliases") or {}
 
-    def test_the_answer_filed_as_a_telling_of_the_cards_node(self):
+    def test_the_answer_filed_on_the_cards_node(self):
+        # v361 (`answer_placement.A_DATE_HE_SAID_IN_A_SENTENCE_IS_A_DATE_HE_SAID`):
+        # "She graduated in 2006" answering the esthetician-school card places
+        # it; before v361 it filed as a telling.
         self.assertEqual(self.report["answers"], 1)
-        self.assertEqual(self.report["tellings"], 1)
+        self.assertEqual((self.report["placed"], self.report["tellings"]), (1, 0))
+        self.assertEqual(self.report["by_reading"][ap.READING_DATE], 1)
         self.assertEqual(self.report["errors"], [])
         self.assertEqual(sum(self.report["refused"].values()), 0)
         self.assertEqual([row["node_ref"] for row in self.report["filed"]],

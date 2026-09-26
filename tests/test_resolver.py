@@ -628,8 +628,11 @@ class LegsTests(unittest.TestCase):
         self.story("a1", "The shop opened after the move to Cedarport.",
                    [("shop", "after", ["the move to Cedarport"])])
         self.publish()
-        item = resolver.plan_items(self.root, limit=5)["items"][0]
         for expected in (1, 2):
+            # Each round is a fresh plan, as a host's next hop is. v361
+            # (`resolver.A_PLAN_IS_FILED_AGAINST_THE_LEDGER_IT_READ`): replaying
+            # round 1's envelope after round 1 wrote the row files nothing.
+            item = resolver.plan_items(self.root, limit=5)["items"][0]
             report = resolver.file_envelope(
                 self.root, self.envelope(item, self.answer_text("shop"), truncated=True), now=NOW)
             self.assertEqual(report["filed"], 0)
@@ -637,6 +640,10 @@ class LegsTests(unittest.TestCase):
             entry = resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]
             self.assertEqual(entry["status"], "no_answer_returned")
             self.assertEqual(entry["attempts"], expected)
+            replay = resolver.file_envelope(
+                self.root, self.envelope(item, self.answer_text("shop"), truncated=True), now=NOW)
+            self.assertEqual([row["reason"] for row in replay["refused_items"]], ["stale_targets"])
+            self.assertEqual(resolver.load_ledger(self.root)["nodes"][self.nodes["shop"]]["attempts"], expected)
         self.assertEqual(resolver.plan_items(self.root, limit=5)["items"], [])
 
     def test_filing_the_same_envelope_twice_files_nothing_the_second_time(self):
@@ -1254,9 +1261,11 @@ class RevisitTests(LegsTests):
         self.story("b1", "We moved house the year I finished school.",
                    [("move", "after", ["finishing school"])])
         self.publish()
-        item = self.item_for(resolver.plan_items(self.root, limit=5), "answers/a1.md")
         self.settle_unknown("shop", "Which year did the shop open?")
         self.publish()
+        # v361 (`resolver.A_PLAN_IS_FILED_AGAINST_THE_LEDGER_IT_READ`): planned from
+        # the ledger it is filed against.
+        item = self.item_for(resolver.plan_items(self.root, limit=5, force=True), "answers/a1.md")
         handle_ref = twi.anchor_handle_ref("the move to Cedarport")
         rows = (pub.read_work_items(self.root) or {})["work_items"]
         self.assertTrue(any(row.get("subject_ref") == handle_ref for row in rows))
