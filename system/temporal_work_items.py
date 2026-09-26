@@ -345,6 +345,37 @@ def canonical_work_item_id(*, kind: object, subject_ref: object = None,
     )
 
 
+#: v359 (`answer_placement.AN_ANSWER_OUTLIVES_ITS_CARD`): the fields a card
+#: id is re-derived under — every canonical field and the one legacy spelling,
+#: because an answer can be to a card minted before O-E6 canonicalized it.
+REDERIVED_REQUESTED_FIELDS = (*CANONICAL_REQUESTED_FIELDS, LEGACY_REQUESTED_FIELD)
+
+
+def asked_work_item_ids(*, event_ref: object,
+                        subject_ref: object = None) -> tuple[tuple[str, str, str], ...]:
+    """Every ``(work id, kind, requested field)`` a card could have been minted under.
+
+    One card about this (node, subject), in every ``WORK_ITEM_KINDS`` kind and
+    every :data:`REDERIVED_REQUESTED_FIELDS` field, spelled exactly as it was
+    minted (NOT canonicalized: the id on a stored session is the id the card
+    had when it was shown).
+
+    Derived, never stored — `legacy_work_item_ids`' discipline, and the reason
+    this lives here, beside the only other re-minter, rather than in the module
+    that reads an answer.
+    """
+    event = collapsed_text(event_ref) or None
+    subject = collapsed_text(subject_ref) or None
+    if not event and not subject:
+        return ()
+    return tuple(
+        (tp.derive_work_item_id(kind=kind, subject_ref=subject, event_ref=event,
+                                requested_field=field), kind, field)
+        for kind in tp.WORK_ITEM_KINDS
+        for field in REDERIVED_REQUESTED_FIELDS
+    )
+
+
 def birth_origin_work_item_id() -> str:
     """The ONE id the owner's missing birthday is asked under, everywhere."""
     return tp.derive_work_item_id(

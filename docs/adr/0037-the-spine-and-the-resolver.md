@@ -1175,3 +1175,52 @@ father against the classifier's own contract; the resolver's 2003-07/2009-07
 is kept as the alternate and a contradiction card asks. That is an extraction
 defect this release unmasks (lifehug#415).
 `CALCULATION_RULE_VERSION` → `timeline-rules:18`.
+
+## Amendment (v359, 2026-09-25): an answer outlives its card
+
+The owner answered his father's mission card *"19-21 years old"*
+(`msg-fc9845c47f8dc2b5099724a5`, session
+`…work_item:work:b7525efb7ce0bb69be2d7129`). Before the answer was placed, the
+2026-09-23 run of this resolver dated that node from its own reading, and v350's
+identity re-key moved it (`node:b69a5be503b14977a6ba0077` →
+`node:80f419115b858c37a7b051f3`). The card left the published generation, and
+v352's `place-answers` refused the answer `card_not_published` — as it refused
+**20 of the 28** card answers on a clone of his vault. The resolver dating a
+moment is exactly what it is for; what was wrong is that its doing so first
+made the person's own answer count for nothing, and said so only as a number.
+
+**THE RULE** (`answer_placement.AN_ANSWER_OUTLIVES_ITS_CARD`): an answer to a card
+the person was shown counts however the card has closed since. The card is not
+remembered — it is RE-DERIVED. A work id is `derive_work_item_id` over (kind,
+subject, node, field), so `closed_cards` mints the ids every node the vault still
+holds could have been asked under: every drawn node, with its resolved subjects
+and the raw `subject_mention` of every claim it folds (resolution is data about a
+claim); every id `node_aliases` redirects; and every node a filed claim's
+`event_ref` names. The node is followed through `node_aliases` to where it is
+drawn now, and the answer is placed there under the node's own subject, exactly
+as v352 places an answer to an open card. It is refused only when no node could
+have asked the card (`card_not_published`) or when that node is no longer drawn
+(`card_node_not_drawn`), and every refused answer is listed on the report. What
+v352's refusals protected is kept: a row a host marked settled is still
+`card_not_open`, an `unresolved:` subject is still refused, one answer is still
+one receipt keyed on the reply's revision.
+
+**This resolver's retirements are now visible from the other side.** Three of
+the owner's answers were to moments this resolver retracted as not an event (two
+`duplicate`, one `fact_statement`); the answers are refused `card_node_not_drawn`
+and listed with the node they asked about. A `duplicate` verdict names the node
+it duplicates only in its prose reason, so an answer to the retired moment is not
+followed onto the surviving one; a structured `duplicate_of` on the verdict
+would let it be, and is left for the resolver's own release.
+
+**A first-person age is the narrator's** (`answer_placement.NARRATOR_AGE_RE`).
+*"probably when I was 4 or 5"*, answering a card about his father, is filed under
+`self` on the card's node and measured from the owner's own birth — lifehug#415's
+first gap, in this seat. The classifier's half of #415 stays filed.
+
+The father's mission now carries the answer's own `age` claim, measured
+1973-06-04/1976-06-03 from 1954-06-04 and joined to the placement's provenance
+(`age_corroborates_placement`); the drawn window stays this resolver's
+month-grained 1973-06/1976-06, because v345's ruling makes an agreeing age
+evidence on a dated moment, never its rival. `CALCULATION_RULE_VERSION` does
+**not** move.

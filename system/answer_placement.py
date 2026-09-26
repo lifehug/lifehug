@@ -66,12 +66,22 @@ own year trap, reused here rather than re-decided).
 
 WHAT IT REFUSES, by name:
 
-* **A card nobody published.** The work item must be in the published
-  ``work-items.json`` and ``open``. An answer to a card that has already been
-  settled files nothing (:data:`REFUSED_CARD_NOT_OPEN`).
-* **A node nobody drew.** The card's ``node_ref`` must name a node in the
-  published projection, or there is nothing to place
-  (:data:`REFUSED_NODE_NOT_DRAWN`).
+* **A card nobody could have asked.** The work item is read from the
+  published ``work-items.json`` — and, since v359, when the generation no
+  longer carries it, RE-DERIVED from what it asked
+  (:data:`AN_ANSWER_OUTLIVES_ITS_CARD`): a card closing after it was shown
+  never voids the answer. Only an id no node the vault still holds could have
+  minted is :data:`REFUSED_CARD_NOT_PUBLISHED`. A published row somebody marked
+  settled (``answered``, ``resolved``, ``dismissed``, ``obsolete``) files
+  nothing (:data:`REFUSED_CARD_NOT_OPEN`).
+* **A node nobody draws.** The card's node, followed through ``node_aliases``,
+  must be a node in the published projection, or there is nothing to place
+  (:data:`REFUSED_NODE_NOT_DRAWN`) — the resolver retracting a moment as not an
+  event is the owner's case.
+
+Every refused answer is LISTED on the report (``unplaced``: its source, its
+work item, the reason, and the node it asked about when that is known), so a
+refusal is read rather than inferred from a smaller number.
 * **A card whose subject nobody resolved.** ``unresolved:`` is the binder
   saying it does not know WHO — the platform already refuses to file a
   resolution against such a row (Timeline Fix 01 P0b) and so does this
@@ -183,9 +193,54 @@ PRONOUN_SUBJECT_MENTIONS = frozenset({
 #: not WHO, and an answer filed against it would be filed against nobody.
 UNRESOLVED_SUBJECT_PREFIX = "unresolved:"
 
-#: The work-item states an answer may be read against. ``open`` and nothing
-#: else: a settled card's answer was already filed by whatever settled it.
-ANSWERABLE_WORK_ITEM_STATES = ("open",)
+#: The work-item states an answer may be read against: ``open``, and
+#: ``offered`` — a card that has been SHOWN and not yet answered is exactly the
+#: card an answer is to (v359). A row a host has explicitly marked settled
+#: (``answered``, ``resolved``, ``dismissed``, ``obsolete``) is still refused
+#: as :data:`REFUSED_CARD_NOT_OPEN`: that state is a decision somebody recorded
+#: on the card, and the fold itself never publishes one.
+ANSWERABLE_WORK_ITEM_STATES = ("open", "offered")
+
+#: AN ANSWER OUTLIVES ITS CARD (v359). What the owner hit: he answered his
+#: father's mission card *"19-21 years old"*
+#: (``conversation:msg-fc9845c47f8dc2b5099724a5``, session
+#: ``…work_item:work:b7525efb7ce0bb69be2d7129``), and before the answer was
+#: placed the 2026-09-23 resolver run had dated the node from its own reading
+#: and v350's identity re-key had moved it
+#: (``node:b69a5be503b14977a6ba0077`` → ``node:80f419115b858c37a7b051f3``).
+#: The card left the published generation, and :func:`card_for_work_item`
+#: refused the answer ``card_not_published`` — as it did 20 of the 28 card
+#: answers on his vault. A card closing AFTER it was shown is a fact about the
+#: substrate, not about what the person said; the answer is testimony and it
+#: counts.
+#:
+#: The card is not remembered, it is RE-DERIVED: a work id is
+#: `temporal_projection.derive_work_item_id` over (kind, subject, node, field),
+#: so the ids a node could have been asked under are arithmetic over what the
+#: vault still holds (:func:`closed_cards`) — the way
+#: `temporal_work_items.legacy_work_item_ids` re-mints a legacy id rather than
+#: storing it. The node found is followed through the published
+#: ``node_aliases`` to where it is drawn NOW, and the answer is placed there
+#: with that node's own subject. It is refused only when no node the vault
+#: draws, redirects or names on a filed claim could have asked that card
+#: (:data:`REFUSED_CARD_NOT_PUBLISHED`), or when the node it asked about is no
+#: longer drawn at all (:data:`REFUSED_NODE_NOT_DRAWN`) — and every refused
+#: answer is LISTED on the report (``unplaced``), never only counted.
+AN_ANSWER_OUTLIVES_ITS_CARD = (
+    "an answer to a card the person was shown counts however the card has "
+    "closed since: a card the published generation no longer carries is "
+    "re-derived from what it asked — kind, subject, node and field, the digest "
+    "that minted it — over every node the vault draws, every id node_aliases "
+    "redirects and every node a filed claim names; the answer is placed on that "
+    "node where it is drawn now, with the node's own subject; and an answer "
+    "whose card does not re-derive, or whose node is no longer drawn, is refused "
+    "by name and listed, never silently dropped"
+)
+
+#: How a filed row says which card it answered: the one still published, or
+#: one :data:`AN_ANSWER_OUTLIVES_ITS_CARD` re-derived.
+CARD_PUBLISHED = "published"
+CARD_CLOSED = "closed"
 
 #: The event kind a card's node falls back to when the projection names none.
 #: `temporal_claims.EVENT_KINDS`' own generic, and the same fallback
@@ -245,15 +300,113 @@ def work_item_of_session(session_ref: object) -> str:
     return _SESSION_DAY_SUFFIX_RE.sub("", tail)
 
 
+def drawn_node_ref(projection: object, node_ref: object) -> str:
+    """Where a node id is drawn NOW: the published ``node_aliases`` walked to
+    its end (v359). An id no alias names is returned unchanged; chains are
+    followed and cycles terminate, because a published map is data — the same
+    walk `temporal_work_items.resolve_work_item_id` does over its own map, and
+    the reason every reader of an old node id follows the alias rather than
+    only publishing it (v342)."""
+    aliases = (projection or {}).get("node_aliases")
+    return twi.resolve_work_item_id(
+        node_ref, aliases=aliases if isinstance(aliases, dict) else {})
+
+
 def _node_view(projection: object, node_ref: str) -> dict | None:
-    """The published node a card is about, or ``None``."""
-    wanted = collapsed_text(node_ref)
+    """The published node a card is about, or ``None``. An id the projection
+    has redirected is read at the node it is drawn at now."""
+    wanted = collapsed_text(drawn_node_ref(projection, node_ref))
     if not wanted:
         return None
     for node in (projection or {}).get("nodes") or ():
         if isinstance(node, dict) and collapsed_text(node.get("node_id")) == wanted:
             return node
     return None
+
+
+def _card_askers(projection: object, claims: object) -> dict[str, dict[str, str]]:
+    """``{node id a card could name: {subject key: the spelling it was said
+    in}}`` — the inputs :func:`closed_cards` re-derives ids from. Keyed on
+    `normalized_mention_key`, which is what the work-item digest keys on.
+
+    Three sources of a node id, each a place the vault still holds one:
+
+    * every node the projection DRAWS, with its resolved ``subject_refs`` and
+      the raw ``subject_mention``/``subject_ref`` of every claim it folds —
+      resolution is data ABOUT a claim, so the mention a card was minted from
+      before a subject resolved is still on the claim that minted it;
+    * every id ``node_aliases`` redirects, with the subjects of the node it
+      redirects to (v350: a re-key moves the id and keeps the moment);
+    * every ``event_ref`` a filed claim names, active or not, with that claim's
+      own subject — so a card whose node the fold no longer draws still
+      re-derives, and is refused for the RIGHT reason
+      (:data:`REFUSED_NODE_NOT_DRAWN`) rather than as a card nobody published.
+    """
+    by_id = {collapsed_text(row.get("claim_id")): row for row in (claims or ())
+             if isinstance(row, dict) and collapsed_text(row.get("claim_id"))}
+    askers: dict[str, dict[str, str]] = {}
+    for node in (projection or {}).get("nodes") or ():
+        if isinstance(node, dict) and collapsed_text(node.get("node_id")):
+            subjects = list(node.get("subject_refs") or ())
+            for ref in node.get("input_claim_refs") or ():
+                row = by_id.get(collapsed_text(ref)) or {}
+                subjects += [row.get("subject_mention"), row.get("subject_ref")]
+            _add_askers(askers, collapsed_text(node["node_id"]), subjects)
+    aliases = (projection or {}).get("node_aliases")
+    for was in (aliases if isinstance(aliases, dict) else {}):
+        now_id = collapsed_text(drawn_node_ref(projection, was))
+        _add_askers(askers, collapsed_text(was), (askers.get(now_id) or {}).values())
+    for row in by_id.values():
+        event = collapsed_text(row.get("event_ref"))
+        if event.startswith("node:"):
+            _add_askers(askers, event,
+                        (row.get("subject_mention"), row.get("subject_ref")))
+    return askers
+
+
+def _add_askers(askers: dict, node_ref: str, subjects: object) -> None:
+    """Add each subject a card about ``node_ref`` could have named, keyed on
+    `normalized_mention_key` and keeping the first spelling it was said in."""
+    row = askers.setdefault(node_ref, {})
+    for value in subjects or ():
+        key = normalized_mention_key(value)
+        if key:
+            row.setdefault(key, collapsed_text(value))
+
+
+def closed_cards(work_item_ids: object, *, projection: object,
+                 claims: object = ()) -> dict[str, dict]:
+    """:data:`AN_ANSWER_OUTLIVES_ITS_CARD`'s derivation, for the ids asked.
+
+    ``{work id: {"work_item_id", "asked_node_ref", "subject_ref", "kind",
+    "requested_field"}}`` for every wanted id some node the vault still holds
+    could have been asked under; an id nothing re-derives is simply absent.
+
+    The id IS what the card asked (`temporal_projection.derive_work_item_id`
+    over kind, subject key, node and field), so this mints the ids of every
+    (node, subject, kind, field) the vault can name and keeps the ones wanted.
+    Nothing is read off an earlier publication and nothing is stored, which is
+    what keeps an answer a function of the vault rather than of which
+    generation happened to be on disk when it arrived. Bounded — the product is
+    nodes x subjects x `temporal_work_items.asked_work_item_ids` —
+    and it stops as soon as every wanted id is found.
+    """
+    wanted = {collapsed_text(ref) for ref in (work_item_ids or ())
+              if collapsed_text(ref)}
+    found: dict[str, dict] = {}
+    if not wanted:
+        return found
+    for node_ref, subjects in sorted(_card_askers(projection, claims).items()):
+        for key in sorted({*subjects, ""}):
+            for wid, kind, field in twi.asked_work_item_ids(
+                    event_ref=node_ref, subject_ref=key or None):
+                if wid in wanted and wid not in found:
+                    found[wid] = {"work_item_id": wid, "asked_node_ref": node_ref,
+                                  "subject_ref": subjects.get(key, ""),
+                                  "kind": kind, "requested_field": field}
+                    if len(found) == len(wanted):
+                        return found
+    return found
 
 
 def _node_subject(node: dict, card_subject: str) -> str:
@@ -273,40 +426,59 @@ def _node_subject(node: dict, card_subject: str) -> str:
     return collapsed_text(card_subject)
 
 
+def _published_card(wanted: str, work_items: object) -> tuple[dict | None, str]:
+    """``(row, canonical id)``: the published row a work id names, through the
+    published ``work_item_aliases``, or ``(None, canonical id)``."""
+    rows = [row for row in ((work_items or {}).get("work_items") or ())
+            if isinstance(row, dict)]
+    aliases = (work_items or {}).get("work_item_aliases")
+    aliases = aliases if isinstance(aliases, dict) else {}
+    canonical = collapsed_text(twi.resolve_work_item_id(wanted, aliases=aliases)) or wanted
+    for row in rows:
+        row_id = collapsed_text(row.get("work_item_id"))
+        if canonical in (row_id, collapsed_text(twi.resolve_work_item_id(row_id, aliases=aliases))):
+            return row, canonical
+    return None, canonical
+
+
 def card_for_work_item(work_item_id: object, *, work_items: object,
-                       projection: object) -> tuple[dict | None, str]:
+                       projection: object,
+                       closed: object = None) -> tuple[dict | None, str]:
     """``(card, refusal)`` for one work id, from the two published files.
 
     The card is everything an answer needs and nothing else::
 
         {"work_item_id", "node_ref", "subject_ref", "event_kind", "label",
-         "question", "requested_field", "kind"}
+         "question", "requested_field", "kind", "card", "asked_node_ref"}
 
     ``refusal`` is ``""`` when a card came back and one of :data:`REFUSALS`
     when none did. The alias map is consulted first for the reason
     `temporal_work_items.resolve_work_item_id` exists: an id minted last month
     must keep opening its own conversation.
+
+    ``closed`` is :func:`closed_cards`' map. When the published generation no
+    longer carries the card, the card it re-derived is the one answered
+    (:data:`AN_ANSWER_OUTLIVES_ITS_CARD`); ``card`` says which of the two it
+    was, and ``asked_node_ref`` is the node id the person was shown, which
+    ``node_ref`` follows to where that moment is drawn now.
     """
     wanted = collapsed_text(work_item_id)
     if not wanted:
         return None, REFUSED_NO_WORK_ITEM
-    rows = [row for row in ((work_items or {}).get("work_items") or ())
-            if isinstance(row, dict)]
-    aliases = (work_items or {}).get("work_item_aliases")
-    aliases = aliases if isinstance(aliases, dict) else {}
-    wanted = collapsed_text(twi.resolve_work_item_id(wanted, aliases=aliases)) or wanted
-    found = None
-    for row in rows:
-        row_id = collapsed_text(row.get("work_item_id"))
-        if wanted in (row_id, collapsed_text(twi.resolve_work_item_id(row_id, aliases=aliases))):
-            found = row
-            break
+    found, canonical = _published_card(wanted, work_items)
+    origin = CARD_PUBLISHED
     if found is None:
-        return None, REFUSED_CARD_NOT_PUBLISHED
+        table = closed if isinstance(closed, dict) else {}
+        asked = table.get(wanted) or table.get(canonical)
+        if not isinstance(asked, dict):
+            return None, REFUSED_CARD_NOT_PUBLISHED
+        found = {**asked, "node_ref": asked.get("asked_node_ref"), "state": "open"}
+        origin = CARD_CLOSED
     if collapsed_text(found.get("state")) not in ANSWERABLE_WORK_ITEM_STATES:
         return None, REFUSED_CARD_NOT_OPEN
-    node_ref = collapsed_text(found.get("node_ref")) or collapsed_text(found.get("event_ref"))
-    node = _node_view(projection, node_ref)
+    asked_node = (collapsed_text(found.get("node_ref"))
+                  or collapsed_text(found.get("event_ref")))
+    node = _node_view(projection, asked_node)
     if node is None:
         return None, REFUSED_NODE_NOT_DRAWN
     subject = _node_subject(node, found.get("subject_ref"))
@@ -314,7 +486,7 @@ def card_for_work_item(work_item_id: object, *, work_items: object,
         return None, REFUSED_SUBJECT_UNRESOLVED
     return {
         "work_item_id": collapsed_text(found.get("work_item_id")),
-        "node_ref": node_ref,
+        "node_ref": collapsed_text(node.get("node_id")),
         "subject_ref": subject,
         "event_kind": (collapsed_text(node.get("event_kind"))
                        or DEFAULT_EVENT_KIND),
@@ -322,16 +494,32 @@ def card_for_work_item(work_item_id: object, *, work_items: object,
         "question": collapsed_text(found.get("prompt_intent")),
         "requested_field": collapsed_text(found.get("requested_field")),
         "kind": collapsed_text(found.get("kind")),
+        "card": origin,
+        "asked_node_ref": asked_node,
     }, ""
+
+
+def read_claims(vault_root: str | Path) -> list[dict]:
+    """Every claim the published active index holds, whatever its status —
+    :func:`closed_cards`' subjects and node ids. ``[]`` when there is no index
+    yet, which re-derives only from the projection."""
+    try:
+        index = store.read_active_index(vault_root) or {}
+    except store.TemporalStoreError:
+        return []
+    return [row for row in (index.get("claims") or ()) if isinstance(row, dict)]
 
 
 def card_for_answer(vault_root: str | Path, session_ref: object, *,
                     work_items: object = None,
-                    projection: object = None) -> tuple[dict | None, str]:
+                    projection: object = None,
+                    closed: object = None) -> tuple[dict | None, str]:
     """:func:`card_for_work_item` for the card a ``session_ref`` names.
 
-    ``work_items``/``projection`` are accepted so a sweep reads the two
-    published files ONCE for a whole run; absent, they are read here.
+    ``work_items``/``projection``/``closed`` are accepted so a sweep reads the
+    published files and re-derives closed cards ONCE for a whole run; absent,
+    they are read here — and a card the generation no longer carries is
+    re-derived here, for this one id (:data:`AN_ANSWER_OUTLIVES_ITS_CARD`).
     """
     wanted = work_item_of_session(session_ref)
     if not wanted:
@@ -340,7 +528,11 @@ def card_for_answer(vault_root: str | Path, session_ref: object, *,
         work_items = pub.read_work_items(vault_root) or {}
     if projection is None:
         projection = pub.read_projection(vault_root) or {}
-    return card_for_work_item(wanted, work_items=work_items, projection=projection)
+    if closed is None and _published_card(wanted, work_items)[0] is None:
+        closed = closed_cards((wanted,), projection=projection,
+                              claims=read_claims(vault_root))
+    return card_for_work_item(wanted, work_items=work_items, projection=projection,
+                              closed=closed)
 
 
 # --------------------------------------------------------------------------
@@ -403,6 +595,38 @@ def age_phrase(text: object) -> str:
     return ""
 
 
+#: AN AGE SAID IN THE FIRST PERSON IS THE NARRATOR'S (v359). *"This would have
+#: happened, probably when I was 4 or 5"*
+#: (``msg-2cffd995550f1320bc270f80``), answering "When did Dad wins pet snake at
+#: fair happen?", is the OWNER's age and not his father's — and this module
+#: files an age claim under the card node's subject, which would have measured
+#: 4 to 5 from the father's 1954 birth. It is lifehug#415's first gap in this
+#: module's own seat (there, the classifier filed *"when I was just off my
+#: mission, so like 22, 23"* on his father), and it is the rule
+#: :func:`aim_at_card` already keeps for a draft: the owner's own first person
+#: is never rewritten onto somebody else. So the age is filed as the
+#: narrator's — subject ``self``, still on the card's node — and the fold
+#: measures it from the owner's own birth (v346: an age is measured from its
+#: own subject's birth). A closed vocabulary, like :data:`AGE_PHRASE_RES`.
+NARRATOR_AGE_RE = re.compile(
+    r"\b(?:i\s+was|i\s+am|i['’]m|we\s+were|we\s+are|we['’]re)\s+"
+    r"(?:about\s+|around\s+|maybe\s+|only\s+|just\s+)?" + _AGE_TEXT,
+    re.IGNORECASE)
+
+#: Whose age a first-person age is: the owner's, under the one owner ref.
+NARRATOR_SUBJECT_REF = twi.OWNER_SUBJECT_REF
+
+
+def age_is_the_narrators(text: object, age: object) -> bool:
+    """Is ``age`` — the text :func:`age_phrase` read — said in the first
+    person (:data:`NARRATOR_AGE_RE`)?"""
+    wanted = collapsed_text(age)
+    if not wanted:
+        return False
+    return any(collapsed_text(match.group(1)) == wanted
+               for match in NARRATOR_AGE_RE.finditer(collapsed_text(text)))
+
+
 def answer_reading(text: object, *, captured: object = None,
                    question: object = None) -> dict | None:
     """What time this reply carries: ``{claim_type, temporal_value, basis,
@@ -447,13 +671,17 @@ def answer_reading(text: object, *, captured: object = None,
         }
     age = age_phrase(body)
     if age:
-        return {
+        reading = {
             "claim_type": "age",
             "temporal_value": age,
             "basis": "explicit",
             "confidence": ccl.AGE_CLAIM_CONFIDENCE,
             "reading": READING_AGE,
         }
+        if age_is_the_narrators(body, age):
+            # v359: whose age it is, which the card's node never decides.
+            reading["subject_ref"] = NARRATOR_SUBJECT_REF
+        return reading
     recency = chrono.from_recency(captured, body, collapsed_text(question))
     if recency is not None:
         return {
@@ -578,6 +806,10 @@ def answer_claim(card: object, reading: object, *, source_ref: object,
     person said it out loud; the RECORD's own basis stays whatever `chronology`
     gave it, which for a recency window is ``stated`` and is why the page
     renders it *placed by you* (v336). Nothing here re-decides either.
+
+    The subject is the card node's — unless the reading names its own
+    (``subject_ref``, v359's :data:`NARRATOR_AGE_RE`): a first-person age is
+    the narrator's, filed on the card's node under the owner.
     """
     view = card if isinstance(card, dict) else {}
     row = reading if isinstance(reading, dict) else {}
@@ -585,7 +817,10 @@ def answer_claim(card: object, reading: object, *, source_ref: object,
         "source_ref": source_ref,
         "source_kind": "conversation",
         "claim_type": collapsed_text(row.get("claim_type")),
-        "subject_mention": collapsed_text(view.get("subject_ref")),
+        # The node's subject, unless the reading itself says whose time it is
+        # (v359, `NARRATOR_AGE_RE`: a first-person age is the narrator's).
+        "subject_mention": (collapsed_text(row.get("subject_ref"))
+                            or collapsed_text(view.get("subject_ref"))),
         "event_kind": collapsed_text(view.get("event_kind")) or DEFAULT_EVENT_KIND,
         "event_ref": collapsed_text(view.get("node_ref")),
         "temporal_value": row.get("temporal_value"),
@@ -714,8 +949,15 @@ def _capture_keys() -> tuple[str, ...]:
 def empty_report() -> dict:
     """The shape :func:`place_answers` always returns, zeros included."""
     return {"rule": ANSWERING_A_CARD_PLACES_ITS_MOMENT,
+            # v359: the rule an answer to a card that has since closed is
+            # read under, and how many answers it reached.
+            "closed_card_rule": AN_ANSWER_OUTLIVES_ITS_CARD,
             "extractor_version": EXTRACTOR_VERSION,
             "answers": 0, "placed": 0, "tellings": 0, "filed": [],
+            "through_a_closed_card": 0,
+            # v359: every answer that placed nothing, by name, so a refusal is
+            # read on the report rather than inferred from a smaller number.
+            "unplaced": [],
             "by_reading": {name: 0 for name in READINGS},
             "refused": {name: 0 for name in REFUSALS},
             # v358: answers to a relation-word card, which carry a word about
@@ -747,6 +989,8 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
         return report
     work_items = pub.read_work_items(root) or {}
     projection = pub.read_projection(root) or {}
+    closed = _closed_cards_of(root, answers, work_items=work_items,
+                              projection=projection)
     for row in answers:
         report["answers"] += 1
         relation = _relation_answer(root, row, work_items=work_items, dry_run=dry_run,
@@ -754,13 +998,13 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
         if relation:
             continue
         card, refusal = card_for_answer(root, row["session_ref"],
-                                        work_items=work_items, projection=projection)
-        if card is None:
-            report["refused"][refusal] = report["refused"].get(refusal, 0) + 1
+                                        work_items=work_items, projection=projection,
+                                        closed=closed)
+        if card is None or not row["text"]:
+            _refuse(report, row, refusal or REFUSED_NO_WORDS, closed=closed)
             continue
-        if not row["text"]:
-            report["refused"][REFUSED_NO_WORDS] += 1
-            continue
+        if card["card"] == CARD_CLOSED:
+            report["through_a_closed_card"] += 1
         reading = answer_reading(row["text"], captured=row["captured"],
                                  question=card["question"]) or telling_reading()
         report["by_reading"][reading["reading"]] += 1
@@ -768,20 +1012,48 @@ def place_answers(vault_root: str | Path, *, sources: object = None,
             report["tellings"] += 1
         else:
             report["placed"] += 1
+        seen = {"card": card["card"], "asked_node_ref": card["asked_node_ref"]}
         if dry_run:
             report["filed"].append({"source_path": row["source_path"],
                                     "node_ref": card["node_ref"],
                                     "work_item_id": card["work_item_id"],
-                                    "reading": reading["reading"]})
+                                    "reading": reading["reading"], **seen})
             continue
         try:
-            report["filed"].append(file_answer(
+            report["filed"].append({**file_answer(
                 root, source_path=row["source_path"], card=card,
-                reading=reading, text=row["text"], now=now))
+                reading=reading, text=row["text"], now=now), **seen})
         except Exception as exc:  # noqa: BLE001 — one bad answer never stops the rest
             report["errors"].append(
                 f"{row['source_path']}: {type(exc).__name__}: {str(exc)[:200]}")
     return report
+
+
+def _closed_cards_of(root: Path, answers: list[dict], *, work_items: object,
+                     projection: object) -> dict[str, dict]:
+    """v359: the cards this run's answers name that the generation no longer
+    carries, re-derived ONCE for the whole run (:data:`AN_ANSWER_OUTLIVES_ITS_CARD`)
+    — and nothing read at all when every card is still published."""
+    unpublished = sorted({wid for wid in (work_item_of_session(row["session_ref"])
+                                          for row in answers)
+                          if _published_card(wid, work_items)[0] is None})
+    if not unpublished:
+        return {}
+    return closed_cards(unpublished, projection=projection, claims=read_claims(root))
+
+
+def _refuse(report: dict, row: dict, refusal: str, *, closed: dict) -> None:
+    """Count one refusal AND list it (v359): the answer, its card, the reason,
+    and the node that card asked about when the derivation found one."""
+    wanted = work_item_of_session(row["session_ref"])
+    report["refused"][refusal] = report["refused"].get(refusal, 0) + 1
+    report["unplaced"].append({
+        "source_path": row["source_path"],
+        "work_item_id": wanted,
+        "refused": refusal,
+        "asked_node_ref": collapsed_text(
+            (closed.get(wanted) or {}).get("asked_node_ref")) or None,
+    })
 
 
 def _relation_answer(root: Path, row: dict, *, work_items: object, dry_run: bool,
@@ -814,12 +1086,20 @@ def describe(report: object) -> list[str]:
     lines = [f"answers with a card: {row.get('answers', 0)}",
              f"placed: {row.get('placed', 0)}",
              f"filed as a telling only: {row.get('tellings', 0)}"]
+    if row.get("through_a_closed_card"):
+        lines.append("  through a card that has since closed: "
+                     f"{row['through_a_closed_card']}")
     for name, count in sorted((row.get("by_reading") or {}).items()):
         if count:
             lines.append(f"  {name}: {count}")
     for name, count in sorted((row.get("refused") or {}).items()):
         if count:
             lines.append(f"  refused {name}: {count}")
+    for unplaced in row.get("unplaced") or ():
+        asked = unplaced.get("asked_node_ref")
+        lines.append(f"  unplaced {unplaced.get('source_path')}: "
+                     f"{unplaced.get('refused')} ({unplaced.get('work_item_id')}"
+                     + (f", asked about {asked}" if asked else "") + ")")
     for filed in row.get("relation_words") or ():
         outcome = (f"relation word {filed.get('relation_gender')}"
                    if filed.get("relation_gender") and not filed.get("refused")
