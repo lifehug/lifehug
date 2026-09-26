@@ -1990,18 +1990,26 @@ def _not_same_blocked(view: TellingView, candidate: Candidate,
 
 def r1_conditions(view: TellingView, candidate: Candidate, *, survivors: int = 1,
                   active: Mapping[str, tuple] | None = None,
-                  entailed: Sequence[tuple] = ()) -> tuple:
+                  entailed: Sequence[tuple] = (),
+                  member_counts: Mapping[str, int] | None = None) -> tuple:
     """§4.2's seven, evaluated in §4.2's order, each with its own reason.
 
     Condition 5 is handed in as ``survivors`` because it is the only one that
     is not a property of the pair — it is a property of the whole retrieval,
     and computing it inside a pair would either be wrong or would make this
     function quadratic.
+
+    ``member_counts`` (:func:`episode_member_counts` of the same ``active``)
+    is handed in for the same reason: condition 7 asks how many tellings the
+    telling's own episode holds, which is a property of the whole binding
+    index, and counting it inside every pair made the binder quadratic in
+    the vault (v364).
     """
     active = dict(active or {})
     stems = candidate.stems
     independent = independent_signals(view, candidate)
-    joining_two_mature = candidate.mature and _home_is_mature(view, active)
+    joining_two_mature = candidate.mature and _home_is_mature(
+        view, active, member_counts=member_counts)
     blocked = _not_same_blocked(view, candidate, active, entailed)
     rows = [
         Condition(
@@ -2056,18 +2064,44 @@ def r1_conditions(view: TellingView, candidate: Candidate, *, survivors: int = 1
     return tuple(ordered[name] for name in R1_CONDITIONS)
 
 
-def _home_is_mature(view: TellingView, active: Mapping[str, tuple]) -> bool:
-    """Is the telling itself already inside an episode of two or more?"""
+def episode_member_counts(active: Mapping[str, tuple]) -> dict:
+    """``{episode_id: tellings whose grouping binding names it}`` over ``active``.
+
+    Condition 7's count, taken ONCE per binding index. It used to be taken
+    inside :func:`_home_is_mature` for every pair: every telling's every
+    candidate re-walked every active binding, so the binder was
+    O(pairs x bindings). On the owner's vault (1,261 nodes, ~1,330 bound
+    tellings, 83,600 condition-7 evaluations) that was 111 million
+    `grouping_binding` calls — 80% of a 572 s `bind-episodes --apply` — and
+    the hosted worker killed the binder at its 600 s budget on every run from
+    2026-09-25 on, holding the vault lease while the owner's filings waited.
+    Same keys, same `grouping_binding`, same collapsed episode id: the counts
+    are exactly what the per-pair loop counted.
+    """
+    counts: dict = {}
+    for telling_ref in active:
+        row = efc.grouping_binding(telling_ref, active)
+        if row is None:
+            continue
+        episode_id = collapsed_text(row.get("episode_id"))
+        counts[episode_id] = counts.get(episode_id, 0) + 1
+    return counts
+
+
+def _home_is_mature(view: TellingView, active: Mapping[str, tuple], *,
+                    member_counts: Mapping[str, int] | None = None) -> bool:
+    """Is the telling itself already inside an episode of two or more?
+
+    ``member_counts`` is :func:`episode_member_counts` of this same
+    ``active``; the binder's own loop always hands it in. Without it the
+    count is taken here, once, which is the old per-call cost.
+    """
     binding = efc.grouping_binding(view.telling_ref, active)
     if binding is None:
         return False
     episode_id = collapsed_text(binding.get("episode_id"))
-    count = 0
-    for telling_ref in active:
-        row = efc.grouping_binding(telling_ref, active)
-        if row is not None and collapsed_text(row.get("episode_id")) == episode_id:
-            count += 1
-    return count >= MATURE_EPISODE_MEMBERS
+    counts = member_counts if member_counts is not None else episode_member_counts(active)
+    return counts.get(episode_id, 0) >= MATURE_EPISODE_MEMBERS
 
 
 # --------------------------------------------------------------------------
@@ -2157,25 +2191,30 @@ def verdict_for(view: TellingView, candidate: Candidate, conditions: Sequence[Co
 
 
 def _pairs_for(view: TellingView, units: Mapping[str, Candidate], *, frames: object,
-               active: Mapping[str, tuple], entailed: Sequence[tuple]) -> list:
+               active: Mapping[str, tuple], entailed: Sequence[tuple],
+               member_counts: Mapping[str, int] | None = None) -> list:
     """Every pair one telling produces, with §4.2 evaluated twice.
 
     Twice on purpose: conditions 1-4 decide who SURVIVES, and condition 5 is a
     fact about the survivors — so the first pass counts them and the second
     pass records the seven conditions each pair actually met.
     """
+    if member_counts is None:
+        member_counts = episode_member_counts(active)
     retrieved = retrieve(view, units, frames=frames)
     home = unit_of(view.telling_ref, units)
     survivors = 0
     for candidate, signals in retrieved:
         rows = r1_conditions(view, candidate, survivors=1,
-                             active=active, entailed=entailed)
+                             active=active, entailed=entailed,
+                             member_counts=member_counts)
         if all(row.passed for row in rows[:4]):
             survivors += 1
     found = []
     for candidate, signals in retrieved:
         rows = r1_conditions(view, candidate, survivors=survivors,
-                             active=active, entailed=entailed)
+                             active=active, entailed=entailed,
+                             member_counts=member_counts)
         pair = Pair(
             telling_ref=view.telling_ref,
             home_key=home or view.telling_ref,
@@ -3677,6 +3716,7 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
     records = ef.normalize_episode_records(episode_records)
     active = efc.active_binding_index(records["bindings"])
     entailed = efc.entailed_not_same(records["bindings"])
+    member_counts = episode_member_counts(active)
 
     result = BinderPlan(views=views, containment_authority=authority)
     dropped = 0
@@ -3684,7 +3724,8 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
         view = views[telling_ref]
         if not view.eligible:
             continue
-        found = _pairs_for(view, units, frames=frames, active=active, entailed=entailed)
+        found = _pairs_for(view, units, frames=frames, active=active, entailed=entailed,
+                           member_counts=member_counts)
         home = unit_of(telling_ref, units)
         considered = sum(1 for key in units
                          if key != home and telling_ref not in units[key].members)
@@ -5014,6 +5055,7 @@ __all__ = [
     "prospective_episode_id",
     "question_row",
     "r1_conditions",
+    "episode_member_counts",
     "read_binder_receipt",
     "read_question_contexts",
     "read_vault_inputs",
