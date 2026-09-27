@@ -17,8 +17,9 @@ non-mutating. If a run fails, report its job id and fixed failure code; never
 print the retained payload or blindly replay a non-idempotent job.
 
 An expired or exhausted queue does not stop daily selection. Fallback uses
-confirmed delivery history: another unanswered question gets preference over
-the last delivery, then the least-delivered cohort feeds category rotation.
+confirmed delivery history: only never-sent questions are rotated, an answered
+question is never sent again, and a sent-but-unanswered one returns only when
+nothing unasked remains (v368 never-resend, `delivery_guard`).
 Quiet-day re-engagement applies this within its existing light/non-focus pool.
 This limits repeats; it does not repair a failed weekly job or malformed bank
 content. Recover the job through its supported workflow, never check off or

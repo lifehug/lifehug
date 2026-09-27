@@ -104,6 +104,9 @@ READ_ONLY_COMMANDS = frozenset({
     # deterministic, zero AI, zero writes — pure reads of roadmap.json and
     # focus_recommendations.json.
     "focus-dupes",
+    # v368 never-resend: "is this question already sent/answered?" — reads
+    # the bank, rotation, queue and answers/, writes nothing.
+    "delivery-check",
     "followups-prompt", "followups-status", "interview-pack", "next", "notify",
     "focus-candidate-evals", "focus-candidate-prompt", "entity-candidate-evals", "entity-candidate-prompt",
     "planner-report", "progress", "quality-stats", "question-candidate-evals",
@@ -448,6 +451,17 @@ def cmd_ai_status(_args: argparse.Namespace) -> int:
 
 def cmd_next(_args: argparse.Namespace) -> int:
     return run_python("ask.py", ["--dry-run"])
+
+
+def cmd_delivery_check(args: argparse.Namespace) -> int:
+    argv = [args.question_id]
+    for ids in args.also_sent or []:
+        argv += ["--also-sent", ids]
+    for ids in args.also_answered or []:
+        argv += ["--also-answered", ids]
+    if args.json:
+        argv.append("--json")
+    return run_python("delivery_guard.py", argv)
 
 
 def cmd_compile(args: argparse.Namespace) -> int:
@@ -3619,6 +3633,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("next", help="Preview the next question without mutating state")
     p.set_defaults(func=cmd_next)
+
+    p = sub.add_parser(
+        "delivery-check",
+        help="Never-resend rule: may this question be sent now? (exit 0 yes, 3 refused)",
+    )
+    p.add_argument("question_id")
+    p.add_argument("--also-sent", action="append", default=[], metavar="IDS")
+    p.add_argument("--also-answered", action="append", default=[], metavar="IDS")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_delivery_check)
 
     p = sub.add_parser("compile", help="Compile the private wiki")
     p.add_argument("--dry-run", action="store_true")

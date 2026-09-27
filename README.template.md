@@ -110,8 +110,9 @@ The daily picker serves the first usable question in the weekly queue even
 after quiet days. If that queue is missing, expired, exhausted, or otherwise
 cannot supply an unanswered queued item, quiet re-engagement gets the next
 choice after the configured silence threshold; ordinary rotation follows when
-the threshold is not met. Both fallback paths prefer another unanswered
-question over the last delivery and then the least-delivered cohort. Sending a
+the threshold is not met. Both fallback paths choose among questions never sent. An answered question
+is never sent again, and a sent-but-unanswered one comes back only when
+nothing unasked remains (v368). Sending a
 question never checks it off; a sole unanswered question remains available.
 
 ## Studio: Projects & Pieces

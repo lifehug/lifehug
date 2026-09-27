@@ -210,8 +210,10 @@ AI on this path) → send + pin on Telegram → confirm delivered. Handles
 pass-completion prompts too.
 
 Normal delivery honors the healthy weekly queue. If it expires or runs out,
-fallback prefers another unanswered question over the last delivery, then
-uses the least-delivered cohort for category rotation. Quiet-day re-engagement
+fallback rotates among questions never sent.
+
+**Never re-send (v368, owner ruling 2026-09-27).** An answered question — bank line checked or `answers/<id>.md` present — is never sent again (`delivery_guard.AN_ANSWERED_QUESTION_IS_NEVER_SENT_AGAIN`). A sent, unanswered question is not repeated while any unsent queued item or unasked bank question exists (`A_SENT_QUESTION_WAITS_UNTIL_NOTHING_UNASKED_REMAINS`); only then is one re-offered, least-offered first, never yesterday's when another exists. A stale queue head that already went out is skipped, and an expired queue falls back to the bank's next unasked question. `lifehug.py delivery-check <id> --json` asks the same rule before a send (exit 3 = refused); hosts add records they hold with `--also-sent/--also-answered`.
+ Quiet-day re-engagement
 uses the same history preference within its existing light/non-focus pool,
 before choosing the shortest wording. Only confirmed delivery advances this
 history; it never answers or edits a question. A sole unanswered question
@@ -311,10 +313,35 @@ samples **pending bank questions** under a stack of weights and caps:
   Saturated Focuses fade to maintenance weight; no single Focus may take
   more than its cap (`DEFAULT_CAP`, or `FINISHING_CAP` while a Focus is
   `finishing` — `:399`).
-- **Group caps** — `GROUP_CAPS` (`:78`): `timeline 0.01 (one a week) ·
+- **Group caps** — `GROUP_CAPS`: `timeline 0.01 (one a week) ·
   main 0.50 · project 0.35 ·
-  focus 0.25` of the week's slots, enforced (not decorative) since the
-  group-cap fix.
+  focus 0.50` of the week's slots, enforced (not decorative) since the
+  group-cap fix. The `focus` group is the people, so 0.50 is the owner's
+  "people focuses as a group up to 50%" (v368, ruling 2026-09-27 —
+  `PEOPLE_AS_A_GROUP_UP_TO_HALF`); the pre-v368 0.25 held every person
+  together to two of eight slots. A copied 0.25 in
+  `state/planner_state.json` migrates on read (`migrate_group_caps`).
+  <!-- parity: question_planner.SINGLE_FOCUS_CAP = 0.3 -->
+- **No single Focus over 30%** — `SINGLE_FOCUS_CAP` 0.30 clamps every
+  Focus's cap, the primary life story's 0.40 included
+  (`NO_SINGLE_FOCUS_OVER_THIRTY_PERCENT`); counted as `ceil`, so three of
+  eight ("Etherfuse was at its cap, not over it"). A `finishing` Focus
+  keeps `FINISHING_CAP`.
+- **The people lane** (v368) — after the self floor and chapter boost, the
+  people half is filled one person at a time: no person takes a second slot
+  while another person with an open question has none; each draw picks a
+  PERSON (their questions share the Focus weight) rather than the biggest
+  backlog; a saturated person keeps weight `PERSON_ROTATION_FLOOR` 0.8; and
+  the people who had no question in the week being replaced go first
+  (`previous_queue_focuses`). "The rest of the week to my-life and projects"
+  is then ordinary weighted sampling.
+- **Interleave** (v368) — `interleave_week` orders the built week, which is
+  delivered in list order, so no two consecutive days share a group where
+  the mix allows (and therefore never a Focus); when the mix forces a
+  repeat, the fullest group goes first so repeats are as few as the counts
+  force, and a forced repeat avoids the same Focus
+  (`NO_TWO_DAYS_IN_A_ROW_FROM_ONE_GROUP`, "that's sorting"). Deterministic
+  for the week's seed.
 - **Least-covered category first** — `enriched_pending_questions`
   (`:553`) sorts the pool by `(objective first, category_ratio ascending,
   non-focus groups first, question id)` (`:649–654`), so within the same
