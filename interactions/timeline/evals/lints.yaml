@@ -1,11 +1,16 @@
 # Timeline eval gates — flat scalar subset only
 cap.reply_chars: 2200
-# timeline-chronology (v195, Design §D): the five timeline gate classes,
-# scored over the ten timeline goldens. "Never pressure" is deliberately NOT
+# timeline-chronology (v195, Design §D): the timeline gate classes,
+# scored over the timeline goldens. "Never pressure" is deliberately NOT
 # here: the parent Conversation contract and arc_walk's no_pressure already
 # own that rule, and a second definition is the defect the recurring-defect
 # doctrine forbids.
-timeline_gates.no_year_opener.compliance: 1.0
+# v366: opening with a year is a preference, not a seat-fail. The class is
+# still scored — a year-first opener lowers compliance — and the threshold
+# does not hard-fail the seat. A natural "what year was that" mid-story must
+# not contort the model. Asking a year on an early rung still shows up in
+# the score.
+timeline_gates.no_year_opener.compliance: 0
 timeline_gates.one_question_per_reply.compliance: 1.0
 timeline_gates.offers_bounds.compliance: 1.0
 timeline_gates.accepts_defer.compliance: 1.0
@@ -16,9 +21,10 @@ timeline_gates.never_invents_a_date.compliance: 1.0
 timeline_gates.one_per_conversation.compliance: 1.0
 # v198 (ADR 0025's suggestive-interviewing hazard, Lindsay et al. 2004): true
 # photographs plus suggestive interviewing produced false memories in 65-66%
-# of participants. A dating probe backed by the person's own evidence is
-# that configuration exactly, so the session never proposes a date and
-# asks for agreement. Shared verbatim with the landmarks lane.
+# of participants. Naming a date and demanding agreement is that
+# configuration. Stating a derivation ("that puts it around 1986") is
+# allowed. This gate stays hard for the demand, not for mentioning a year.
+# Shared verbatim with the landmarks lane.
 timeline_gates.never_proposes_a_date.compliance: 1.0
 # v362 (owner, 2026-09-26, `timeline_interaction
 # .A_TIMELINE_ACTION_CONVERSATION_DOES_ONE_JOB`): a conversation opened from a

@@ -161,9 +161,11 @@ full at `system/research/chronology.md` (research queue:
    **[shipped v195, ADR 0024: the `timeline` child interaction
    (`interactions/timeline/`, `system/timeline_interaction.py`) implements
    the playbook as `PLAYBOOK_STEPS`; dates are stored as intervals with a
-   basis (`system/chronology.py`, EDTF/ISO 8601-2); "never ask what year"
-   survives as BOTH `arc_planner.BANNED_PHRASE` and the
-   `timeline_gates.no_year_opener` lint, pinned against each other.]**
+   basis (`system/chronology.py`, EDTF/ISO 8601-2); planned probes still
+   refuse `arc_planner.BANNED_PHRASE`. v366: inside the Timeline interaction
+   that preference is scored by `timeline_gates.no_year_opener` and is not a
+   seat-fail — a natural year question mid-conversation is allowed.
+   Fabricated dates and naming a date to demand agreement stay hard.]**
 
 **How that chronology is DISPLAYED** is a separate literature and has its own
 corpus: `system/research/chronology-vis.md` (v206). Its four headline findings:

@@ -23,8 +23,10 @@ OUTPUT FORMAT appendix). This extension adds exactly one optional field,
 - **Precision so far**: {precision_so_far}
 
 - `open` (the first reply): name what you are curious about in ONE warm
-  sentence — the stretch or the moment, never the word "gap", never a
-  calendar year — then ask the probe. That is the whole opener.
+  sentence — the stretch or the moment. Prefer not to open with a calendar
+  year; a year question is fine when the conversation naturally calls for
+  it. Prefer not to call it a "gap". Then ask the probe. That is the whole
+  opener.
 - `place` (every reply after): receive what they just said the way any
   Conversation turn would, then ask the next thing that would actually
   narrow it. If they went somewhere else, go with them; the placement can
@@ -117,8 +119,9 @@ thread, what is already known about it, and which rung of the ladder is open.
 The whole conversation is inside it.
 
 - **Open in the era, not in a gap.** Say the era by ITS OWN NAME in one warm
-  sentence — "College", not "the 2007–2011 period", never "the gap", never a
-  calendar year they did not give you — and ask the rung's question.
+  sentence — "College", not "the 2007–2011 period". Prefer that name to a
+  calendar year; do not state a year they did not give you. Prefer not to
+  say "the gap". Then ask the rung's question.
 - **The ladder is theirs to stop.** Bounds first if it has no end yet, then
   where they were living, then the biggest undated thing inside it, then
   precision — and precision only while it stays cheap. A season, a stretch of

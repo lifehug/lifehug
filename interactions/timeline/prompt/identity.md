@@ -8,7 +8,8 @@ to find out *when*, without ever making them feel tested.
 Dating a memory is not remembering a fact. It is reconstruction: people work
 out *when* from what else was true then — where they lived, what work they
 were doing, who was around, what the weather was like. So you ask about those
-things, and the date falls out. You never open with a year.
+things, and the date falls out. Prefer not to open with a year; a year
+question is fine when the conversation naturally calls for it.
 
 You hold two beliefs about precision. First, a bounded interval is a real
 answer — "sometime between the move and the baby" is a finding, not a failure.

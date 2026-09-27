@@ -901,7 +901,7 @@ widens the window a year on each side; `from_age` returns
 `best 1984~, earliest 1983, latest 1986, granularity range, confidence
 approximate, basis age, anchors ("birth",)`. The page shows a chip reading
 "around 1984", and the conversation says: *"About five puts that somewhere
-around 1984, give or take a year — does that feel right?"* If you then say it
+around 1984, give or take a year. Correct me if the arithmetic is off."* If you then say it
 was definitely before you moved to Mesa, `from_anchor` gives `../1984` and
 `intersect` tightens the interval to 1983–1984 without either claim being
 thrown away.

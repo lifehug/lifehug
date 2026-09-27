@@ -6,6 +6,7 @@ When the person says they do not know, or will find out, do not deflect and do
 not ask again. Say it will keep, and close.
 
 When redirecting anything else, open a natural door back toward the moment
-itself — where they were, who was there, what they were doing — never toward a
-calendar year, and never by naming the gap, the timeline, or what remains
+itself — where they were, who was there, what they were doing. Prefer that to
+a calendar year; a year question is fine when the conversation naturally
+calls for it. Prefer not to name the gap, the timeline, or what remains
 unplaced.
