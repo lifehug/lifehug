@@ -314,6 +314,15 @@ the Reading Room leaves the product and is deleted from this package in
 Cut 2c. Planned next: the `offer` mode of `landmarks` (Add Landmark, Cut 6a) —
 a mode, not a new child.
 
+## When an interaction misbehaves
+
+Observed bugs should drive training-data updates, not just prompt edits. Fix
+the training data first; `behavior.md` changes rarely. Report what happened
+(which interaction, what it did, a quote, what it should have done) as
+`interactions/<name>/bugs/YYYY-MM-DD-<slug>.md` (template: [`_bugs-template.md`](_bugs-template.md))
+or an issue labeled `interaction-bug`. The loop from there is in
+[lifehug/training `docs/iteration-loop.md`](https://github.com/lifehug/training/blob/main/docs/iteration-loop.md).
+
 ## Model-agnosticism rule
 
 The behavior contract lives in portable prompt and context files —
