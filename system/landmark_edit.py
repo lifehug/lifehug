@@ -92,6 +92,33 @@ WORD_GENDER = {"dad": "male", "father": "male", "grandpa": "male", "grandfather"
                "grandmother": "female", "sister": "female", "daughter": "female",
                "wife": "female"}
 
+#: v366 (owner, 2026-09-27): *"I've tried to edit the Harvey birthday many times
+#: and it seems to say it's filed but doesn't work"* — and the ruling that
+#: settles it: *"get rid of the play button next to things because we now have
+#: the edit icon"*; the row's pencil opens the form, and saving a date there IS
+#: the settlement. His Born of 2021-10-11 was filed, and the grid kept its ⚠
+#: because the "2020" readings (a roster landmark entry's classification, a
+#: conversation) came from sources `_supersede_landmark_dates` never looks at:
+#: it retires only the landmark ladder's own claims for the same entry key. The
+#: save even MINTED the card on a vault where the two readings had sat on two
+#: nodes, because his "Harvey" entry joined them into one.
+#:
+#: THE RULE: a date he types on the person form is his answer to every reading
+#: of that milestone. After it files and publishes, every ACTIVE date claim on
+#: that person's milestone nodes (`timeline_views.milestone_nodes`, the grid's
+#: own grouping) that CANNOT be true at the same time as his date
+#: (`chronology.dates_agree`) is superseded by one correction, returned in
+#: ``corrections`` so undo reinstates it. A reading that agrees with it (a
+#: coarser "2021", a ``10/11/2021`` range) stays as supporting evidence. The
+#: sources are never touched.
+A_FORM_DATE_SETTLES_ITS_RIVALS = (
+    "a born/married/divorced/died date the owner saves on the person form "
+    "settles that milestone: every active reading on the person's milestone "
+    "nodes that cannot be true at the same time as his date is superseded by "
+    "one undoable correction, and readings that agree with it stay as evidence"
+)
+SETTLE_SCOPE = "cornerstones/settled"
+
 EDIT_SCOPE = "landmarks/{domain}"
 PERSON_SCOPE = "cornerstones/others"
 FORM_MARK = "owner"
@@ -477,7 +504,80 @@ def edit_person(vault_root: object, payload: object) -> dict:
             _save_person(root, timeline, body, summary)
         else:
             raise LandmarkEditError(f"unknown mode {mode!r}")
+    if mode == "save":
+        # :data:`A_FORM_DATE_SETTLES_ITS_RIVALS` reads the milestone nodes the
+        # fold just published (his new record may have joined two of them),
+        # so it runs after the batch's publish, and republishes only when it
+        # retired something.
+        settled = _settle_rival_dates(root, body, summary)
+        if settled:
+            with timeline.landmark_publication_batch(root):
+                timeline.redraw_landmarks()
     return summary
+
+
+#: The person form's date fields -> the grid's milestone (`timeline_views.COLUMNS`).
+_FIELD_MILESTONE = (("born", "birth"), ("died", "death"), ("married", "wedding"),
+                    ("divorced", "divorce"))
+
+
+def _settle_rival_dates(root: Path, body: dict, summary: dict) -> list[str]:
+    """:data:`A_FORM_DATE_SETTLES_ITS_RIVALS`. Returns the superseded claim ids."""
+    import cornerstones as cs  # noqa: PLC0415
+    import landmark_projection as lp  # noqa: PLC0415
+    import temporal_publication as pub  # noqa: PLC0415
+    import temporal_store as store  # noqa: PLC0415
+    import timeline_views as tv  # noqa: PLC0415
+
+    married = body.get("married") if isinstance(body.get("married"), dict) else {}
+    said = {"born": body.get("born"), "died": body.get("died"),
+            "divorced": body.get("divorced"), "married": married.get("date")}
+    stated = {milestone: form_date(said[field]) for field, milestone in _FIELD_MILESTONE}
+    stated = {milestone: record for milestone, record in stated.items() if record}
+    if not stated:
+        return []
+    projection = pub.read_projection(root) or {}
+    nodes = [n for n in projection.get("nodes") or () if isinstance(n, dict)]
+    if not nodes:
+        return []
+    roster, owner_names = pub.owner_identity_inputs(root)
+    relations = cs.Relations(roster, lp.load_landmark_sources(root), owner_names=owner_names)
+    person_ref = collapsed_text(body.get("person_ref"))
+    category = collapsed_text(body.get("category")).casefold()
+    is_self = category == "self" or person_ref == "self"
+    person = cs.SELF if is_self else (relations.person_for(person_ref)
+                                      or relations.person_for(collapsed_text(body.get("name"))))
+    if person is None:
+        return []
+    key = cs.SELF if person == cs.SELF else getattr(person, "key", None)
+    couple = person == cs.SELF or getattr(person, "relationship", "") == "spouse"
+    held = tv.milestone_nodes(nodes, relations)
+    index = store.fold_active_index(root)
+    active = {row["claim_id"]: row for row in store.active_claims(index)}
+    rivals: list[str] = []
+    for milestone, record in stated.items():
+        whose = cs.SELF if milestone in ("wedding", "divorce") and couple else key
+        for node in held.get((milestone, whose)) or ():
+            for claim_id in node.get("input_claim_refs") or ():
+                row = active.get(collapsed_text(claim_id))
+                if row is None or collapsed_text(row.get("claim_type")) != "date":
+                    continue
+                reading = chrono.from_dict(row.get("temporal_value"))
+                if reading is None or chrono.dates_agree(record, reading):
+                    continue
+                if row["claim_id"] not in rivals:
+                    rivals.append(row["claim_id"])
+    if not rivals:
+        return []
+    who = collapsed_text(body.get("name")) or ("self" if is_self else person_ref)
+    correction = store.supersede_claims(
+        root, sorted(rivals), scope=SETTLE_SCOPE,
+        reason=(f"settled by the owner's person form for {who} "
+                f"({', '.join(f'{m} {chrono.to_edtf(chrono.from_dict(r))}' for m, r in sorted(stated.items()))}); "
+                "person-edit undo reinstates it"))
+    summary["corrections"].append(correction.correction_id)
+    summary["settled_claims"] = sorted(rivals)
+    return rivals
 
 
 def _delete_other(root: Path, body: dict, summary: dict) -> None:
@@ -628,7 +728,7 @@ def main(verb: str, raw: str, vault_root: object) -> tuple[int, dict]:
 
 
 __all__ = [
-    "CATEGORY_RELATIONSHIP", "FORM_KINDS", "LandmarkEditError", "OWNER_EDIT_IS_EXACT",
+    "A_FORM_DATE_SETTLES_ITS_RIVALS", "CATEGORY_RELATIONSHIP", "FORM_KINDS", "LandmarkEditError", "OWNER_EDIT_IS_EXACT",
     "SCHOOL_LEVELS", "build_record", "comparable", "drawn_with_refs", "edit_digest",
     "edit_landmark", "edit_person", "form_date", "main",
 ]

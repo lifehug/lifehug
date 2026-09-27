@@ -124,7 +124,14 @@ asks you for a year.
   `disagreement` (an open contradiction on it) or `missing`; a death nobody
   has told is `not_owed`, never asked. Each person is shown by what you call
   them ("Dad", "Mom", "AJ"). A row that needs settling carries its Play: the
-  open work item on it, else its landmarks ladder.
+  open work item on it, else its landmarks ladder. **A date saved on the
+  person form settles its cell** (v366, owner 2026-09-27: the row's pencil
+  opens the form, and saving a date there IS the settlement): every active
+  reading on that person's milestone that cannot be true at the same time as
+  the date he typed is superseded by one undoable correction, so ⚠ becomes ✓
+  and the contradiction card closes; a reading that agrees with it (a coarser
+  year, a day/month-ambiguous range that holds it) stays as evidence
+  (`landmark_edit.A_FORM_DATE_SETTLES_ITS_RIVALS`).
 - **Landmark brackets** (v365, owner 2026-09-26) — the thin lines left of
   the Timeline's rows, one lane per kind (home, school, work, mission when
   mentioned), ONE colour per kind: *"I want the bands to be continuous. This

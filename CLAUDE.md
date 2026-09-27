@@ -100,6 +100,9 @@ much it would place (`temporal_work_items.A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`)
 a cornerstone-type event about anyone else is asked once and accepted at any
 grain. When you talk to the owner about a date, show a day only if he or a
 document gave it; a day you worked out is its month.
+A date he saves on the person form (`person-edit`) is his answer to that
+milestone: it supersedes every reading that cannot be true beside it, undoably
+(`landmark_edit.A_FORM_DATE_SETTLES_ITS_RIVALS`, v366).
 
 **Timeline gestures (v365, owner 2026-09-26).** A drag on the Timeline says
 one of three things, and each is the person's own statement, undoable, with
