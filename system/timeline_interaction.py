@@ -1256,6 +1256,37 @@ AN_ANSWER_WITH_NOTHING_TO_RETIRE_IS_PLACED = (
 )
 
 
+#: v367 (owner, staging 2026-09-27). He answered a precision card "This
+#: happened at the same time we moved out … When I moved into BJ's house,
+#: that's when 701 was foreclosed on." The turn's model had no date to put in
+#: `placed` — there is none in the words — so the answer filed NOTHING on the
+#: turn: no job, no pending state, the card left exactly where it was, while
+#: the dated answer he gave a minute earlier left Needs Placing at once. A
+#: reply the card seat itself can read (`answer_placement.answer_reading`: a
+#: date in a sentence, an age, a grade, a landmark he tied it to) is filed now
+#: on the same seat, whatever the model's own `placed` said.
+A_REPLY_THE_CARD_SEAT_CAN_READ_IS_FILED_NOW = (
+    "an answer to a card with nothing to retire is filed on the turn when "
+    "either the conversation's placed record or the card seat's own reading "
+    "of the words carries time; only a reply neither can read waits for the "
+    "sweep"
+)
+
+
+def reply_carries_time(text: object) -> bool:
+    """Does the card seat's own reader find time in this reply? Never raises:
+    a host whose sandbox cannot import the reader answers ``False``, which is
+    the pre-v367 behavior."""
+    try:
+        import answer_placement  # noqa: PLC0415 — heavy, and only needed here
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        return answer_placement.answer_reading(text) is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def work_item_resolution(target: object, placed: object, *,
                          resolution_text: str) -> dict | None:
     """The kwargs for `mirror.resolve_actionable_item`, or `None` to write nothing.
@@ -1286,7 +1317,10 @@ def work_item_resolution(target: object, placed: object, *,
         # waited for the daily sweep while the card stayed in front of him.
         # When the reply actually dated it, the answer is PLACED now, through
         # the card seat (`answer_placement.place_card_answer`).
-        if chrono.from_dict(placed) is None:
+        # v367 (:data:`A_REPLY_THE_CARD_SEAT_CAN_READ_IS_FILED_NOW`): the
+        # model's `placed` is one reader; the card seat's own reading of the
+        # words is the other, and it is the one that files.
+        if chrono.from_dict(placed) is None and not reply_carries_time(text):
             return None
         return {
             "work_item_id": row["work_item_id"],

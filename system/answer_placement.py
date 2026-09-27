@@ -301,7 +301,11 @@ READING_TELLING = "telling_only"
 #: v360 (owner, 2026-09-25): a school grade said of a person ("middle of sixth grade
 #: for James", `chronology.A_SCHOOL_GRADE_IS_AN_AGE_ON_THE_SCHOOL_CALENDAR`).
 READING_GRADE = "stated_grade"
-READINGS = (READING_DATE, READING_AGE, READING_GRADE, READING_RECENCY, READING_TELLING)
+#: v367 (owner, staging 2026-09-27): the moment tied to a landmark he gave —
+#: "when I moved into BJ's house" (:data:`A_LANDMARK_HE_TIES_IT_TO_PLACES_IT`).
+READING_ANCHOR = "stated_landmark"
+READINGS = (READING_DATE, READING_AGE, READING_ANCHOR, READING_GRADE, READING_RECENCY,
+            READING_TELLING)
 
 
 # --------------------------------------------------------------------------
@@ -798,6 +802,48 @@ def date_in_words(text: object):
     return chrono.parse_stated_date(match.group(1))
 
 
+#: v367 (owner, staging 2026-09-27). The card asked "What year did the
+#: foreclosure on 701 North Williams happen?" and he answered *"This happened at
+#: the same time we moved out, when my parents moved into BJ's house and I
+#: moved in with them. When I moved into BJ's house, that's when 701 was
+#: foreclosed on."* No number — and still exactly as placed as a year: BJ's
+#: House is a stay he gave (July 2009 on), and the moving day is its first
+#: month. The reply read as a telling and filed no time, so the card came back.
+#: "What the owner says is the placement" (2026-09-25) covers a landmark he
+#: names as surely as a date he names; "a place mention ties to a landmark he
+#: gave" says which one. The reply becomes a ``relative_order`` claim against
+#: the moving day's handle, which the fold resolves to that stay's start
+#: (`landmark_identity.A_MOVE_INTO_A_HOUSE_IS_THAT_STAYS_START`) at the month
+#: the stay carries — never finer.
+A_LANDMARK_HE_TIES_IT_TO_PLACES_IT = (
+    "a reply to a card that ties the moment to moving into or out of a house "
+    "he gave — when, at the same time as, right before or after — is a "
+    "relative_order claim against that moving day, placed at the stay's own "
+    "start or end month; a reply naming two different moving days stays a "
+    "telling"
+)
+
+
+def anchor_reading(text: object) -> dict | None:
+    """:data:`A_LANDMARK_HE_TIES_IT_TO_PLACES_IT` — the landmark a reply ties
+    its moment to, as a ``relative_order`` reading, or ``None``."""
+    import classifier_claims as ccl  # noqa: PLC0415 — avoids an import cycle
+    import landmark_identity as lid  # noqa: PLC0415
+
+    clauses = lid.move_clauses(collapsed_text(text))
+    distinct = {(row["relation"], row["handle"].lower()) for row in clauses}
+    if len(distinct) != 1:
+        return None
+    row = clauses[0]
+    return {
+        "claim_type": "relative_order",
+        "temporal_value": {"relation": row["relation"], "anchors": [row["handle"]]},
+        "basis": "explicit",
+        "confidence": ccl.ORDER_CLAIM_CONFIDENCE,
+        "reading": READING_ANCHOR,
+    }
+
+
 def answer_reading(text: object, *, captured: object = None,
                    question: object = None) -> dict | None:
     """What time this reply carries: ``{claim_type, temporal_value, basis,
@@ -814,6 +860,9 @@ def answer_reading(text: object, *, captured: object = None,
        measures against the SUBJECT's own birth (v346's
        ``BIRTH_ANCHOR_TIERS``), so *"he was 4"* about a child the roster knows
        places without anybody naming a year;
+       (v367) then a LANDMARK they tied it to (:func:`anchor_reading`, *"when
+       I moved into BJ's house"*) — a ``relative_order`` claim the fold places
+       at that stay's start or end month;
     3. a RECENCY cue plus the message's own capture date
        (`chronology.from_recency`) — a ``date`` claim whose record is
        ``basis: stated``, because the person is the one saying it was recent
@@ -854,6 +903,11 @@ def answer_reading(text: object, *, captured: object = None,
         if age_is_the_narrators(body, age):
             # v359: whose age it is, which the card's node never decides.
             reading["subject_ref"] = NARRATOR_SUBJECT_REF
+        return reading
+    # v367: a landmark he tied it to — the classifier ladder's own third rung
+    # (`classifier_claims.temporal_reading`'s `date.anchor_ref`).
+    reading = anchor_reading(body)
+    if reading is not None:
         return reading
     reading = grade_reading(body)
     if reading is not None:
