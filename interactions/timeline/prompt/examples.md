@@ -106,4 +106,4 @@ Nobody said 1993 and nothing on the timeline implies it.
 
 ## Bad — naming a date and demanding agreement
 
-"Was it 1984? Does that feel right?"
+"Was it 1984?"
