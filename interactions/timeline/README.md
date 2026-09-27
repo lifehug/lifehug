@@ -2,15 +2,21 @@
 
 `timeline` is an independently registered, auditable Interaction for placing a
 memory in time. It exact-composes Conversation by reference and owns only the
-one goal Conversation cannot carry: **place a memory in time without ever
-demanding a year.**
+one goal Conversation cannot carry: **place a memory in time.** Timeline is
+not Conversation: Conversation tries to get the person to open up, and
+Timeline tries to reach a placement. The asking doctrine is preference-based,
+not prohibition-based — see [`prompt/behavior.md`](prompt/behavior.md). Prefer
+the moment, where they were living, or what they were doing. A year question
+is fine when the conversation naturally calls for it.
 
 **Asking stays anchor-first; storage gains real dates.** The package's old
 doctrine — the planner's `BANNED_PHRASE`, the compiler's "absolute years are
 deliberately NOT inferred" — was right about ASKING and wrong about STORAGE
 (ADR 0024, owner ruling 1). Dating a memory is reconstructive inference
-(Friedman 1993), so a year prompt buys a rounded, telescoped guess and stays a
-lint. But a date the system can DERIVE from what the person did say — their
+(Friedman 1993), so a year prompt can buy a rounded, telescoped guess. That
+is a preference, not a hard lint failure: `timeline_gates.no_year_opener` is
+still scored and does not fail the seat (v366). But a date the system can
+DERIVE from what the person did say — their
 age against their birthday, a landmark plus a before/after — is real, and it
 is stored as an interval with a granularity, a confidence, a basis, its
 anchors, and its provenance (`chronology.DateRecord`).
@@ -33,7 +39,10 @@ remembered nowhere: the unknown simply stays outstanding, keeps its star and
 its leverage, and is offered again whenever the ordering says it is worth
 offering. The courtesy survives as the ladder's last rung and as the
 `timeline_gates.accepts_defer` lint — a person who says they will find out is
-received, never pressed.
+received, never pressed. There is no deferral shape on `placed`.
+`validate_placed` and `conversation_delivery._parse_placed` both drop
+`{"deferred": true}` (v196); the reply leaves `placed` null. The examples
+match that.
 
 **Both accounts survive a contradiction.** Oral history treats the
 disagreement itself as data (Portelli). `chronology.reconcile` scores claims

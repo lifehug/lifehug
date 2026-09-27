@@ -36,7 +36,7 @@
     "fixture_id": "timeline-place-age-arithmetic",
     "turns": [
       {
-        "message": "About five puts that somewhere around 1984, give or take a year — does that feel right?",
+        "message": "About five puts that somewhere around 1984, give or take a year. Correct me if the arithmetic is off.",
         "placed": {
           "best": "1984~",
           "earliest": "1983",
