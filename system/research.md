@@ -295,7 +295,7 @@ preference within its existing light/non-focus pool before comparing length.
 Normal delivery still honors a healthy queue. **v300 / ADR 0034 makes that
 precedence unconditional:** the first eligible planned item is selected before
 the silence check, and re-engagement becomes a fallback only when the queue is
-missing, expired, exhausted, sent, answered, or otherwise unusable. This is a
+missing, expired, exhausted, sent, answered, or otherwise unusable. **v368 (owner ruling 2026-09-27) never re-sends:** an answered question is never sent again and a sent-but-unanswered one waits until nothing unasked remains — the queue skips a head that already went out, and fallback rotation draws only never-sent questions (`system/delivery_guard.py`). This is a
 bounded operational policy, not a judgment that silence answers or invalidates
 a question: bank text and answered flags stay unchanged, and a sole unanswered
 question always remains eligible. Existing soft candidate-quality warnings are

@@ -104,15 +104,41 @@ DEFAULT_LANE_POLICY = {
     "expansion_onset": 0.60,       # global fullness where expansion urgency starts
 }
 
+# v368 (owner ruling "Question queue", 2026-09-27): "no single focus over
+# 30%; people focuses as a group up to 50%; the rest of the week to my-life
+# and projects." The person Focuses share the `focus` group, so this cap is
+# the PEOPLE budget as a group — 0.25 held every person together to two of
+# eight slots, which is why a whole week could pass without Mom, Dad, Katie
+# or the kids. `SINGLE_FOCUS_CAP` below is the per-Focus half of the ruling.
 GROUP_CAPS = {
     "main": 0.50,
     "project": 0.35,
-    "focus": 0.25,
+    "focus": 0.50,
     # v196: minted keystone questions live in their own group, and the cap is
     # the volume control — max_counts floors every group at 1, so ANY weekly
     # limit yields exactly one timeline question per week.
     "timeline": 0.01,
 }
+
+#: The group cap every vault carried before v368. `planner_state.json` copies
+#: `GROUP_CAPS` into itself on first write, so a vault built before the
+#: ruling holds this exact number without anyone having chosen it; it is
+#: migrated on read (`load_planner_state`), never by asking for a vault edit.
+LEGACY_FOCUS_GROUP_CAP = 0.25
+
+#: v368: no single Focus takes more than this share of the week — the
+#: primary life story included (its roadmap cap of 0.40 is clamped here).
+#: Counted the way every cap in this module is (`ceil(limit × share)`), so
+#: an 8-question week allows three: the owner's "Etherfuse was at its cap,
+#: not over it" was three of eight. A `finishing` Focus keeps its raised
+#: cap — being pushed to done is the author's own explicit choice.
+SINGLE_FOCUS_CAP = 0.30
+
+#: The named rules this module enforces for the week's distribution and
+#: order (cited by tests, the handbook and the changelog).
+NO_SINGLE_FOCUS_OVER_THIRTY_PERCENT = "question_planner.NO_SINGLE_FOCUS_OVER_THIRTY_PERCENT"
+PEOPLE_AS_A_GROUP_UP_TO_HALF = "question_planner.PEOPLE_AS_A_GROUP_UP_TO_HALF"
+NO_TWO_DAYS_IN_A_ROW_FROM_ONE_GROUP = "question_planner.NO_TWO_DAYS_IN_A_ROW_FROM_ONE_GROUP"
 
 STORY_FUNCTIONS = (
     "foundation",
@@ -264,10 +290,28 @@ def load_planner_state(*, write_default: bool = False) -> dict:
     if "focus" not in group_caps and old_focus_group in group_caps:
         group_caps["focus"] = group_caps[old_focus_group]
     group_caps.pop(old_focus_group, None)
+    migrate_group_caps(group_caps)
     if write_default:
         data["last_updated"] = now_utc()
         write_json(PLANNER_STATE_FILE, data)
     return data
+
+
+def migrate_group_caps(group_caps: dict) -> bool:
+    """v368: lift a copied pre-ruling people cap to the ruling's 50%.
+
+    Only the exact legacy default moves — a vault that set its own number
+    keeps it. Mutates `group_caps` in place and says whether it changed, so
+    a read never needs a vault edit and a later write persists the new value.
+    """
+    try:
+        current = float(group_caps.get("focus", GROUP_CAPS["focus"]))
+    except (TypeError, ValueError):
+        current = None
+    if current is None or math.isclose(current, LEGACY_FOCUS_GROUP_CAP):
+        group_caps["focus"] = GROUP_CAPS["focus"]
+        return True
+    return False
 
 
 def load_question_state():
@@ -436,7 +480,12 @@ def build_focus_index(focuses: list[dict], questions: list[dict]) -> dict:
     info: dict[str, dict] = {}
     for focus in focuses:
         fill = focus_fill(focus, questions)
-        cap_frac = FINISHING_CAP if focus.get("phase") == "finishing" else float(focus.get("cap", DEFAULT_CAP))
+        if focus.get("phase") == "finishing":
+            cap_frac = FINISHING_CAP
+        else:
+            # NO_SINGLE_FOCUS_OVER_THIRTY_PERCENT: a roadmap cap above the
+            # ruling (the primary life story's 0.40) is clamped, never obeyed.
+            cap_frac = min(float(focus.get("cap", DEFAULT_CAP)), SINGLE_FOCUS_CAP)
         info[focus["id"]] = {
             "focus": focus,
             "fill": fill,
@@ -589,6 +638,31 @@ ESCALATION_MIN_ANSWERED = 2
 LOVE_MAP_STALE_DAYS = 60
 LOVE_MAP_STALE_BOOST = 1.3
 
+#: v368 PEOPLE_AS_A_GROUP_UP_TO_HALF, the rotation half: "every person comes
+#: up". A person Focus is drawn as a PERSON, not by the size of its backlog —
+#: its questions share the Focus weight (one person with forty open questions
+#: no longer outweighs one with four) — and a saturated person keeps at least
+#: this weight instead of fading to maintenance, so a well-covered spouse
+#: still comes round within a few weeks.
+PERSON_ROTATION_FLOOR = 0.8
+PERSON_FOCUS_TYPES = ("person", "relationship")
+#: …and the people lane draws first from the people who had NO question last
+#: week (the queue's only memory, read from the week it replaces —
+#: `previous_queue_focuses`); outside the lane a person asked last week is
+#: drawn at this fraction of their weight.
+PERSON_RECENT_FACTOR = 0.35
+
+
+def previous_queue_focuses(queue_data: object = None) -> set[str]:
+    """The Focus ids in the week being replaced — GUARDED, never raises."""
+    try:
+        data = read_json(QUESTION_QUEUE_FILE, default={}) if queue_data is None else queue_data
+        rows = data.get("queue") if isinstance(data, dict) else None
+        return {str(row["focus"]) for row in rows or ()
+                if isinstance(row, dict) and row.get("focus")}
+    except Exception:  # noqa: BLE001 — a bad old queue must never break the new one
+        return set()
+
 
 def enriched_pending_questions(questions: list[dict], categories: dict, coverage: dict, objectives: list[dict],
                                focus_index: dict | None = None) -> list[dict]:
@@ -634,6 +708,8 @@ def enriched_pending_questions(questions: list[dict], categories: dict, coverage
         focus_id = cat_to_focus.get(category)
         finfo = info.get(focus_id, {})
         base_weight = float(finfo.get("weight", 1.0))
+        if finfo.get("type") in PERSON_FOCUS_TYPES and base_weight > 0:
+            base_weight = max(base_weight, PERSON_ROTATION_FLOOR)
 
         # Apply quality multiplier from profile (only when profile is active).
         if _qprofile.get("active"):
@@ -727,7 +803,8 @@ def _week_seed(generated_at: str) -> int:
 
 
 def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: dict | None = None,
-                seed: int | None = None, timeline_probes: object = None) -> dict:
+                seed: int | None = None, timeline_probes: object = None,
+                previous_queue: object = None) -> dict:
     """Build the weekly queue by dynamic Focus-weighted sampling.
 
     Each Focus gets weight = base(tier) × fill_factor × room; saturated Focuses
@@ -754,6 +831,7 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
 
     pending = enriched_pending_questions(
         questions, categories, coverage, planner_state.get("active_objectives", []), findex)
+    recently_asked = previous_queue_focuses(previous_queue)
 
     # v196: a MINTED keystone question is an ordinary pending bank question
     # that happens to carry a leverage number. The index is supplied by the
@@ -853,6 +931,17 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
             return False
         if fid and per_focus[fid] >= focus_max.get(fid, limit):
             return False
+        # Breadth before depth among people: a person takes a second slot in
+        # the week only once every person with an open question has one.
+        if (enforce_story and fid and per_focus[fid] >= 1
+                and info.get(fid, {}).get("type") in PERSON_FOCUS_TYPES
+                and any(
+                    other.get("focus") not in (None, fid)
+                    and per_focus[other.get("focus")] == 0
+                    and info.get(other.get("focus"), {}).get("type") in PERSON_FOCUS_TYPES
+                    for other in remaining
+                )):
+            return False
         if q.get("objective") and objective_counts[q["objective"]] >= int(q.get("objective_limit") or limit):
             return False
         if enforce_arc and str(q["category"]) == category_streak and streak_count >= arc_max:
@@ -866,12 +955,25 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         return True
 
     def weighted_pick(pool: list[dict]) -> dict:
+        # A person Focus's questions share its weight (PERSON_ROTATION_FLOOR's
+        # docstring): the draw picks a person, then one of their questions.
+        person_share = Counter(
+            q.get("focus") for q in pool
+            if q.get("focus") and q.get("focus_type") in PERSON_FOCUS_TYPES
+        )
         weights = [
             max(q.get("weight", 1.0), 0.0001)
             * (policy["objective_boost"] if q.get("objective") else 1.0)
             * (q.get("timeline_boost", 1.0) if q.get("timeline_probe") else 1.0)
             for q in pool
         ]
+        # Arc walking pins the expression above (`arc_walk._plan_weight`); the
+        # week-only person adjustment is applied after it, never inside it.
+        for index, q in enumerate(pool):
+            if q.get("focus_type") in PERSON_FOCUS_TYPES and q.get("focus"):
+                weights[index] /= person_share.get(q.get("focus"), 1)
+                if q.get("focus") in recently_asked:
+                    weights[index] *= PERSON_RECENT_FACTOR
         return rng.choices(pool, weights=weights, k=1)[0]
 
     # 1) Inner-story floor — reserve ~1 slot/week for self-examination questions
@@ -909,6 +1011,24 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         record(weighted_pick(pool))
         chapter_boost_taken += 1
 
+    # 1c) The people lane (v368, PEOPLE_AS_A_GROUP_UP_TO_HALF): "people
+    # focuses as a group up to 50%; the rest of the week to my-life and
+    # projects." While people have open questions, their share of the week is
+    # filled here, one person at a time (breadth before depth, see
+    # `eligible`), each drawn as a person by Focus weight — so a strong life
+    # story or project can no longer crowd the people out of their half.
+    people_cap = max_by_group.get("focus", 0)
+    people_taken = 0
+    while len(queue) < limit and group_counts["focus"] < people_cap:
+        pool = [q for q in remaining
+                if q.get("focus_type") in PERSON_FOCUS_TYPES and str(q["group"]) == "focus"
+                and eligible(q)]
+        if not pool:
+            break
+        # People skipped last week go first — a rotation, not a lottery.
+        record(weighted_pick([q for q in pool if q.get("focus") not in recently_asked] or pool))
+        people_taken += 1
+
     # 2) Weighted sampling for the rest, relaxing constraints only if stuck.
     while remaining and len(queue) < limit:
         pool = [q for q in remaining if eligible(q)]
@@ -917,6 +1037,8 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         if not pool:
             pool = remaining[:]   # last resort: caps exhausted, fill anyway
         record(weighted_pick(pool))
+
+    queue = interleave_week(queue)
 
     fullness = global_fullness(focuses, questions)
     onset = policy["expansion_onset"]
@@ -954,6 +1076,10 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
                 for fid, d in info.items()
             ],
             "self_floor": self_floor,
+            "people": {"cap": people_cap, "taken": people_taken,
+                       "rule": PEOPLE_AS_A_GROUP_UP_TO_HALF},
+            "single_focus_cap": SINGLE_FOCUS_CAP,
+            "order_rule": NO_TWO_DAYS_IN_A_ROW_FROM_ONE_GROUP,
             "chapter_boost": {"cap": chapter_boost_max, "taken": chapter_boost_taken},
             "leverage": {
                 "per_story": per_story,
@@ -984,6 +1110,81 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         "candidate_recommendations": accepted_candidate_recommendations(candidates),
         "queue": queue,
     }
+
+
+def _week_key(item: dict) -> tuple[str, str]:
+    group = str(item.get("group") or "main")
+    return group, str(item.get("focus") or group)
+
+
+def _zero_adjacent_possible(counts: Counter, previous: str | None) -> bool:
+    """Can `counts` be laid out with no two neighbours sharing a group, the
+    first one differing from `previous`? Exact for a multiset: the largest
+    group fits in the alternate slots, one fewer if it is `previous`."""
+    remaining = sum(counts.values())
+    if remaining == 0:
+        return True
+    for group, count in counts.items():
+        room = remaining // 2 if group == previous else (remaining + 1) // 2
+        if count > room:
+            return False
+    return True
+
+
+def interleave_week(queue: list[dict]) -> list[dict]:
+    """NO_TWO_DAYS_IN_A_ROW_FROM_ONE_GROUP — order the built week so the days
+    alternate (owner ruling "Question queue", 2026-09-27: "never two
+    questions from the same group on consecutive days — that's sorting").
+
+    The week is delivered in list order, so the order IS the schedule. The
+    build's own order (seeded, so reproducible) is the priority: each day
+    takes the earliest remaining item whose group differs from yesterday's
+    and that still leaves a zero-repeat arrangement possible. When the mix
+    cannot avoid a repeat (a week that is mostly one group), the fullest
+    group goes first so the repeats are as few as the counts force, and a
+    forced repeat still never puts the same Focus on two consecutive days
+    when another Focus in that group is available. Pure and deterministic:
+    the same built week always comes out in the same order.
+    """
+    remaining = list(queue)
+    ordered: list[dict] = []
+    previous: tuple[str, str] | None = None
+    while remaining:
+        counts = Counter(_week_key(item)[0] for item in remaining)
+        prev_group = previous[0] if previous else None
+        pick = None
+        for index, item in enumerate(remaining):
+            group = _week_key(item)[0]
+            if group == prev_group:
+                continue
+            rest = counts.copy()
+            rest[group] -= 1
+            if _zero_adjacent_possible(+rest, group):
+                pick = index
+                break
+        if pick is None:
+            # A repeat is forced somewhere: spend the fullest group first.
+            fullest = max(counts.values())
+            candidates = [
+                index for index, item in enumerate(remaining)
+                if _week_key(item)[0] != prev_group
+            ]
+            dominant = [
+                index for index in candidates
+                if counts[_week_key(remaining[index])[0]] == fullest
+            ]
+            if dominant or candidates:
+                pick = (dominant or candidates)[0]
+            else:
+                other_focus = [
+                    index for index, item in enumerate(remaining)
+                    if previous is None or _week_key(item)[1] != previous[1]
+                ]
+                pick = other_focus[0] if other_focus else 0
+        chosen = remaining.pop(pick)
+        ordered.append(chosen)
+        previous = _week_key(chosen)
+    return ordered
 
 
 def current_timeline_probes() -> dict:

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from datetime import date, datetime, timezone
 
+import delivery_guard
 from lifehug_core import (
     COVERAGE_FILE,
     QUESTION_QUEUE_FILE,
@@ -80,9 +81,12 @@ def eligible_questions(questions, *, question_bank_text=None, work_items_payload
     ]
 
 
-def pick_planned_question(questions):
-    """Return the first valid unanswered question from state/question_queue.json."""
-    queue_data = read_json(QUESTION_QUEUE_FILE, default={}) or {}
+def pick_planned_question(questions, records=None, queue_data=None):
+    """Return the first queued question that is neither answered nor already
+    sent (v368, the never-resend rule): a stale queue whose head already went
+    out skips to the next unsent item instead of repeating it."""
+    if queue_data is None:
+        queue_data = read_json(QUESTION_QUEUE_FILE, default={}) or {}
     if planned_queue_expired(queue_data):
         return None
     queue = queue_data.get("queue", [])
@@ -93,8 +97,13 @@ def pick_planned_question(questions):
             continue
         question_id = item.get("question_id")
         question = question_by_id(questions, question_id) if question_id else None
-        if question and not question["answered"]:
-            return question
+        if not question or question["answered"]:
+            continue
+        if records is not None and (
+            str(question["id"]) in records["answered"] or str(question["id"]) in records["sent"]
+        ):
+            continue
+        return question
     return None
 
 
@@ -175,12 +184,37 @@ def pick_reengagement_question(questions, categories, rotation=None):
     return min(pool, key=lambda q: len(str(q["text"]).split()))
 
 
-def pick_next_question(questions, categories, rotation):
-    """Honor a planned queue, otherwise rotate among less-delivered questions."""
-    questions = eligible_questions(questions)
-    planned = pick_planned_question(questions)
+def pick_next_question(questions, categories, rotation, *, also_sent=(), also_answered=()):
+    """Honor a planned queue, otherwise rotate — never re-sending (v368).
+
+    The never-resend rule (`delivery_guard`, owner ruling 2026-09-27): an
+    answered question is never picked; a sent-but-unanswered one waits until
+    no unsent question remains (queue or bank), and only then is re-offered,
+    least-offered first. `also_sent` / `also_answered` are a host's extra
+    records (they only add)."""
+    queue_data = read_json(QUESTION_QUEUE_FILE, default={}) or {}
+    records = delivery_guard.delivery_records(
+        questions, rotation=rotation, queue_data=queue_data,
+        also_sent=also_sent, also_answered=also_answered,
+    )
+    questions = [
+        {**q, "answered": True} if str(q["id"]) in records["answered"] and not q["answered"] else q
+        for q in eligible_questions(questions)
+    ]
+    planned = pick_planned_question(questions, records, queue_data)
     if planned:
         return planned
+
+    unsent = delivery_guard.never_sent(questions, records)
+    if not unsent:
+        # A_SENT_QUESTION_WAITS_UNTIL_NOTHING_UNASKED_REMAINS: only now may an
+        # unanswered question go out again.
+        again = delivery_guard.reoffer_pool(
+            questions, records, last_question_id=rotation.get("last_question_id"))
+        return again[0] if again else None
+    unsent_ids = {str(q["id"]) for q in unsent}
+    # Everything below chooses among never-sent questions only.
+    questions = [q if str(q["id"]) in unsent_ids else {**q, "answered": True} for q in questions]
 
     config = load_config()
     reengage_days = float(config.get("reengage_after_days", DEFAULT_REENGAGE_AFTER_DAYS) or DEFAULT_REENGAGE_AFTER_DAYS)
@@ -387,6 +421,10 @@ def main():
     parser.add_argument("--confirm-sent", metavar="ID", help="Mark a dry-run question as delivered")
     parser.add_argument("--mark-pass-complete", action="store_true", help="Set pass-transition state")
     parser.add_argument("--rebuild-coverage", action="store_true", help="Rebuild coverage.json")
+    parser.add_argument("--also-sent", action="append", default=[], metavar="IDS",
+                        help="Host-known sends (comma-separated ids) the vault has not recorded yet")
+    parser.add_argument("--also-answered", action="append", default=[], metavar="IDS",
+                        help="Host-known answers (comma-separated ids) the vault has not recorded yet")
     args = parser.parse_args()
 
     questions, categories, rotation = load_state()
@@ -438,7 +476,8 @@ def main():
         print(f"PASS_COMPLETE:{current_pass}:{get_followup_model()}")
         return
 
-    question = pick_next_question(questions, categories, rotation)
+    question = pick_next_question(questions, categories, rotation,
+                                  also_sent=args.also_sent, also_answered=args.also_answered)
     if not question:
         current_pass = rotation.get("current_pass", 1)
         if args.dry_run:

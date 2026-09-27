@@ -267,8 +267,10 @@ when that queue cannot supply a question does selection fall back to quiet
 re-engagement and then delivery-aware rotation. You normally don't pick by
 hand — the script does it. See ADR 0034.
 
+**Never re-send (v368, owner ruling 2026-09-27).** An answered question — bank line checked or `answers/<id>.md` present — is never sent again (`delivery_guard.AN_ANSWERED_QUESTION_IS_NEVER_SENT_AGAIN`). A sent, unanswered question is not repeated while any unsent queued item or unasked bank question exists (`A_SENT_QUESTION_WAITS_UNTIL_NOTHING_UNASKED_REMAINS`); only then is one re-offered, least-offered first, never yesterday's when another exists. A stale queue head that already went out is skipped, and an expired queue falls back to the bank's next unasked question. `lifehug.py delivery-check <id> --json` asks the same rule before a send (exit 3 = refused); hosts add records they hold with `--also-sent/--also-answered`.
+
 Fallback rotation order:
-1. **Delivery history**: among unanswered questions, give the last delivered question one turn off when an alternative exists, then keep the least-delivered cohort
+1. **Delivery history**: never-sent unanswered questions only (the never-resend rule above); only when none remain, the least-offered sent-but-unanswered ones, never the last delivered when an alternative exists
 2. **Coverage priority**: lowest answer-ratio category in that cohort first (RED → YELLOW → GREEN)
 3. **Group alternation**: alternate between available groups based on the last question
 4. **Focus interleaving**: every N questions (`focus_frequency`, default 4), when that cohort includes a Focus

@@ -110,8 +110,19 @@ class DeliveryFairnessTests(unittest.TestCase):
             "queue": [{"question_id": "A1", "status": "queued"}],
             "expires_at": "2099-01-01T00:00:00Z",
         }
-        rotation = {"delivery_counts": {"A1": 8}, "last_question_id": "A1"}
+        rotation = {"delivery_counts": {"B1": 1}, "last_question_id": "B1"}
         self.assertEqual(ask.pick_next_question(questions, self.categories, rotation)["id"], "A1")
+
+    def test_a_queued_question_already_delivered_is_not_resent(self):
+        # v368 (owner ruling 2026-09-27): before, a queue head delivered eight
+        # times was sent a ninth time. It waits while B1 has never gone out.
+        questions = [question("A1"), question("B1")]
+        self.queue.return_value = {
+            "queue": [{"question_id": "A1", "status": "queued"}],
+            "expires_at": "2099-01-01T00:00:00Z",
+        }
+        rotation = {"delivery_counts": {"A1": 8}, "last_question_id": "A1"}
+        self.assertEqual(ask.pick_next_question(questions, self.categories, rotation)["id"], "B1")
 
     def test_expired_queue_cannot_override_fairness(self):
         questions = [question("A7a", "update"), question("A8")]
@@ -135,7 +146,7 @@ class DeliveryFairnessTests(unittest.TestCase):
         }
         rotation = {
             "last_answered_at": (datetime.now() - timedelta(days=13)).isoformat(),
-            "delivery_counts": {"A7a": 8},
+            "delivery_counts": {"A8": 1},
         }
         self.assertEqual(ask.pick_next_question(questions, self.categories, rotation)["id"], "A7a")
 
@@ -331,7 +342,7 @@ class ConfirmedDeliverySequenceTests(unittest.TestCase):
         self.system.mkdir()
         self.state = self.vault / "state"
         self.state.mkdir()
-        for name in ("ask.py", "lifehug_core.py", "vault_paths.py", "vault_contract.json", "update.py"):
+        for name in ("ask.py", "delivery_guard.py", "lifehug_core.py", "vault_paths.py", "vault_contract.json", "update.py"):
             shutil.copyfile(SYSTEM / name, self.system / name)
         self.bank = self.system / "question-bank.md"
         self.bank.write_text(
@@ -399,12 +410,21 @@ class ConfirmedDeliverySequenceTests(unittest.TestCase):
 
     def test_healthy_queue_advances_only_after_confirmation(self):
         (self.state / "question_queue.json").write_text(json.dumps({
+            "queue": [{"question_id": qid, "status": "queued"} for qid in ("A8", "B1")],
+            "expires_at": "2099-01-01T00:00:00Z",
+        }), encoding="utf-8")
+        self.assertEqual(self.pick(), "A8")
+        self.assertEqual(self.pick(), "A8")
+        self.cli("--confirm-sent", "A8")
+        self.assertEqual(self.pick(), "B1")
+
+    def test_queued_head_already_sent_skips_to_the_next_unsent_item(self):
+        # v368 never-resend: A7a is queued but the vault already counts eight
+        # deliveries of it (the fixture), so the queue's stale head is skipped.
+        (self.state / "question_queue.json").write_text(json.dumps({
             "queue": [{"question_id": qid, "status": "queued"} for qid in ("A7a", "B1")],
             "expires_at": "2099-01-01T00:00:00Z",
         }), encoding="utf-8")
-        self.assertEqual(self.pick(), "A7a")
-        self.assertEqual(self.pick(), "A7a")
-        self.cli("--confirm-sent", "A7a")
         self.assertEqual(self.pick(), "B1")
 
     def test_single_valid_question_stays_unanswered_across_confirmations_from_no_history(self):
