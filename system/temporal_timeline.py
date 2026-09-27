@@ -4081,7 +4081,8 @@ def _place_anchor_resolver(stays: list[dict]):
     ``resolve`` answers an anchor handle or a telling's place phrase with one
     of: the stay's own node id (one house, one stay), a synthetic
     ``place:…`` ref whose bounds are the union of his stays at that level
-    (a city, a state), or ``place:end:<stay>`` for "left <house>". Bounds are
+    (a city, a state), ``place:end:<stay>`` for "left <house>", or
+    ``place:start:<stay>`` for "moved into <house>" (v367). Bounds are
     month-grained at most, basis ``anchor``. ``""`` when the words name none
     of his places: a mention never creates one.
     """
@@ -4155,6 +4156,22 @@ def _place_anchor_resolver(stays: list[dict]):
                 confidence="inferred", basis="anchor", anchors=(place,),
                 provenance=({"rule": "place_anchor",
                              "text": f"when you left {place}"},))
+            members[ref] = ids
+        elif relation == "start":
+            # `landmark_identity.A_MOVE_INTO_A_HOUSE_IS_THAT_STAYS_START`: the
+            # twin of "left <house>" — one house, one stay, its first month.
+            if found["level"] != "house" or len(ids) != 1:
+                return ""
+            start = by_id[ids[0]]["best"]
+            month = _month_floor(start.earliest)
+            if not month:
+                return ""
+            ref = f"{PLACE_ANCHOR_PREFIX}start:{ids[0]}"
+            synthetic[ref] = chrono.DateRecord(
+                best=month, earliest=month, latest=month, granularity="month",
+                confidence="inferred", basis="anchor", anchors=(place,),
+                provenance=({"rule": "place_anchor",
+                             "text": f"when you moved into {place}"},))
             members[ref] = ids
         elif found["level"] == "house" and len(ids) == 1:
             ref = ids[0]

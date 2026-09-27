@@ -67,6 +67,22 @@ A_PLACE_MENTION_TIES_TO_HIS_LANDMARKS = (
     "stays at month grain at most, and the mention never creates a place"
 )
 
+#: v367 (owner, staging 2026-09-27). He answered "When was 701 North Williams
+#: foreclosed on?" with *"This happened at the same time we moved out, when my
+#: parents moved into BJ's house and I moved in with them. When I moved into
+#: BJ's house, that's when 701 was foreclosed on."* — a moment tied to the day
+#: he MOVED INTO a house he gave, and the card came back unplaced. Moving into
+#: a house is that stay's START exactly as leaving it is its end: "moved into
+#: <house>" is the stay's first month, and a moment said to happen when he
+#: moved in (or right before or after it) is placed against that month.
+A_MOVE_INTO_A_HOUSE_IS_THAT_STAYS_START = (
+    "'moved into <house>' is that stay's start and 'left / moved out of "
+    "<house>' its end, at the month the stay carries; a moment he says "
+    "happened when he moved in or out is placed there, and right before or "
+    "after it on that side; a house he lived at more than once, or a city or "
+    "a state, is never a single moving day"
+)
+
 #: v360 follow-up (owner, 2026-09-25) (item 7), owner: *"Dad's house could be many
 #: houses."* A residence named by a relation word's possessive — "dad's
 #: house", "mom's place", "grandma's house", "my parents' home" — is a RELATIVE
@@ -866,6 +882,10 @@ def finding_for(domain: object, record: object, decision: dict) -> dict:
 _LEFT_RE = re.compile(
     r"^\s*(?:after\s+|when\s+)?(?:i|we|he|she)?\s*"
     r"(?:left|leaving|moved out of|moving out of)\s+(?P<place>[^,;.()]+)", re.I)
+#: :data:`A_MOVE_INTO_A_HOUSE_IS_THAT_STAYS_START` — the start-side twin.
+_MOVED_INTO_RE = re.compile(
+    r"^\s*(?:after\s+|when\s+)?(?:i|we|he|she)?\s*"
+    r"(?:moved into|moved in to|moving into|moved in at)\s+(?P<place>[^,;.()]+)", re.I)
 #: A place as he names it: capitalised words ("San Diego", "BJ's"), with an
 #: optional leading "the" and a trailing dwelling word ("the Fiegers' house").
 _PLACE = (r"(?:the\s+)?[A-Z][\w'\u2019.-]*(?:\s+(?:[A-Z][\w'\u2019.-]*|of))*"
@@ -889,10 +909,55 @@ def anchor_place_phrase(text: object) -> tuple[str, str] | None:
     left = _LEFT_RE.match(raw)
     if left:
         return ("end", left.group("place").strip(" .,;"))
+    moved_in = _MOVED_INTO_RE.match(raw)
+    if moved_in:
+        return ("start", moved_in.group("place").strip(" .,;"))
     lived = _LIVED_RE.search(raw)
     if lived:
         return ("during", lived.group("place").strip(" .,;"))
     return None
+
+
+#: Who can be moving when the moment is his: he, the family, or a relative he
+#: moved with ("my parents moved into BJ's house and I moved in with them").
+_MOVER = r"(?:i|we|my\s+(?:parents|family|folks|wife|husband|mom|dad|mother|father))"
+#: The words that tie a moment to the moving day: the same time, or one side.
+_WHEN_CONNECTOR = (r"(?P<connector>(?:(?:right|just|shortly)\s+)?(?:after|before)"
+                   r"|when|as\s+soon\s+as|the\s+(?:same\s+)?(?:time|month|week|day)"
+                   r"(?:\s+(?:that|when|as))?|at\s+the\s+same\s+time(?:\s+(?:that|as))?"
+                   r"|around\s+the\s+(?:same\s+)?time(?:\s+(?:that|as))?)")
+_MOVE_CLAUSE_RE = re.compile(
+    # Case-blind for the connector, the mover and the verb; the PLACE keeps
+    # :data:`_PLACE`'s capitals, which is what makes it a name he gave.
+    r"\b(?i:" + _WHEN_CONNECTOR + r")\s+(?i:" + _MOVER + r")\s+"
+    r"(?P<verb>(?i:moved\s+into|moved\s+in\s+to|moved\s+out\s+of|left))\s+"
+    r"(?P<place>" + _PLACE + r")")
+
+
+def move_clauses(text: object) -> list[dict]:
+    """Every "when I moved into <house>" a reply says, in order.
+
+    :data:`A_MOVE_INTO_A_HOUSE_IS_THAT_STAYS_START`, as prose: ``[{"relation",
+    "handle", "side", "place"}]`` where ``relation`` is ``within`` (when / the
+    same time), ``after`` or ``before``; ``handle`` is the anchor text the
+    fold resolves (``"moved into BJ's house"``, ``"left Kristen's house"``);
+    ``side`` is the stay's ``start`` or ``end``. Pure words — whether the place
+    is one of his stays is the fold's question, against the stays he gave.
+    """
+    out: list[dict] = []
+    for match in _MOVE_CLAUSE_RE.finditer(str(text or "")):
+        connector = " ".join(match.group("connector").lower().split())
+        relation = ("after" if connector.endswith("after") else
+                    "before" if connector.endswith("before") else "within")
+        verb = " ".join(match.group("verb").lower().split())
+        side = "end" if verb in ("moved out of", "left") else "start"
+        place = match.group("place").strip(" .,;")
+        if not place:
+            continue
+        lead = "moved into" if side == "start" else "moved out of"
+        out.append({"relation": relation, "handle": f"{lead} {place}",
+                    "side": side, "place": place})
+    return out
 
 
 def resolve_place(text: object, stays: object) -> dict | None:

@@ -539,8 +539,9 @@ _LOOSE_MONTH_DAY_YEAR_RE = re.compile(
 _LOOSE_DAY_MONTH_YEAR_RE = re.compile(
     r"^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\.?\s+(\d{4})$", re.IGNORECASE
 )
-#: ``Month YYYY``.
-_LOOSE_MONTH_YEAR_RE = re.compile(r"^([A-Za-z]+)\.?\s+(\d{4})$")
+#: ``Month YYYY`` — and ``Month of YYYY`` (v367: the owner answered a card
+#: "August of 2025", and the reply read as no date at all).
+_LOOSE_MONTH_YEAR_RE = re.compile(r"^([A-Za-z]+)\.?\s+(?:(?i:of)\s+)?(\d{4})$")
 #: One explicit whole-string range connector. Endpoints are parsed separately
 #: by the same single-date authority below; two connectors are ambiguous.
 _LOOSE_RANGE_CONNECTOR_RE = re.compile(

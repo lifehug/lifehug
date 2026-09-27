@@ -766,6 +766,13 @@ calculating placement against a spine**:
   stood (`resolver.A_SILENCE_NEVER_UNSETTLES_A_READING`). An answer to a card
   that names one date inside a sentence — *"her freshmen year January 2026"* —
   is that date (`answer_placement.A_DATE_HE_SAID_IN_A_SENTENCE_IS_A_DATE_HE_SAID`).
+  *"August of 2025"* is August 2025 (v367). An answer that ties the moment
+  to moving into or out of a house he gave — *"When I moved into BJ's house,
+  that's when 701 was foreclosed on"* — is placed at that stay's own start or
+  end month (`answer_placement.A_LANDMARK_HE_TIES_IT_TO_PLACES_IT`,
+  `landmark_identity.A_MOVE_INTO_A_HOUSE_IS_THAT_STAYS_START`), and either kind
+  of answer is filed on the turn, not left for the sweep
+  (`timeline_interaction.A_REPLY_THE_CARD_SEAT_CAN_READ_IS_FILED_NOW`).
 - **Verification is mechanical**: every cited quote must occur in the cited
   passage, every date must parse, ranges must be ordered, a `derived` answer
   must cite the spine fact it came from. What fails files nothing.
