@@ -1,7 +1,7 @@
 {
   "version": 369,
   "released": "2026-09-28",
-  "changelog": "v369: research-only note system/research/graph-vis.md, the wiki graph as a life-portrait target. Nothing in the viewer, the compiler, or the daily loop changes. The file is listed in framework_files so an upgrade ships it (the same reason chronology-vis.md is listed). check_framework_files.py would pass without that listing; vaults would not receive the review.",
+  "changelog": "v369: research-only note system/research/graph-vis.md, the wiki graph as a life-portrait target. Nothing in the viewer, the compiler, or the daily loop changes. \u00a78 adds four emerging directions (semantic substrates, temporal evolution, provenance, uncertainty) as research, not behavior. The file is listed in framework_files so an upgrade ships it (the same reason chronology-vis.md is listed). check_framework_files.py would pass without that listing; vaults would not receive the review.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

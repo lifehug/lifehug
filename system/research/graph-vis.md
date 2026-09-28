@@ -31,8 +31,9 @@ is the planning note. Its findings comment
 is the code reading this review checks, corrects where the line numbers or the
 simulation drifted, and does not re-implement.
 
-Nothing below is a shipped behavior. Design consequences are numbered in §8
-so a later contract can cite them.
+Nothing below is a shipped behavior. §8 records four directions that are
+not yet a design. Design consequences are numbered in §9 so a later
+contract can cite them.
 
 ---
 
@@ -225,7 +226,7 @@ not be asked to mean what the settling never meant.
 
 Three results in `chronology-vis.md` §5.2 bound any animation on this page.
 The papers behind the second and third were **not re-obtained** this session;
-the quotations below are the ones that review already prints, and §9 lists
+the quotations below are the ones that review already prints, and §10 lists
 them as gaps.
 
 **Animation is the weakest form for analysis.** `chronology-vis.md` lines
@@ -387,7 +388,7 @@ are a convex hull around the member points, and Bubble Sets (Collins, Penn &
 Carpendale, 2009, *Bubble Sets: Revealing Set Relations with Isocontours over
 Existing Visualizations*, IEEE TVCG 15(6)). **Collins et al. was not
 obtained** this session (the usual PDF URL returned 503). This review does
-not state what that study found. The design consequence in §8 is only that a
+not state what that study found. The design consequence in §9 is only that a
 region, if one is drawn, is drawn around a key from §3.2, and that the hull
 algorithm is unchosen until the paper is read.
 
@@ -438,7 +439,8 @@ Nothing in the codebase stores an ideal radius, an archetype table, or a
 learned weight. `graph_data` has only `sources` and, sometimes, `sat`. This
 review does not invent the rest of the table. How the weights are defined —
 fixed archetype, learned from the life, or an archetype the owner can
-override — is issue #434's second open question, and it is still open (§10).
+override — is issue #434's second open question, and it is still open
+(research queue, item 2).
 
 ### 4.3 A single completeness meter is an improper scoring rule
 
@@ -467,7 +469,7 @@ pretending their source counts live on one scale.
 
 All three are proposals. None is what the graph reads today. The order is
 the one in issue #434's findings comment. This review does not promote one
-of them to a decision; §8 records that the choice is still open.
+of them to a decision; §9 records that the choice is still open.
 
 **(a) Distinct answers, as a percentile within the type.** Count distinct
 `answers/*.md` paths on the node, or read the roster's `unique_answers`, and
@@ -563,7 +565,7 @@ split says the analysis has to remain visible when nothing is moving. Static
 alternatives that carry the same fact: a stroke on the node, a second ring
 that is either there or not, or a small multiples panel of "in this week's
 queue" beside the graph. Fading can be a smaller static mark at higher
-saturation, not a tween. §8 prefers the static mark.
+saturation, not a tween. §9 prefers the static mark.
 
 ---
 
@@ -604,7 +606,7 @@ A force layout of every page and every `related:` link is one picture, and
 §2.1 says that picture was built to spread vertices and even out edges, not
 to explain a life. Three alternatives sit beside it. They are design
 options. This session did not obtain a user study that ranks them for a
-biographical graph; that absence is a gap in §9.
+biographical graph; that absence is a gap in §10.
 
 **Ego.** The subgraph of one node and its neighbours. The platform already
 does the visual half on hover (§1.5): neighbours stay bright, everything else
@@ -630,10 +632,178 @@ view, and that it should not be the one that moves.
 
 ---
 
-## 8. Design consequences
+## 8. Emerging directions
+
+Four directions, none of them tried on a vault. Each one states the idea,
+what in this repository could feed it, and what it would be for the owner.
+A mapping that is a guess says so. Design consequences D15–D18, in §9, are
+the parts a later contract could cite. They do not replace D1–D14.
+
+### 8.1 Semantic substrates
+
+**The idea.** Lay a node down by what it means, not by where a spring left
+it. Shneiderman & Aris 2006, obtained from the HCIL technical report of the
+*IEEE TVCG* paper (12(5):733–740), give two principles: layouts are
+user-defined semantic substrates, non-overlapping regions in which placement
+follows node attributes, and users filter which links are visible so a
+source and a destination can still be read. In their words, "the location
+conveys information": a paper in a region labeled Journals is a journal
+paper, and a node to the left of that region is an earlier paper. They
+contrast this with force-directed layout, which they say dominates the
+literature because it spreads nodes and shows links (their §2), the same
+heuristic §2.1 already recorded. Inside a region they still allow a
+force-directed, geographic, or temporal placement. Their legal-precedent
+example is the temporal one: court as the region, year from left to right,
+the arrangement they call a historiograph. They name PivotGraph (Wattenberg
+2006) as a relative that places nodes on a grid by attributes. That paper
+was **not obtained**, so this review does not report its findings. Their
+caution, in the same section: a substrate needs a categorical attribute, or
+a number that can be binned, and "a small number of categories, such as 2–5,
+is convenient."
+
+**In Lifehug, if it were used.** A time axis has pieces, and it does not
+have one coordinate per node. A period page can carry `chrono` and an EDTF
+`date` (`wiki_compile.frontmatter`, lines 411–418). Moments are placed on
+the timeline, and `placement_score` measures that placement, not how
+complete the life is (§6). A person, a job, or a theme is not a year.
+Putting one of those nodes at a single x is a reduction this review does
+not define. The second axis the prompt suggests, `emotional_weight`, is not
+a classifier field. `recommend_focuses._window_has_emotion` (lines 366–371)
+counts emotion-words in an 80-character window around a mention, and
+`_build_entity_stats` sums those counts (lines 464 and 472). The focus
+score that uses the sum is `mention_count + 2·unique_answers +
+3·cross_categories + 1.5·emotional_weight` (lines 620–629), stored on the
+recommendation in `state/focus_recommendations.json`. The classifier's
+nearby fields are different: `scene_slots.thought_and_felt` and
+`focus_opportunities.evidence_strength` (`classify_story.py` lines
+996–1013). Plotting the keyword sum as a height would draw the detector,
+not a feeling the owner stated. That use is speculative.
+
+**What it would be for.** The owner could read a shape that is about the
+life — earlier against later, or one court of the story against another —
+instead of a picture whose only meaning is that the springs settled (§2.1).
+Which pair of attributes deserves that reading is open. Time against
+emotional weight is an example, not a choice.
+
+### 8.2 Temporal graph evolution
+
+**The idea.** The portrait changes as pages and links are added. The
+research question is how to show the change without throwing away the
+picture the reader already holds. Misue, Eades, Lai & Sugiyama 1995 name
+that picture the mental map. The paper was **not obtained**. chronology-vis
+§5.2 already treats it as the origin of the idea, and §2.2 of this review
+quotes the later result. Archambault, Purchase & Pinaud 2011 — the same
+paper chronology-vis cites, **not re-obtained**, quoted there at lines
+982–990 — found small multiples faster than animation on their graph tasks,
+and found that preserving the mental map had little effect on error or
+time. Beck, Burch, Diehl & Weiskopf split the techniques by how they draw
+time: an animated diagram, or a static chart on a timeline. That split is
+in the 2014 EuroVis state-of-the-art report, which this session obtained.
+The 2017 *Computer Graphics Forum* 36(1):133–159 version's full text was
+**not obtained**. Its abstract, read on the Wiley page, states the same
+split: animation, or a timeline. That agrees with §2.2. Animation is the
+weakest form for analysis. A before-and-after pair, or one small multiple
+per state, is the static alternative.
+
+**In Lifehug, if it were used.** `graph_data()` (§1.1) builds one picture
+from the wiki as it stands. Nothing writes the previous `{nodes, edges}`.
+The daily loop changes `state/question_queue.json` (§5) before it changes
+the graph. A node appears when a page is compiled. An edge appears when
+`compute_crosslinks` writes `related:` (§1.4). Those are the events a
+history would have to keep, and it does not keep them. Animating the
+320-step simulation (§1.2) would be the settling §2.1 already refused to
+treat as meaning, plus a second motion that §2.2 says is read as causality
+(Heer & Robertson).
+
+**What it would be for.** The owner could see that the portrait grew
+because a week of questions landed, and could compare two states. The task
+is comparison. Motion is not the instrument for it.
+
+### 8.3 Provenance
+
+**The idea.** Provenance is where a thing came from. The W3C PROV primer
+(obtained; the PROV-DM Recommendation itself was **not obtained**) models
+that as entities, activities that use entities and generate new ones, and
+agents who can be assigned responsibility. When one entity exists partly
+because of another, the later one was derived from the earlier one. Ragan,
+Endert, Sanyal & Chen 2016, obtained as the VAST 2015 preprint of the
+*IEEE TVCG* 22(1) paper, sort visualization provenance into five types —
+data, visualization, interaction, insight, and rationale — and six
+purposes. Recall is the purpose that matches "where did this node come
+from." They note that a coarser record raises uncertainty about what was
+aggregated. The type this page would need is data provenance, for recall.
+It is not a history of the viewer's own clicks, and it is not the
+classifier's rationale.
+
+**In Lifehug, if it were used.** A compiled page already names its origins.
+`frontmatter()` writes `sources:` as vault-relative paths and then
+`sources_count` (lines 432–436). Those paths are `answers/<id>.md` or files
+under `sources/`. A classification under `state/classifications/` names the
+same source (`source_path`) and the people, places, and themes read off it
+(`classify_story.py` lines 979–991). The graph node keeps only the integer
+`sources` (§1.1). A click opens the wiki page (line 2393), not the answer.
+Reading `sources:` back to a specific file is possible. The graph does not
+do it. Saying, in PROV's vocabulary, that the page was derived from those
+source entities, that compile was the activity, and that the owner is the
+agent of an answer, is a reading of the primer onto files that exist. It
+is not an export, and this review does not specify one.
+
+**What it would be for.** The owner could check a node against the words it
+came from, and could distrust a page whose sources they do not recognize.
+That is recall of the record. Corrections and retractions already work that
+way, on the source, not on the picture.
+
+### 8.4 Uncertainty
+
+**The idea.** Some names are suspected and not confirmed. A dashed outline
+is the obvious mark, and it is the one chronology-vis §3.1 already argues
+against. Joslyn & Savelli 2021, quoted there and **not re-obtained** here,
+tested dashed lines and blurry ends against a solid interval and found the
+errors "at approximately the same rate": "these classic uncertainty features
+did not help at all." Readers treated the graphic as a deterministic
+quantity. MacEachren et al. 2012, quoted in chronology-vis §3.2 and **not
+re-obtained**, ranked fuzziness, location, and value (lighter means less
+certain) as the encodings readers took to mean uncertainty, and ranked
+saturation, hue, orientation, and shape as unacceptable. Boukhelifa,
+Bezerianos, Isenberg & Fekete 2012, quoted in that same section and **not
+re-obtained**, found that people subjectively prefer dashing to blur,
+grayscale, and sketchiness. Wood, Isenberg, Isenberg, Dykes, Boukhelifa &
+Slingsby 2012, quoted beside it, found that sketchy rendering compromises
+relative area judgment. Radius is this page's analysis mark (§4). A sketchy
+circle fights that comparison. A dashed ring also collides with the ghost
+ring D3 wants for ideal size: two outlines, two meanings.
+
+**In Lifehug, if it were used.** Three stores hold "not yet sure," and none
+of them is a graph node. `plan_entities` skips an entity whose real
+answer-mentions fall short of `_ENTITY_MIN_MENTIONS` — person 1, place 2,
+period 2, object 1 — unless a manual source or a confirmed research item
+remains (`wiki_compile.py` lines 917 and 966–968). The name can still sit
+on `state/entity_rosters/<type>.json`. It is absent from the wiki, so
+`graph_data` never sees it. `recommend_focuses._evidence_strength` labels a
+score under 8 as `weak` (lines 633–638) and writes that label on
+`state/focus_recommendations.json`. A weak recommendation is a focus idea,
+not a page. Candidate research becomes a file under
+`sources/candidate-research/` only when it is confirmed and ready
+(`candidate_research.py` line 1262: "only confirmed ready research can
+become source"). Unconfirmed research is not a source and not a node.
+Drawing any of the three as a dashed circle would invent a node the
+compiler refused, and would use a mark the uncertainty literature does not
+support. Withholding the node, or drawing a confirmed node in a lighter
+value when its support is thin, is the proposal. It has not been tested.
+
+**What it would be for.** The owner should not read a guess as a person in
+the portrait. The graph is the life that has been filed. Suspicion already
+lives on the roster and in the recommendations, until a channel is chosen
+that does not look like the ideal-size ring and does not pretend a missing
+page is a page.
+
+---
+
+## 9. Design consequences
 
 Numbered so a contract can cite them. Each one points at the section that
-forced it. None of them is implemented.
+forced it. None of them is implemented. D1–D14 come from §1–§7. D15–D18
+come from §8 and do not renumber the earlier items.
 
 1. **D1. Read the source count from the whole frontmatter.** `page_field`'s
    1024-character window drops `sources_count` once the `sources:` list is
@@ -685,10 +855,29 @@ forced it. None of them is implemented.
 14. **D14. Keep a way out of the hairball.** Ego highlight, small multiples
     by type or era, and a focus mode are filters over existing keys (§7).
     The force layout of every `related:` link is not the only view.
+15. **D15. A semantic substrate is a different layout, not a coat of paint
+    on the force simulation** (§8.1). An axis has to be an attribute the
+    vault stores. Time is not one number per node. `emotional_weight` is
+    the recommender's keyword-window sum, not a classifier field, and it
+    is not a feeling the owner stated. Do not place nodes on it until a
+    contract picks the attribute.
+16. **D16. Do not animate the graph's growth** (§8.2). Successive states,
+    if they are kept at all, are small multiples or a before-and-after
+    pair. The 320-step settling is not a time series.
+17. **D17. Provenance on a node is the page's `sources:` list, opened as
+    the answer or the source file** (§8.3). The purpose is recall of the
+    record. A PROV export is unspecified, and this review does not add one.
+18. **D18. Do not encode "suspected" with a dashed outline** (§8.4). It
+    collides with D3's ideal-size ring, and chronology-vis §3.1 says the
+    classic dashed uncertainty mark did not help. An entity under
+    `_ENTITY_MIN_MENTIONS`, a weak focus recommendation, and unconfirmed
+    candidate research are not graph nodes. Withholding the node is the
+    proposal. A lighter value, on a node that does exist, is the
+    alternative to test.
 
 ---
 
-## 9. Honest gaps in this review
+## 10. Honest gaps in this review
 
 Stated so a later reader does not mistake silence for support.
 
@@ -729,6 +918,27 @@ Stated so a later reader does not mistake silence for support.
   `focus_fill`, category coverage, and `placement_score` (§4.5), plus the
   owner's sentence in chronology-vis. It is not a proof that no module
   anywhere computes one.
+- **§8 is a set of directions, and most of its pictures are speculative.**
+  No vault was laid out on a substrate, no earlier graph was stored, no
+  provenance click was drawn, and no uncertainty mark was tested.
+- **Beck, Burch, Diehl & Weiskopf 2017 was not obtained in full.** The
+  claims in §8.2 are from the 2014 EuroVis STAR by the same authors, which
+  was obtained, and from the 2017 abstract on the Wiley page. Unread pages
+  of the journal version are not cited.
+- **Wattenberg 2006 (PivotGraph) was not obtained.** §8.1 mentions it only
+  as a paper Shneiderman & Aris name.
+- **The PROV-DM Recommendation was not obtained.** §8.3 uses the PROV
+  primer. It does not quote the Recommendation's constraints.
+- **MacEachren et al. 2012, Boukhelifa et al. 2012, Wood et al. 2012, and
+  Joslyn & Savelli 2021 were not re-obtained.** §8.4 quotes them only
+  through chronology-vis §3.1 and §3.2.
+- **`emotional_weight` is a keyword count.** Treating it as an emotion the
+  owner expressed would over-read `recommend_focuses.py` (§8.1).
+- **There is no stored history of `{nodes, edges}`.** Any picture of the
+  graph growing is undesigned (§8.2).
+- **A dashed outline for an unconfirmed entity is the prompt's example,
+  not a finding.** §8.4 refuses it. The refusal rests on chronology-vis
+  and on the compiler's refusal to mint the page, not on a new experiment.
 
 ---
 
@@ -736,7 +946,7 @@ Stated so a later reader does not mistake silence for support.
 
 **This repository and the planning issue**
 
-- `system/research/chronology-vis.md` §0 (lines 21–30), §1.1, §4 (lines 733–933), §5.1–§5.3 (lines 937–1024) — the owner's balance sentence, the outline-under-solid overlay, the improper-meter argument, and the animation constraints this review adopts
+- `system/research/chronology-vis.md` §0 (lines 21–30), §1.1, §3.1–§3.2 (uncertainty encodings, from about line 430), §4 (lines 733–933), §5.1–§5.3 (lines 937–1024) — the owner's balance sentence, the outline-under-solid overlay, the uncertainty results §8.4 reuses, the improper-meter argument, and the animation constraints this review adopts
 - [lifehug/lifehug#434](https://github.com/lifehug/lifehug/issues/434) — planning issue, including the findings comment [#issuecomment-5862355205](https://github.com/lifehug/lifehug/issues/434#issuecomment-5862355205)
 - lifehug-platform `9a607f54` (read 2026-09-28): `apps/web/lib/graph-layout.ts`, `apps/web/lib/reflect.ts` (`GraphNode`, `GraphEdge`), `apps/web/app/(product)/graph/GraphClient.tsx`
 
@@ -745,7 +955,7 @@ Stated so a later reader does not mistake silence for support.
 - Fruchterman, T. M. J. & Reingold, E. M., 1991, *Graph drawing by force-directed placement*, Software: Practice and Experience 21(11):1129–1164 — https://reingold.co/force-directed.pdf — https://doi.org/10.1002/spe.4380211102 *(obtained)*
 - Heer, J. & Robertson, G., 2007, *Animated transitions in statistical data graphics*, InfoVis — https://idl.cs.washington.edu/files/2007-AnimatedTransitions-InfoVis.pdf *(abstract and introduction re-read; experimental statistics carried from chronology-vis §5.1)*
 - Robertson, G., Fernandez, R., Fisher, D., Lee, B. & Stasko, J., 2008, *Effectiveness of animation in trend visualization*, IEEE TVCG — http://www.cc.gatech.edu/~john.stasko/papers/infovis08-anim.pdf *(not obtained; quoted via chronology-vis §5.2)*
-- Archambault, D. & Purchase, H., 2011, *Animation, small multiples, and the effect of mental map preservation in dynamic graphs*, IEEE TVCG — https://doi.org/10.1109/tvcg.2010.78 *(not obtained; quoted via chronology-vis §5.2)*
+- Archambault, D., Purchase, H. & Pinaud, B., 2011, *Animation, small multiples, and the effect of mental map preservation in dynamic graphs*, IEEE TVCG — https://doi.org/10.1109/tvcg.2010.78 *(not obtained; quoted via chronology-vis §5.2, whose source line already names Pinaud)*
 - Misue, K., Eades, P., Lai, W. & Sugiyama, K., 1995, *Layout adjustment and the mental map*, Journal of Visual Languages & Computing — https://doi.org/10.1006/jvlc.1995.1010 *(not obtained)*
 - Tversky, B., Morrison, J. B. & Bétrancourt, M., 2002, *Animation: can it facilitate?*, International Journal of Human-Computer Studies 57(4) — https://doi.org/10.1006/ijhc.2002.1017 *(not obtained; quoted via Heer & Robertson and chronology-vis §5.2)*
 
@@ -754,6 +964,19 @@ Stated so a later reader does not mistake silence for support.
 - Blondel, V. D., Guillaume, J.-L., Lambiotte, R. & Lefebvre, E., 2008, *Fast unfolding of communities in large networks*, Journal of Statistical Mechanics P10008 — https://arxiv.org/pdf/0803.0476 *(obtained)*
 - Traag, V. A., Waltman, L. & van Eck, N. J., 2019, *From Louvain to Leiden: guaranteeing well-connected communities*, Scientific Reports — https://arxiv.org/pdf/1810.08473 *(obtained)*
 - Collins, C., Penn, G. & Carpendale, S., 2009, *Bubble Sets: Revealing Set Relations with Isocontours over Existing Visualizations*, IEEE TVCG 15(6) — https://doi.org/10.1109/TVCG.2009.122 *(not obtained)*
+
+**Semantic substrates, dynamic graphs, provenance, uncertainty (§8)**
+
+- Shneiderman, B. & Aris, A., 2006, *Network visualization by semantic substrates*, IEEE TVCG 12(5):733–740 — http://www.cs.umd.edu/hcil/trs/2006-19/2006-19.pdf — https://doi.org/10.1109/TVCG.2006.166 *(obtained, as the HCIL technical report)*
+- Wattenberg, M., 2006, *Visual exploration of multivariate graphs*, CHI, pp. 811–819 *(not obtained; bibliographic line taken from Shneiderman & Aris, reference [37])*
+- Beck, F., Burch, M., Diehl, S. & Weiskopf, D., 2014, *The state of the art in visualizing dynamic graphs*, EuroVis STAR — https://doi.org/10.2312/eurovisstar.20141174 *(obtained)*
+- Beck, F., Burch, M., Diehl, S. & Weiskopf, D., 2017, *A taxonomy and survey of dynamic graph visualization*, Computer Graphics Forum 36(1):133–159 — https://doi.org/10.1111/cgf.12791 *(full text not obtained; abstract read)*
+- Gil, Y. & Miles, S. (eds.), 2013, *PROV Model Primer*, W3C Working Group Note — https://www.w3.org/TR/prov-primer/ *(obtained)*. PROV-DM, the Recommendation, was **not obtained**
+- Ragan, E. D., Endert, A., Sanyal, J. & Chen, J., 2016, *Characterizing provenance in visualization and data analysis: an organizational framework of provenance types and purposes*, IEEE TVCG 22(1):31–40 — https://www.cise.ufl.edu/~eragan/papers/Ragan_VAST2015.pdf — https://doi.org/10.1109/TVCG.2015.2467551 *(obtained, as the VAST 2015 preprint)*
+- MacEachren, A. M., Roth, R. E., O'Brien, J., Li, B., Swingley, D. & Gahegan, M., 2012, *Visual semiotics and uncertainty visualization: an empirical study*, IEEE TVCG 18(12):2496–2505 *(not re-obtained; quoted via chronology-vis §3.2)*
+- Boukhelifa, N., Bezerianos, A., Isenberg, T. & Fekete, J.-D., 2012, *Evaluating sketchiness as a visual variable for the depiction of qualitative uncertainty*, IEEE TVCG 18(12):2769–2778 *(not re-obtained; quoted via chronology-vis §3.2)*
+- Wood, J., Isenberg, P., Isenberg, T., Dykes, J., Boukhelifa, N. & Slingsby, A., 2012, *Sketchy rendering for information visualization*, IEEE TVCG 18(12):2749–2758 *(not re-obtained; quoted via chronology-vis §3.2)*
+- Joslyn, S. & Savelli, S., 2021, *Visualizing uncertainty for non-expert end users*, Frontiers in Computer Science 2:590232 — https://www.frontiersin.org/articles/10.3389/fcomp.2020.590232/pdf *(not re-obtained; title and quotations via chronology-vis §3.1)*
 
 **Completeness, carried from chronology-vis §4 and not re-obtained**
 
@@ -768,8 +991,12 @@ Written here, not in `system/research/QUEUE.md`. That file was not edited.
 1. **Which signal is current size** (issue #434, open question 1). Distinct answers per entity, normalised within type; the recommender score; scene-slot depth; raw source count; or a mix. §4.4 lists the first three and rejects the fourth as the radius (D2, D6).
 2. **How ideal weights are defined** (issue #434, open question 2). A fixed archetype by type and relation, weights learned from the life, or an archetype the owner can override. The only examples on record are sisters, parents, grandparents, and jobs (§4.2, D4).
 3. **How to render current against target without clutter** (issue #434, open question 3). Ghost ring, fill percentage, hover-only, or small multiples. D3 picks the static ring as the proposal to test, and does not test it.
-4. **Whether to deduplicate cross-referenced sources** (issue #434, open question 4). One answer on five pages currently counts five times. Fractional weight is undesigned (§9).
+4. **Whether to deduplicate cross-referenced sources** (issue #434, open question 4). One answer on five pages currently counts five times. Fractional weight is undesigned (§10).
 5. **Reproduce the 1024-character bug on a compiled vault** with both short answer paths and `msg-<24 hex>` conversation paths, and record the real radii (§1.3).
 6. **Obtain the unread layout papers** before a contract leans on them: Robertson et al. 2008, Archambault & Purchase 2011, Misue et al. 1995, Tversky et al. 2002, Collins et al. 2009.
 7. **Decide whether era memberships are hulls, filters, or edges.** They are receipts (`era_memberships.py`), not `related:` links (§3.2). Nothing says which picture they should become.
 8. **Decide whether a saved layout is allowed at all.** D10 forbids it. The platform warm start shows the pressure to cache positions. A contract should say which of those wins before anyone stores a drag.
+9. **Which attribute, if any, is a semantic-substrate axis** (§8.1, D15). Time is a property of a period and of a placed moment, not of a person. `emotional_weight` is a keyword-window sum. Neither has been chosen.
+10. **Whether successive graph states are kept, and as what** (§8.2, D16). Small multiples and a before-and-after pair are the candidates. Animation is not. Nothing in the vault stores a previous `{nodes, edges}`.
+11. **How far a provenance click goes** (§8.3, D17). The wiki page, the `sources:` list, or the answer body. A PROV serialization is a separate question, and this review does not open it.
+12. **Which uncertainty channel does not collide with the ideal-size ring** (§8.4, D18). Dashed outlines are the example the literature, via chronology-vis §3.1, does not support. Lighter value, and withholding a node the compiler never minted, are untested.
