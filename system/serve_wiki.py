@@ -2250,6 +2250,29 @@ def _fm_list(fm: str, key: str) -> list[str]:
     return out
 
 
+def _fm_scalar(fm: str, key: str) -> str:
+    """Read one frontmatter scalar from the whole block, not a byte window."""
+    m = re.search(rf'^{re.escape(key)}:\s*"?(.+?)"?\s*$', fm, re.MULTILINE)
+    return m.group(1).strip() if m else ""
+
+
+def graph_source_count(fm: str) -> int:
+    """How many sources feed a page.
+
+    `frontmatter()` writes `sources_count` after the full `sources:` list.
+    `page_field()` only scans 1024 characters, so a long list hides that
+    scalar and the fullest pages draw at radius 7. The list is the count.
+    """
+    listed = _fm_list(fm, "sources")
+    if listed:
+        return len(listed)
+    raw = _fm_scalar(fm, "sources_count")
+    try:
+        return int(raw or 0)
+    except ValueError:
+        return 0
+
+
 def graph_data() -> dict:
     """Build the entity graph from compiled wiki pages: nodes = pages (sized by
     sources_count, colored by focus saturation where known), edges = related
@@ -2275,7 +2298,7 @@ def graph_data() -> dict:
         fm = _frontmatter_block(text)
         rel = str(p.relative_to(WIKI_DIR.parent))
         try:
-            sc = int(page_field(p, "sources_count") or 0)
+            sc = graph_source_count(fm)
         except ValueError:
             sc = 0
         node = {"id": rel, "label": page_title(p), "type": p.parent.name, "sources": sc}

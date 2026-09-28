@@ -263,7 +263,7 @@ class WikiViewsTests(unittest.TestCase):
         wiki = self.tmp / "wiki"
         serve_wiki.WIKI_DIR = wiki
         self._write("wiki/life/my-life.md",
-            '---\ntitle: "My Life"\ntype: life\nsources:\n  - "answers/A1.md"\nsources_count: 3\nrelated:\n  - "[[emma]]"\n---\n# My Life\n')
+            '---\ntitle: "My Life"\ntype: life\nsources:\n  - "answers/A1.md"\n  - "answers/A2.md"\n  - "answers/A3.md"\nsources_count: 3\nrelated:\n  - "[[emma]]"\n---\n# My Life\n')
         self._write("wiki/people/emma.md",
             '---\ntitle: "Emma"\ntype: person\nsources:\n  - "answers/A1.md"\nsources_count: 1\nrelated:\n  - "[[my-life]]"\n---\n# Emma\n')
         self._write("wiki/index.md", "# Index\n")
@@ -817,6 +817,40 @@ class WikiViewsTests(unittest.TestCase):
         mylife = next(n for n in g["nodes"] if n["id"].endswith("my-life.md"))
         self.assertEqual(mylife["sources"], 3)
         self.assertIn("sat", mylife)
+
+    def test_graph_source_count_survives_a_long_frontmatter(self):
+        # frontmatter() writes sources_count after the whole sources list.
+        # page_field() only reads 1024 characters, so conversation paths
+        # fall out at 14 sources and short answer paths at about 40. The
+        # graph must count the list, or the fullest pages draw smallest.
+        self._populate()
+        wiki = self.tmp / "wiki" / "people"
+
+        def page(name: str, paths: list[str]) -> None:
+            lines = [
+                "---",
+                f'title: "{name}"',
+                "type: person",
+                "created: 2026-09-28",
+                "last_updated: 2026-09-28",
+                "sources:",
+            ]
+            lines.extend(f'  - "{p}"' for p in paths)
+            lines.append(f"sources_count: {len(paths)}")
+            lines.append("---")
+            lines.append(f"# {name}")
+            (wiki / f"{name}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        answers = [f"answers/K{n}.md" for n in range(50)]
+        conversations = [
+            f"sources/conversations/msg-{n:024x}.md" for n in range(14)
+        ]
+        page("full", answers)
+        page("talk", conversations)
+        g = serve_wiki.graph_data()
+        by_id = {n["id"]: n for n in g["nodes"]}
+        self.assertEqual(by_id["wiki/people/full.md"]["sources"], 50)
+        self.assertEqual(by_id["wiki/people/talk.md"]["sources"], 14)
 
 
 class RevisionFooterTests(unittest.TestCase):
