@@ -852,6 +852,31 @@ class WikiViewsTests(unittest.TestCase):
         self.assertEqual(by_id["wiki/people/full.md"]["sources"], 50)
         self.assertEqual(by_id["wiki/people/talk.md"]["sources"], 14)
 
+    def test_graph_camera_is_a_pointer_view_not_a_saved_layout(self):
+        # Drag, pan, and zoom are a camera. The 320-tick pose is the start.
+        # Nothing writes positions back, and a phone has the same nodes as a list.
+        self._populate()
+        title, body, wide = self._view("graph")
+        self.assertEqual(title, "Graph")
+        self.assertTrue(wide)
+        page = serve_wiki.layout(title, body, wide=wide).decode("utf-8")
+        self.assertIn('id="graph-stage"', page)
+        self.assertIn('id="graph-list"', page)
+        self.assertIn('id="graph-open"', page)
+        self.assertIn("pointerdown", page)
+        self.assertIn("pointermove", page)
+        self.assertIn("pointerup", page)
+        self.assertIn("requestFullscreen", page)
+        self.assertIn("preserveAspectRatio", page)
+        self.assertIn("for (var s = 0; s < 320; s++) tick();", page)
+        self.assertIn("touch-action: none", page)
+        self.assertIn("min-height: 44px", page)
+        self.assertNotIn("mousedown", page)
+        self.assertNotIn("localStorage", body)
+        self.assertNotIn("sessionStorage", body)
+        self.assertNotIn("addEventListener('click', function () { window.location", body)
+        self.assertIn("Second tap on the highlighted node opens the page", body)
+
 
 class RevisionFooterTests(unittest.TestCase):
     """v98: revision footer, /artifact-version + /artifact-diff helpers,
