@@ -1,7 +1,7 @@
 {
-  "version": 370,
+  "version": 371,
   "released": "2026-09-28",
-  "changelog": "v370: the graph counts every source on a page. A long sources list used to hide sources_count past the first 1024 characters, so the fullest pages drew smallest. WHAT HE WILL NOTICE: node size on the graph follows the real source list.",
+  "changelog": "v371: the graph is a camera you move, not a picture that saves where you dragged it. Pan, pinch, and drag work with a finger or a mouse. The first tap highlights a node and its neighbors; the next tap, or Open, goes to the page. A list of the same nodes is there when the map is too small, including on a phone. WHAT HE WILL NOTICE: he can move around the graph on his phone, and it starts from the same layout every time he opens it.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

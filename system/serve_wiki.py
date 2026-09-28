@@ -549,9 +549,18 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       padding: 4px 16px 2px; margin: 0 0 26px; }}
     .source-meta table {{ margin-bottom: 8px; }}
     .source-body {{ overflow-wrap: anywhere; }}
-    #graph {{ width: 100%; height: calc(100vh - 150px); border: 1px solid #e5dfd5; border-radius: 10px; background: #fffdf9; }}
-    .graph-legend {{ font-size: 13px; color: #6b5d49; margin: 6px 0 10px; }}
-    .graph-legend span {{ margin-right: 14px; }}
+    #graph {{ width: 100%; max-width: 100%; height: calc(100vh - 190px); height: calc(100dvh - 190px);
+      border: 1px solid #e5dfd5; border-radius: 10px; background: #fffdf9; touch-action: none; user-select: none; display: block; }}
+    .graph-legend {{ display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: #6b5d49; margin: 6px 0 10px; }}
+    .graph-toolbar {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }}
+    .graph-toolbar button, .graph-toolbar a {{ font: inherit; font-size: 13px; font-weight: 600; color: var(--link);
+      background: var(--card-bg); border: 1px solid #d8cdbb; border-radius: 6px; padding: 6px 12px; min-height: 36px;
+      text-decoration: none; display: inline-flex; align-items: center; box-sizing: border-box; }}
+    .graph-stage {{ min-width: 0; max-width: 100%; }}
+    .graph-stage:fullscreen, .graph-stage.graph-full {{ background: var(--card-warm); padding: 12px; box-sizing: border-box; }}
+    .graph-stage:fullscreen #graph, .graph-stage.graph-full #graph {{ height: calc(100vh - 88px); height: calc(100dvh - 88px); }}
+    .graph-list {{ list-style: none; margin: 0; padding: 0; }}
+    .graph-list a {{ display: flex; align-items: center; min-height: 36px; padding: 4px 2px; overflow-wrap: anywhere; }}
     @media (max-width: 820px) {{
       header {{ height: 60px; gap: 8px; padding: 0 12px; }}
       header > a {{ flex: 0 0 auto; }}
@@ -587,7 +596,8 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       .art-group-counts {{ white-space: nowrap; }}
       .source-toolbar a {{ min-height: 44px; }}
       table.dash {{ display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
-      #graph {{ min-width: 0; height: calc(100vh - 180px); }}
+      #graph {{ min-width: 0; height: min(62dvh, calc(100vh - 240px)); }}
+      .graph-toolbar button, .graph-toolbar a, .graph-list a {{ min-height: 44px; }}
     }}
   </style>
 </head>
@@ -2331,9 +2341,19 @@ _GRAPH_HTML = """<h1>Graph</h1>
   <span>Node size = sources feeding the page</span>
   <span>Fill = focus saturation (red→green) or entity type</span>
   <span>Edge width = shared-source strength</span>
-  <span style="color:#9a8c75">Click a node to open its page</span>
+  <span>First tap highlights. Second tap opens the page.</span>
 </div>
+<div class="graph-toolbar">
+  <button type="button" id="graph-fit">Fit</button>
+  <button type="button" id="graph-reset">Reset</button>
+  <button type="button" id="graph-full">Full screen</button>
+  <button type="button" id="graph-show-list" aria-pressed="false">List</button>
+  <a id="graph-open" hidden>Open page</a>
+</div>
+<div class="graph-stage" id="graph-stage">
 <svg id="graph"></svg>
+<ul id="graph-list" class="graph-list" hidden></ul>
+</div>
 <script>
 (function () {
   var TYPE_COLORS = {
@@ -2344,12 +2364,18 @@ _GRAPH_HTML = """<h1>Graph</h1>
   function satColor(s) { return s >= 0.7 ? '#3f8f4f' : (s >= 0.3 ? '#c79a2e' : '#b3543f'); }
   var svg = document.getElementById('graph');
   var NS = 'http://www.w3.org/2000/svg';
+  var stage = document.getElementById('graph-stage');
+  var listEl = document.getElementById('graph-list');
+  var openEl = document.getElementById('graph-open');
 
   fetch('/views/graph.json').then(function (r) { return r.json(); }).then(function (data) {
     var nodes = data.nodes, edges = data.edges;
-    if (!nodes.length) { svg.outerHTML = '<p class="empty">No compiled pages yet. Run <code>lifehug compile</code>.</p>'; return; }
-    var rect = svg.getBoundingClientRect();
-    var W = rect.width || 900, H = rect.height || 600;
+    if (!nodes.length) {
+      svg.insertAdjacentHTML('afterend', '<p class="empty">No compiled pages yet. Run <code>lifehug compile</code>.</p>');
+      svg.hidden = true;
+      return;
+    }
+    var W = 900, H = 640;
     var byId = {};
     nodes.forEach(function (n, i) {
       n.r = 7 + Math.sqrt(n.sources || 0) * 4;
@@ -2361,7 +2387,7 @@ _GRAPH_HTML = """<h1>Graph</h1>
     });
     edges = edges.filter(function (e) { return byId[e.source] && byId[e.target]; });
 
-    // Simple force simulation: repulsion + link springs + centering.
+    // Deterministic initial pose. Settling is not shown; it is not a change in the life.
     var K_REP = 5200, K_SPRING = 0.02, LINK_LEN = 90, CENTER = 0.015, DAMP = 0.86;
     function tick() {
       for (var i = 0; i < nodes.length; i++) {
@@ -2393,6 +2419,7 @@ _GRAPH_HTML = """<h1>Graph</h1>
       });
     }
     for (var s = 0; s < 320; s++) tick();
+    nodes.forEach(function (n) { n.x0 = n.x; n.y0 = n.y; });
 
     function el(name, attrs) {
       var e = document.createElementNS(NS, name);
@@ -2400,24 +2427,200 @@ _GRAPH_HTML = """<h1>Graph</h1>
       return e;
     }
     while (svg.firstChild) svg.removeChild(svg.firstChild);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    var world = el('g', {});
+    svg.appendChild(world);
     edges.forEach(function (e) {
-      var a = byId[e.source], b = byId[e.target];
-      svg.appendChild(el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y,
-        stroke: '#d8cdb8', 'stroke-width': Math.min(6, e.weight) }));
+      e.line = el('line', { stroke: '#d8cdb8', 'stroke-width': Math.min(6, e.weight) });
+      world.appendChild(e.line);
     });
     nodes.forEach(function (n) {
-      var g = el('g', { cursor: 'pointer' });
-      g.appendChild(el('circle', { cx: n.x, cy: n.y, r: n.r, fill: n.fill,
-        stroke: '#fff', 'stroke-width': 1.5 }));
-      var t = el('text', { x: n.x, y: n.y - n.r - 4, 'text-anchor': 'middle',
-        'font-size': 11, fill: '#3f3428' });
+      var g = el('g', {});
+      g.appendChild(el('circle', { cx: 0, cy: 0, r: n.r, fill: n.fill, stroke: '#fff', 'stroke-width': 1.5 }));
+      var t = el('text', { x: 0, y: -(n.r + 4), 'text-anchor': 'middle', 'font-size': 11, fill: '#3f3428' });
       t.textContent = n.label;
       g.appendChild(t);
-      g.addEventListener('click', function () { window.location = '/page/' + encodeURI(n.id); });
-      svg.appendChild(g);
+      n.g = g;
+      world.appendChild(g);
     });
+
+    function placeNode(n) { n.g.setAttribute('transform', 'translate(' + n.x + ' ' + n.y + ')'); }
+    function placeEdges() {
+      edges.forEach(function (e) {
+        var a = byId[e.source], b = byId[e.target];
+        e.line.setAttribute('x1', a.x); e.line.setAttribute('y1', a.y);
+        e.line.setAttribute('x2', b.x); e.line.setAttribute('y2', b.y);
+      });
+    }
+    nodes.forEach(placeNode);
+    placeEdges();
+
+    var neighbor = {};
+    edges.forEach(function (e) {
+      (neighbor[e.source] = neighbor[e.source] || {})[e.target] = 1;
+      (neighbor[e.target] = neighbor[e.target] || {})[e.source] = 1;
+    });
+    var selected = null;
+    function applySelection() {
+      nodes.forEach(function (n) {
+        var hot = !selected || n.id === selected || (neighbor[selected] && neighbor[selected][n.id]);
+        n.g.setAttribute('opacity', hot ? '1' : '0.15');
+      });
+      edges.forEach(function (e) {
+        var hot = !selected || e.source === selected || e.target === selected;
+        e.line.setAttribute('opacity', hot ? '1' : '0.08');
+      });
+      if (selected) {
+        openEl.hidden = false;
+        openEl.href = '/page/' + encodeURI(selected);
+        openEl.textContent = 'Open ' + byId[selected].label;
+      } else {
+        openEl.hidden = true;
+        openEl.removeAttribute('href');
+      }
+    }
+    // Second tap on the highlighted node opens the page. Drag never does.
+    function onTap(n) {
+      if (selected === n.id) { window.location = '/page/' + encodeURI(n.id); return; }
+      selected = n.id;
+      applySelection();
+    }
+
+    var cam = { x: 0, y: 0, w: W, h: H };
+    function applyCam() { svg.setAttribute('viewBox', cam.x + ' ' + cam.y + ' ' + cam.w + ' ' + cam.h); }
+    function bounds() {
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      nodes.forEach(function (n) {
+        var tw = Math.max(48, (n.label || '').length * 3.4);
+        minX = Math.min(minX, n.x - tw); maxX = Math.max(maxX, n.x + tw);
+        minY = Math.min(minY, n.y - n.r - 18); maxY = Math.max(maxY, n.y + n.r + 8);
+      });
+      return { x: minX - 24, y: minY - 24, w: Math.max(1, maxX - minX) + 48, h: Math.max(1, maxY - minY) + 48 };
+    }
+    function fit() { var b = bounds(); cam = { x: b.x, y: b.y, w: b.w, h: b.h }; applyCam(); }
+    function clientToWorld(cx, cy) {
+      var rect = svg.getBoundingClientRect();
+      var rw = rect.width || 1, rh = rect.height || 1;
+      var scale = Math.min(rw / cam.w, rh / cam.h) || 1;
+      var ox = rect.left + (rw - cam.w * scale) / 2;
+      var oy = rect.top + (rh - cam.h * scale) / 2;
+      return { x: cam.x + (cx - ox) / scale, y: cam.y + (cy - oy) / scale };
+    }
+    function zoomAt(cx, cy, factor) {
+      var before = clientToWorld(cx, cy);
+      var oldW = cam.w;
+      var nw = Math.max(80, Math.min(8000, oldW * factor));
+      cam.h = cam.h * (nw / oldW);
+      cam.w = nw;
+      var after = clientToWorld(cx, cy);
+      cam.x += before.x - after.x;
+      cam.y += before.y - after.y;
+      applyCam();
+    }
+    function hitNode(wx, wy) {
+      var best = null, bestD = Infinity;
+      nodes.forEach(function (n) {
+        var dx = wx - n.x, dy = wy - n.y;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d <= n.r + 10 && d < bestD) { best = n; bestD = d; }
+      });
+      return best;
+    }
+    fit();
+
+    // Camera only. A drag changes this view, never the vault.
+    var active = {};
+    var pinchD = 0;
+    function pointerDown(ev) {
+      if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+      svg.setPointerCapture(ev.pointerId);
+      var wpt = clientToWorld(ev.clientX, ev.clientY);
+      var hit = hitNode(wpt.x, wpt.y);
+      active[ev.pointerId] = {
+        x: ev.clientX, y: ev.clientY, cx: ev.clientX, cy: ev.clientY,
+        node: hit, nodeX: hit ? hit.x : 0, nodeY: hit ? hit.y : 0,
+        camX: cam.x, camY: cam.y, moved: false
+      };
+      ev.preventDefault();
+    }
+    function pointerMove(ev) {
+      var p = active[ev.pointerId];
+      if (!p) return;
+      p.cx = ev.clientX; p.cy = ev.clientY;
+      if (Math.abs(ev.clientX - p.x) + Math.abs(ev.clientY - p.y) > 8) p.moved = true;
+      var ids = Object.keys(active);
+      if (ids.length >= 2) {
+        var a = active[ids[0]], b = active[ids[1]];
+        var d = Math.hypot(a.cx - b.cx, a.cy - b.cy) || 1;
+        if (pinchD) zoomAt((a.cx + b.cx) / 2, (a.cy + b.cy) / 2, pinchD / d);
+        pinchD = d;
+        return;
+      }
+      var rect = svg.getBoundingClientRect();
+      var scale = Math.min((rect.width || 1) / cam.w, (rect.height || 1) / cam.h) || 1;
+      var dx = (ev.clientX - p.x) / scale;
+      var dy = (ev.clientY - p.y) / scale;
+      if (p.node) {
+        p.node.x = p.nodeX + dx;
+        p.node.y = p.nodeY + dy;
+        placeNode(p.node);
+        placeEdges();
+      } else {
+        cam.x = p.camX - dx;
+        cam.y = p.camY - dy;
+        applyCam();
+      }
+    }
+    function pointerUp(ev) {
+      var p = active[ev.pointerId];
+      delete active[ev.pointerId];
+      pinchD = 0;
+      if (!p || ev.type === 'pointercancel') return;
+      if (!p.moved && p.node) onTap(p.node);
+      else if (!p.moved && !p.node) { selected = null; applySelection(); }
+    }
+    svg.addEventListener('pointerdown', pointerDown);
+    svg.addEventListener('pointermove', pointerMove);
+    svg.addEventListener('pointerup', pointerUp);
+    svg.addEventListener('pointercancel', pointerUp);
+    svg.addEventListener('wheel', function (ev) {
+      ev.preventDefault();
+      zoomAt(ev.clientX, ev.clientY, ev.deltaY > 0 ? 1.08 : 0.92);
+    }, { passive: false });
+
+    document.getElementById('graph-fit').addEventListener('click', fit);
+    document.getElementById('graph-reset').addEventListener('click', function () {
+      nodes.forEach(function (n) { n.x = n.x0; n.y = n.y0; placeNode(n); });
+      placeEdges();
+      selected = null;
+      applySelection();
+      fit();
+    });
+    document.getElementById('graph-full').addEventListener('click', function () {
+      if (document.fullscreenElement) { document.exitFullscreen(); return; }
+      if (stage.requestFullscreen) stage.requestFullscreen();
+      else stage.classList.toggle('graph-full');
+    });
+    var listBtn = document.getElementById('graph-show-list');
+    nodes.slice().sort(function (a, b) { return (a.label || '').localeCompare(b.label || ''); }).forEach(function (n) {
+      var li = document.createElement('li');
+      var a = document.createElement('a');
+      a.href = '/page/' + encodeURI(n.id);
+      a.textContent = n.label + ' · ' + n.type;
+      li.appendChild(a);
+      listEl.appendChild(li);
+    });
+    listBtn.addEventListener('click', function () {
+      var show = listEl.hidden;
+      listEl.hidden = !show;
+      svg.hidden = show;
+      listBtn.textContent = show ? 'Map' : 'List';
+      listBtn.setAttribute('aria-pressed', show ? 'true' : 'false');
+    });
+    applySelection();
   }).catch(function (err) {
-    svg.outerHTML = '<p class="empty">Could not load graph: ' + err + '</p>';
+    svg.insertAdjacentHTML('afterend', '<p class="empty">Could not load graph: ' + err + '</p>');
+    svg.hidden = true;
   });
 })();
 </script>"""
