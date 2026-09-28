@@ -1,7 +1,7 @@
 {
-  "version": 371,
+  "version": 372,
   "released": "2026-09-28",
-  "changelog": "v371: the graph is a camera you move, not a picture that saves where you dragged it. Pan, pinch, and drag work with a finger or a mouse. The first tap highlights a node and its neighbors; the next tap, or Open, goes to the page. A list of the same nodes is there when the map is too small, including on a phone. WHAT HE WILL NOTICE: he can move around the graph on his phone, and it starts from the same layout every time he opens it.",
+  "changelog": "v372: the graph is a portrait. Node size is an entity's share of the answers that name it, compared with others of its type. A focus draws a ring for the target it is trying to reach. A relationship is an edge, thicker as more of that target has been told. WHAT HE WILL NOTICE: people and the other entities size by how much of the telling is theirs, a ring shows the aim, and the bonds between them are the thick lines.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",

@@ -877,6 +877,69 @@ class WikiViewsTests(unittest.TestCase):
         self.assertNotIn("addEventListener('click', function () { window.location", body)
         self.assertIn("Second tap on the highlighted node opens the page", body)
 
+    def test_graph_portrait_credit_ring_and_relationship_edge(self):
+        # Distinct answers, split 1/n across the entity pages that cite them.
+        # Percentile is within type. A relationship page is an edge, not a node.
+        # The ring is the focus target. No focus means no ring.
+        self._populate()
+        roadmap.ROADMAP_FILE.write_text(
+            '{"version":1,"focuses":['
+            '{"id":"my-life","label":"My Life","type":"life_story","categories":["A"],'
+            '"target_depth":4,"wiki_node":"wiki/life/my-life.md"},'
+            '{"id":"ann","label":"Ann","type":"person","categories":["A"],'
+            '"target_depth":8,"wiki_node":"wiki/people/ann.md"},'
+            '{"id":"me-ann","label":"Me and Ann","type":"relationship","categories":["A"],'
+            '"target_depth":8,"wiki_node":"wiki/relationships/me-and-ann.md"}'
+            ']}',
+            encoding="utf-8",
+        )
+
+        def page(rel: str, title: str, paths: list[str], related: list[str]) -> None:
+            lines = ["---", f'title: "{title}"', "type: person", "sources:"]
+            lines.extend(f'  - "{p}"' for p in paths)
+            lines.append(f"sources_count: {len(paths)}")
+            lines.append("related:")
+            lines.extend(f'  - "[[{r}]]"' for r in related)
+            lines.append("---")
+            lines.append(f"# {title}")
+            self._write(rel, "\n".join(lines) + "\n")
+
+        page("wiki/people/ann.md", "Ann", ["answers/Q1.md"], [])
+        page("wiki/people/ben.md", "Ben", ["answers/Q1.md", "answers/Q2.md"], [])
+        page("wiki/places/town.md", "Town", ["answers/Q2.md"], [])
+        page("wiki/relationships/me-and-ann.md", "Me & Ann", ["answers/Q1.md"], ["ann"])
+
+        g = serve_wiki.graph_data()
+        ids = {n["id"] for n in g["nodes"]}
+        self.assertNotIn("wiki/relationships/me-and-ann.md", ids)
+        by_id = {n["id"]: n for n in g["nodes"]}
+        ann, ben, town = (by_id["wiki/people/ann.md"], by_id["wiki/people/ben.md"],
+                          by_id["wiki/places/town.md"])
+        self.assertAlmostEqual(ann["credit"], 0.5)
+        self.assertAlmostEqual(ben["credit"], 1.0)
+        self.assertAlmostEqual(town["credit"], 0.5)
+        self.assertLess(ann["percentile"], ben["percentile"])
+        self.assertEqual(town["percentile"], 1.0)
+        self.assertTrue(ann["ring"])
+        self.assertEqual(ann["target"], 8)
+        self.assertAlmostEqual(ann["sat"], 0.125)
+        self.assertNotIn("ring", ben)
+
+        rels = [e for e in g["edges"] if e.get("kind") == "relationship"]
+        self.assertEqual(len(rels), 1)
+        ends = {rels[0]["source"], rels[0]["target"]}
+        self.assertEqual(ends, {"wiki/life/my-life.md", "wiki/people/ann.md"})
+        self.assertAlmostEqual(rels[0]["told"], 0.125)
+        emma_edge = next(
+            e for e in g["edges"]
+            if e.get("kind") == "related"
+            and {e["source"], e["target"]} == {"wiki/life/my-life.md", "wiki/people/emma.md"}
+        )
+        self.assertEqual(emma_edge["weight"], 2)
+        body = serve_wiki.view_graph()[1]
+        self.assertIn("n.ring", body)
+        self.assertIn("relationship", body)
+
 
 class RevisionFooterTests(unittest.TestCase):
     """v98: revision footer, /artifact-version + /artifact-diff helpers,
