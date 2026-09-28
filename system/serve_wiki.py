@@ -2283,27 +2283,70 @@ def graph_source_count(fm: str) -> int:
         return 0
 
 
+def _percentile(value: float, peers: list[float]) -> float:
+    """Midrank percentile in ``peers``. A type with one entity is the whole type."""
+    if len(peers) <= 1:
+        return 1.0
+    less = sum(1 for v in peers if v < value)
+    same = sum(1 for v in peers if v == value)
+    return (less + 0.5 * same) / len(peers)
+
+
+def _answer_source(path: str) -> bool:
+    return path.startswith("answers/") and path.endswith(".md")
+
+
+_REL_TITLE = re.compile(r"\s+(?:&|and)\s+", re.IGNORECASE)
+
+
+def _relationship_ends(label: str, related: list[str], slug_to_id: dict[str, str],
+                       label_to_id: dict[str, str], life_id: str | None,
+                       self_id: str) -> tuple[str, str] | None:
+    """The two entities a relationship page joins. One named end uses the life hub."""
+    ends: list[str] = []
+
+    def add(nid: str | None) -> None:
+        if nid and nid != self_id and nid not in ends:
+            ends.append(nid)
+
+    for slug in related:
+        add(slug_to_id.get(slug))
+    for part in _REL_TITLE.split(label or ""):
+        part = part.strip()
+        if not part:
+            continue
+        add(slug_to_id.get(slugify(part)) or label_to_id.get(part.casefold()))
+    if len(ends) == 1:
+        add(life_id)
+    if len(ends) >= 2:
+        return ends[0], ends[1]
+    return None
+
+
 def graph_data() -> dict:
-    """Build the entity graph from compiled wiki pages: nodes = pages (sized by
-    sources_count, colored by focus saturation where known), edges = related
-    links weighted by shared sources."""
-    sat_by_path: dict[str, float] = {}
+    """Entity graph from compiled wiki pages.
+
+    Node size is the percentile, within entity type, of distinct-answer credit.
+    An answer listed on n entity pages gives 1/n to each. A focus match draws
+    a ghost ring (no focus, no ring). A relationship page is an edge between
+    the entities it joins, not a node. Thickness is how much of that
+    relationship's focus target has been answered. Other ``related:`` links
+    stay thin.
+    """
+    focus_by_path: dict[str, dict] = {}
     try:
         questions = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8")) if QUESTIONS_FILE.exists() else []
         for f in load_roadmap().get("focuses", []):
             node = f.get("wiki_node")
             if node:
-                sat_by_path[node] = focus_fill(f, questions)["saturation"]
+                focus_by_path[node] = focus_fill(f, questions)
     except Exception:
-        pass
+        questions = []
 
-    nodes = []
-    slug_to_id: dict[str, str] = {}
-    sources_by_id: dict[str, set] = {}
-    related_by_id: dict[str, list[str]] = {}
+    pages = []
     for p in wiki_pages():
         if p.parent == WIKI_DIR:
-            continue  # skip index/log/schema
+            continue
         text = p.read_text(encoding="utf-8", errors="replace")
         fm = _frontmatter_block(text)
         rel = str(p.relative_to(WIKI_DIR.parent))
@@ -2311,36 +2354,112 @@ def graph_data() -> dict:
             sc = graph_source_count(fm)
         except ValueError:
             sc = 0
-        node = {"id": rel, "label": page_title(p), "type": p.parent.name, "sources": sc}
-        sat = sat_by_path.get(rel)
-        if sat is not None:
-            node["sat"] = round(sat, 3)
-        nodes.append(node)
-        slug_to_id[p.stem] = rel
-        sources_by_id[rel] = set(_fm_list(fm, "sources"))
-        related_by_id[rel] = [slugify(r) for r in _fm_list(fm, "related")]
+        pages.append({
+            "id": rel,
+            "label": page_title(p),
+            "type": p.parent.name,
+            "sources": sc,
+            "source_paths": _fm_list(fm, "sources"),
+            "related": [slugify(r) for r in _fm_list(fm, "related")],
+        })
 
-    edges = []
-    seen = set()
-    for nid, related in related_by_id.items():
-        for rslug in related:
+    entities = [p for p in pages if p["type"] != "relationships"]
+    relationships = [p for p in pages if p["type"] == "relationships"]
+
+    slug_to_id: dict[str, str] = {}
+    label_to_id: dict[str, str] = {}
+    for p in entities:
+        slug_to_id[Path(p["id"]).stem] = p["id"]
+        label_to_id[p["label"].casefold()] = p["id"]
+
+    life_nodes = [p for p in entities if p["type"] == "life"]
+    life_id = None
+    for p in life_nodes:
+        if p["id"].endswith("/my-life.md"):
+            life_id = p["id"]
+            break
+    if life_id is None and len(life_nodes) == 1:
+        life_id = life_nodes[0]["id"]
+    elif life_id is None and life_nodes:
+        life_id = max(life_nodes, key=lambda p: p["sources"])["id"]
+
+    holders: dict[str, list[str]] = {}
+    for p in entities:
+        for src in p["source_paths"]:
+            if _answer_source(src):
+                holders.setdefault(src, []).append(p["id"])
+    credit = {p["id"]: 0.0 for p in entities}
+    for ids in holders.values():
+        share = 1.0 / len(ids)
+        for i in ids:
+            credit[i] += share
+    by_type: dict[str, list[str]] = {}
+    for p in entities:
+        by_type.setdefault(p["type"], []).append(p["id"])
+    percentile = {}
+    for ids in by_type.values():
+        vals = [credit[i] for i in ids]
+        for i in ids:
+            percentile[i] = _percentile(credit[i], vals)
+
+    nodes = []
+    for p in entities:
+        fill = focus_by_path.get(p["id"])
+        node = {
+            "id": p["id"],
+            "label": p["label"],
+            "type": p["type"],
+            "sources": p["sources"],
+            "credit": round(credit[p["id"]], 3),
+            "percentile": round(percentile[p["id"]], 3),
+        }
+        if fill is not None:
+            node["sat"] = fill["saturation"]
+            node["target"] = fill["target"]
+            node["ring"] = True
+        nodes.append(node)
+
+    rel_edges: dict[tuple[str, str], dict] = {}
+    for p in relationships:
+        ends = _relationship_ends(p["label"], p["related"], slug_to_id, label_to_id, life_id, p["id"])
+        if not ends:
+            continue
+        key = tuple(sorted(ends))
+        fill = focus_by_path.get(p["id"])
+        told = 0.0
+        if fill is not None:
+            told = max(0.0, min(1.0, float(fill["saturation"])))
+        prev = rel_edges.get(key)
+        if prev is None or told > prev["told"]:
+            rel_edges[key] = {
+                "source": ends[0], "target": ends[1], "weight": 1,
+                "kind": "relationship", "told": round(told, 3),
+            }
+
+    edges = list(rel_edges.values())
+    seen = set(rel_edges)
+    sources_by_id = {p["id"]: set(p["source_paths"]) for p in entities}
+    for p in entities:
+        for rslug in p["related"]:
             tgt = slug_to_id.get(rslug)
-            if not tgt or tgt == nid:
+            if not tgt or tgt == p["id"]:
                 continue
-            key = tuple(sorted([nid, tgt]))
+            key = tuple(sorted([p["id"], tgt]))
             if key in seen:
                 continue
             seen.add(key)
-            shared = len(sources_by_id.get(nid, set()) & sources_by_id.get(tgt, set()))
-            edges.append({"source": nid, "target": tgt, "weight": 1 + shared})
+            shared = len(sources_by_id.get(p["id"], set()) & sources_by_id.get(tgt, set()))
+            edges.append({
+                "source": p["id"], "target": tgt, "weight": 1 + shared, "kind": "related",
+            })
     return {"nodes": nodes, "edges": edges}
 
 
 _GRAPH_HTML = """<h1>Graph</h1>
 <div class="graph-legend">
-  <span>Node size = sources feeding the page</span>
-  <span>Fill = focus saturation (red→green) or entity type</span>
-  <span>Edge width = shared-source strength</span>
+  <span>Node size = this entity's share of the telling, among its type</span>
+  <span>Ring = the focus target, when the page is a focus</span>
+  <span>Brown edges are relationships, thicker as more of that target is told</span>
   <span>First tap highlights. Second tap opens the page.</span>
 </div>
 <div class="graph-toolbar">
@@ -2378,7 +2497,9 @@ _GRAPH_HTML = """<h1>Graph</h1>
     var W = 900, H = 640;
     var byId = {};
     nodes.forEach(function (n, i) {
-      n.r = 7 + Math.sqrt(n.sources || 0) * 4;
+      n.r = 8 + (n.percentile != null ? n.percentile : 0) * 16;
+      var room = n.ring ? (4 + (1 - Math.max(0, Math.min(1, n.sat || 0))) * 14) : 0;
+      n.outer = n.r + room;
       n.x = W / 2 + Math.cos(i) * 180 + (i % 7) * 12;
       n.y = H / 2 + Math.sin(i) * 180 + (i % 5) * 12;
       n.vx = 0; n.vy = 0;
@@ -2431,11 +2552,21 @@ _GRAPH_HTML = """<h1>Graph</h1>
     var world = el('g', {});
     svg.appendChild(world);
     edges.forEach(function (e) {
-      e.line = el('line', { stroke: '#d8cdb8', 'stroke-width': Math.min(6, e.weight) });
+      var relEdge = e.kind === 'relationship';
+      var width = relEdge ? (1.25 + Math.max(0, Math.min(1, e.told || 0)) * 6.5) : 1;
+      e.line = el('line', {
+        stroke: relEdge ? '#9a6b3f' : '#d8cdb8',
+        'stroke-width': width
+      });
       world.appendChild(e.line);
     });
     nodes.forEach(function (n) {
       var g = el('g', {});
+      if (n.ring) {
+        g.appendChild(el('circle', {
+          cx: 0, cy: 0, r: n.outer, fill: 'none', stroke: 'rgba(124,79,29,0.45)', 'stroke-width': 1.5
+        }));
+      }
       g.appendChild(el('circle', { cx: 0, cy: 0, r: n.r, fill: n.fill, stroke: '#fff', 'stroke-width': 1.5 }));
       var t = el('text', { x: 0, y: -(n.r + 4), 'text-anchor': 'middle', 'font-size': 11, fill: '#3f3428' });
       t.textContent = n.label;
@@ -2491,9 +2622,10 @@ _GRAPH_HTML = """<h1>Graph</h1>
     function bounds() {
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       nodes.forEach(function (n) {
+        var reach = n.outer || n.r;
         var tw = Math.max(48, (n.label || '').length * 3.4);
         minX = Math.min(minX, n.x - tw); maxX = Math.max(maxX, n.x + tw);
-        minY = Math.min(minY, n.y - n.r - 18); maxY = Math.max(maxY, n.y + n.r + 8);
+        minY = Math.min(minY, n.y - reach - 18); maxY = Math.max(maxY, n.y + reach + 8);
       });
       return { x: minX - 24, y: minY - 24, w: Math.max(1, maxX - minX) + 48, h: Math.max(1, maxY - minY) + 48 };
     }
@@ -2522,7 +2654,7 @@ _GRAPH_HTML = """<h1>Graph</h1>
       nodes.forEach(function (n) {
         var dx = wx - n.x, dy = wy - n.y;
         var d = Math.sqrt(dx * dx + dy * dy);
-        if (d <= n.r + 10 && d < bestD) { best = n; bestD = d; }
+        if (d <= (n.outer || n.r) + 10 && d < bestD) { best = n; bestD = d; }
       });
       return best;
     }
