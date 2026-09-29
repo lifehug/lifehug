@@ -798,15 +798,59 @@ Every `timeline_resolution.reason` must contain 1 to
 """
 
 
+#: v374. Candidate fields that exist for freshness and identity bookkeeping,
+#: not for the model's choice: claim evidence, source revisions and hashes
+#: (``grounding_identity``), the canonical roster terms already folded into
+#: ``aliases``, and the episode id behind ``candidate_id``. They stay in the
+#: snapshot and in ``context_digest``; only the timeline prompt's copy drops them.
+PROMPT_OMITTED_CANDIDATE_FIELDS = (
+    "grounding_identity", "canonical_roster_terms", "episode_id",
+)
+#: v374. Event-context fields the model never reads (a freshness hash).
+PROMPT_OMITTED_EVENT_CONTEXT_FIELDS = ("input_fingerprint",)
+#: v374. What a stored event's old resolution shows the model: its verdict and
+#: why, never the bookkeeping (candidate list, revisions, fingerprints).
+PROMPT_KEPT_RESOLUTION_FIELDS = ("status", "reason")
+#: v374. The first line of the per-source data. Everything before it is the
+#: fixed timeline instruction block, byte-identical for every source, so a
+#: host can cache it as a prompt prefix.
+TIMELINE_DATA_MARKER = "## Source File"
+
+
+def _compact_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _prompt_candidate(row: object) -> object:
+    if not isinstance(row, dict):
+        return row
+    return {key: value for key, value in row.items()
+            if key not in PROMPT_OMITTED_CANDIDATE_FIELDS}
+
+
+def _prompt_event(event: dict) -> dict:
+    row = dict(event)
+    resolution = row.get("timeline_resolution")
+    if isinstance(resolution, dict):
+        row["timeline_resolution"] = {
+            key: resolution[key] for key in PROMPT_KEPT_RESOLUTION_FIELDS if key in resolution
+        }
+    return row
+
+
 def _timeline_prompt_context(
     context_snapshot: dict,
     *,
     event_keys: list[str] | None = None,
+    compact: bool = False,
 ) -> str:
     """Render existing context facts without changing the stored snapshot.
 
     ``event_keys`` (v373, timeline mode) narrows the event contexts to the
     events that still need judgment. Rule-settled events are never shown.
+    ``compact`` (v374, timeline mode) also narrows the candidates to the ones
+    those events name, drops freshness-only fields from the prompt's copy,
+    and renders without whitespace.
     """
     candidates = list(context_snapshot.get("candidates") or [])
     event_contexts = context_snapshot.get("event_contexts", {})
@@ -815,7 +859,23 @@ def _timeline_prompt_context(
         event_contexts = {
             key: value for key, value in (event_contexts or {}).items() if key in wanted
         }
-    return json.dumps({
+    if compact:
+        needed = {
+            str(candidate_id)
+            for value in (event_contexts or {}).values() if isinstance(value, dict)
+            for candidate_id in value.get("candidate_ids") or ()
+        }
+        candidates = [
+            _prompt_candidate(row) for row in candidates
+            if isinstance(row, dict) and str(row.get("candidate_id") or "") in needed
+        ]
+        event_contexts = {
+            key: {name: field for name, field in value.items()
+                  if name not in PROMPT_OMITTED_EVENT_CONTEXT_FIELDS}
+            if isinstance(value, dict) else value
+            for key, value in (event_contexts or {}).items()
+        }
+    payload = {
         "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
         "context_complete": context_snapshot.get("context_complete", False),
         "context_truncated": context_snapshot.get("context_truncated", False),
@@ -832,7 +892,10 @@ def _timeline_prompt_context(
         "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
         "prior_event_identities": context_snapshot.get("prior_event_identities", []),
         "event_contexts": event_contexts,
-    }, indent=2, sort_keys=True)
+    }
+    if compact:
+        return _compact_json(payload)
+    return json.dumps(payload, indent=2, sort_keys=True)
 
 
 def timeline_settlement_for(
@@ -868,13 +931,99 @@ def settle_for(
     )
 
 
+def _timeline_eligibility_without_echo() -> str:
+    """The shared eligibility block, minus the timeline candidate-list echo.
+
+    v374: the framework fills ``timeline_resolution.candidate_ids`` from the
+    event context, so the timeline prompt never asks the model to copy it.
+    Full mode keeps the shared block verbatim. Every replacement must apply,
+    so an edit to the shared block fails loudly here instead of drifting.
+    """
+    text = _TIMELINE_CANDIDATE_ELIGIBILITY
+    for old, new in (
+        ("""   - In timeline mode, copy the exact
+     `event_contexts[event_key].candidate_ids` list into
+     `timeline_resolution.candidate_ids`, including alternatives and ineligible
+     candidates. Do not recompute, filter, add, or omit IDs, even when abstaining.
+""", """   - In timeline mode, the event-local set is exactly
+     `event_contexts[event_key].candidate_ids`, alternatives and ineligible
+     candidates included. Do not return it: the framework records it.
+"""),
+        (""" With complete
+   coverage, return null relation plus `ambiguous`, preserving the entire
+   event-local candidate ID list.
+""", """ With complete
+   coverage, return null relation plus `ambiguous`.
+"""),
+        ("""   Never choose an ID in `identity_blocked_candidate_ids`; keep it in the
+   resolution candidate list when supplied for this event.
+   Retain ineligible candidates in the resolution list; never link to them.
+""", """   Never choose an ID in `identity_blocked_candidate_ids`, and never link to
+   an ineligible candidate.
+"""),
+        ("""relation; every other status requires null. `candidate_ids` includes every
+event-local alternative, even when rejected or ineligible. This list is
+event-local, not the entire catalog.
+""", """relation; every other status requires null. Return only `status` and
+`reason`; the framework fills the event-local `candidate_ids`.
+"""),
+    ):
+        if old not in text:
+            raise AssertionError("timeline eligibility block drifted from its no-echo edit")
+        text = text.replace(old, new, 1)
+    return text
+
+
+def timeline_instruction_block() -> str:
+    """The fixed timeline-refresh instructions: identical for every source.
+
+    v374. They come FIRST, ending just before :data:`TIMELINE_DATA_MARKER`,
+    so a host can cache them; the one source's data follows.
+    """
+    return f"""You are refreshing only the timeline evidence in an existing Lifehug story classification.
+
+{load_how_words_arrive()}
+
+## What to return
+
+Return ONLY one raw JSON object with exactly these fields:
+{{
+  "_classification_mode": "timeline",
+  "_classification_snapshot": the four-key object under "Snapshot" below, copied exactly,
+  "events": [
+    {{ "event_key": "exact existing event_key", "source_grounding": {{ "quote": "exact unique event quote", "temporal_quote": "exact date or age words inside quote", "subject_quote": "exact subject words inside quote", "kind": "date|age" }} or null, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "exact supplied candidate_id", "entity_refs": ["exact refs on that candidate"], "evidence": {{ "quote": "exact uniquely occurring Story Text quote" }} }} or null, "timeline_resolution": {{ "status": "linked|missing_evidence|ambiguous|incomplete|not_temporal", "reason": "1-{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} character explanation" }} }}
+  ]
+}}
+
+{_TIMELINE_EVIDENCE_DECISIONS}
+{_timeline_eligibility_without_echo()}
+
+Return each event key listed under Existing Events exactly once, and no
+other key: events the framework already settled by rule are not shown and must
+not be returned. Do not re-extract, rename, reorder, add, or omit events.
+Return only the four event-delta fields shown, and inside
+`timeline_resolution` only `status` and `reason`: the framework fills each
+event's `candidate_ids` from `event_contexts`. The framework merges only
+grounding, relation and resolution into the stored event. Never infer a
+calendar year. Do not return any document-level extraction field. Echo the
+mode and four-key snapshot exactly.
+
+Everything below is the one source to refresh. The data blocks are compact JSON.
+
+"""
+
+
 def _build_timeline_prompt(
     source_path: Path,
     fm: dict,
     story_text: str,
     context_snapshot: dict,
 ) -> str:
-    """Ask only for the temporal fields that can legitimately be refreshed."""
+    """Ask only for the temporal fields that can legitimately be refreshed.
+
+    v374: fixed instructions first, then this source's compact data, carrying
+    only the events that need judgment and only their candidates.
+    """
     _path, existing = _existing_classification(source_path)
     settlement = timeline_settlement.settle(context_snapshot, existing, story_text)
     judgment_keys = set(settlement["judgment_keys"])
@@ -883,18 +1032,17 @@ def _build_timeline_prompt(
         if isinstance(event, dict):
             timeline_evidence.ensure_event_key(event)
             if event["event_key"] in judgment_keys:
-                stored_events.append(event)
+                stored_events.append(_prompt_event(event))
     timeline_context = _timeline_prompt_context(
-        context_snapshot, event_keys=settlement["judgment_keys"]
+        context_snapshot, event_keys=settlement["judgment_keys"], compact=True,
     )
-    return f"""You are refreshing only the timeline evidence in an existing Lifehug story classification.
-
-{load_how_words_arrive()}
-
-## Source File
+    return f"""{timeline_instruction_block()}{TIMELINE_DATA_MARKER}
 Path: {_relative_path(source_path)}
 Title: {fm.get('title', '(untitled)')}
 Type: {fm.get('type', 'unknown')}
+
+## Snapshot
+{_compact_json(classifier_ctx.snapshot_metadata(context_snapshot))}
 
 ## Story Text
 {story_text}
@@ -904,27 +1052,7 @@ Type: {fm.get('type', 'unknown')}
 {timeline_context}
 
 ## Existing Events (immutable except the three link fields; only those needing judgment)
-{json.dumps(stored_events, indent=2, sort_keys=True)}
-
-Return ONLY one raw JSON object with exactly these fields:
-{{
-  "_classification_mode": "timeline",
-  "_classification_snapshot": {json.dumps(classifier_ctx.snapshot_metadata(context_snapshot), sort_keys=True)},
-  "events": [
-    {{ "event_key": "exact existing event_key", "source_grounding": {{ "quote": "exact unique event quote", "temporal_quote": "exact date or age words inside quote", "subject_quote": "exact subject words inside quote", "kind": "date|age" }} or null, "timeline_relation": {{ "relation": "within|before|after", "candidate_id": "exact supplied candidate_id", "entity_refs": ["exact refs on that candidate"], "evidence": {{ "quote": "exact uniquely occurring Story Text quote" }} }} or null, "timeline_resolution": {{ "status": "linked|missing_evidence|ambiguous|incomplete|not_temporal", "candidate_ids": ["every supplied candidate id relevant to this event"], "reason": "1-{timeline_evidence.MAX_RESOLUTION_REASON_CHARS} character explanation" }} }}
-  ]
-}}
-
-{_TIMELINE_EVIDENCE_DECISIONS}
-{_TIMELINE_CANDIDATE_ELIGIBILITY}
-
-Return each event key listed under Existing Events exactly once, and no
-other key: events the framework already settled by rule are not
-shown and must not be returned. Do not re-extract, rename, reorder, add, or omit
-events. Return only the four event-delta fields shown. The framework
-merges only grounding, relation and resolution into the stored event. Never infer
-a calendar year. Do not return any document-level extraction field. Echo the
-mode and four-key snapshot exactly.
+{_compact_json(stored_events)}
 """
 
 

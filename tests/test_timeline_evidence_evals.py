@@ -145,41 +145,51 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
                 self.assertNotIn(fixture["fixture_id"], timeline_prompt)
 
     def test_full_and_timeline_share_verbatim_eligibility_instructions(self) -> None:
+        """Full mode carries the shared block verbatim. v374: timeline mode
+        carries the same block minus the candidate-list echo, which the
+        framework fills; every other rule is word for word the same."""
         fixture = evals.load_fixtures()[-1]
         block = evals.classify_story._TIMELINE_CANDIDATE_ELIGIBILITY
-        prompts = (
-            evals.emitted_prompt(evals.build_case(fixture)),
-            evals.emitted_timeline_prompt(evals.build_timeline_case(fixture)),
+        no_echo = evals.classify_story._timeline_eligibility_without_echo()
+        full = evals.emitted_prompt(evals.build_case(fixture))
+        timeline = evals.emitted_timeline_prompt(evals.build_timeline_case(fixture))
+        self.assertEqual(full.count(block), 1)
+        self.assertEqual(timeline.count(no_echo), 1)
+        self.assertEqual(timeline.count(block), 0)
+        echo_rules = (
+            "copy the exact `event_contexts[event_key].candidate_ids` list",
+            "Do not recompute, filter, add, or omit IDs, even when abstaining",
+            "With complete coverage, return null relation plus `ambiguous`, preserving the entire event-local candidate ID list",
         )
-        for prompt in prompts:
-            with self.subTest(mode="timeline" if "Existing Events" in prompt else "full"):
-                self.assertEqual(prompt.count(block), 1)
-                text = " ".join(prompt.split())
-                for rule in (
-                    "copy the exact `event_contexts[event_key].candidate_ids` list",
-                    "including alternatives and ineligible candidates",
-                    "Do not recompute, filter, add, or omit IDs, even when abstaining",
-                    "must have no `unresolved_entity_mentions` and no `entity_ref_ambiguities`",
-                    "literal whole-candidate eligibility check: ANY nonempty list blocks the relation",
-                    "even when its mention seems unrelated to the matched place or role",
-                    "Do not reinterpret or dismiss the supplied flags",
-                    "With complete coverage, return null relation plus `ambiguous`, preserving the entire event-local candidate ID list",
-                    "Never choose an ID in `identity_blocked_candidate_ids`",
-                    "`entity_refs` must be a nonempty list of exact refs supplied on THAT candidate",
-                    "one exact, unchanged substring of Story Text occurring exactly once",
-                    "return `source_grounding: null`",
-                    "Null grounding still permits an independently valid relative `timeline_relation`",
-                    "When `complete: false`, always return `incomplete` with a null relation",
-                ):
-                    self.assertIn(rule, text)
+        shared_rules = (
+            "must have no `unresolved_entity_mentions` and no `entity_ref_ambiguities`",
+            "literal whole-candidate eligibility check: ANY nonempty list blocks the relation",
+            "even when its mention seems unrelated to the matched place or role",
+            "Do not reinterpret or dismiss the supplied flags",
+            "Never choose an ID in `identity_blocked_candidate_ids`",
+            "`entity_refs` must be a nonempty list of exact refs supplied on THAT candidate",
+            "one exact, unchanged substring of Story Text occurring exactly once",
+            "return `source_grounding: null`",
+            "Null grounding still permits an independently valid relative `timeline_relation`",
+            "When `complete: false`, always return `incomplete` with a null relation",
+        )
+        full_text = " ".join(full.split())
+        timeline_text = " ".join(timeline.split())
+        for rule in echo_rules + shared_rules:
+            self.assertIn(rule, full_text)
+        for rule in shared_rules:
+            self.assertIn(rule, timeline_text)
+        for rule in echo_rules:
+            self.assertNotIn(rule, timeline_text)
+        self.assertIn("including alternatives and ineligible candidates", full_text)
+        self.assertIn("alternatives and ineligible candidates included", timeline_text)
         sentinel = "SYNTHETIC_SHARED_ELIGIBILITY_SENTINEL"
         with mock.patch.object(evals.classify_story, "_TIMELINE_CANDIDATE_ELIGIBILITY", sentinel):
-            for prompt in (
-                evals.emitted_prompt(evals.build_case(fixture)),
-                evals.emitted_timeline_prompt(evals.build_timeline_case(fixture)),
-            ):
-                self.assertEqual(prompt.count(sentinel), 1)
-                self.assertNotIn("candidate must have no `unresolved_entity_mentions`", prompt)
+            prompt = evals.emitted_prompt(evals.build_case(fixture))
+            self.assertEqual(prompt.count(sentinel), 1)
+            self.assertNotIn("candidate must have no `unresolved_entity_mentions`", prompt)
+            with self.assertRaises(AssertionError):
+                evals.classify_story._timeline_eligibility_without_echo()
 
     def test_rendered_identity_blocks_match_in_both_modes_without_snapshot_mutation(self) -> None:
         fixtures = evals.load_fixtures()
@@ -197,18 +207,33 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
                           else evals.emitted_prompt(case))
                 context_text = prompt.split("## Canonical Timeline Context\n", 1)[1]
                 context, _ = json.JSONDecoder().raw_decode(context_text[context_text.index("{"):])
-                self.assertEqual(context["identity_blocked_candidate_ids"], [
-                    "node:amber-job", "node:cedar-first", "node:willow-stay",
-                ])
+                cs = evals.classify_story
+                if mode == "timeline":
+                    # v374: only the candidates the judged events name, and
+                    # without their freshness-only fields.
+                    needed = {cid for value in before["event_contexts"].values()
+                              for cid in value["candidate_ids"]}
+                    self.assertEqual(context["identity_blocked_candidate_ids"], ["node:cedar-first"])
+                    self.assertEqual(context["candidates"], [
+                        cs._prompt_candidate(row) for row in before["candidates"]
+                        if row["candidate_id"] in needed])
+                    self.assertEqual(context["event_contexts"], {
+                        key: {k: v for k, v in value.items() if k != "input_fingerprint"}
+                        for key, value in before["event_contexts"].items()})
+                else:
+                    self.assertEqual(context["identity_blocked_candidate_ids"], [
+                        "node:amber-job", "node:cedar-first", "node:willow-stay",
+                    ])
+                    self.assertEqual(context["candidates"], before["candidates"])
+                    self.assertEqual(context["event_contexts"], before["event_contexts"])
                 self.assertNotIn("node:cedar-second", context["identity_blocked_candidate_ids"])
-                self.assertEqual(context["candidates"], before["candidates"])
-                self.assertEqual(context["event_contexts"], before["event_contexts"])
                 self.assertEqual(context["classification_snapshot"],
                                  evals.classifier_context.snapshot_metadata(before))
                 self.assertEqual(case["snapshot"], before)
                 self.assertNotIn("identity_blocked_candidate_ids", case["snapshot"])
-                rendered.append(context["identity_blocked_candidate_ids"])
-        self.assertEqual(*rendered)
+                rendered.append(set(context["identity_blocked_candidate_ids"]))
+        # The timeline set is the full set narrowed to the judged candidates.
+        self.assertLessEqual(rendered[1], rendered[0])
 
     def test_identity_predicate_preserves_existing_truthiness_policy(self) -> None:
         predicate = evals.classifier_context.candidate_identity_is_resolved
@@ -410,8 +435,8 @@ class TimelineEvidenceEvalTests(unittest.TestCase):
         self.assertEqual(len(case["candidate_ids"]), 2)
         self.assertIn(case["expected_candidate_id"], case["candidate_ids"])
         self.assertIn("The borrowed desk is where I launched Harborlight.", case["prompt"])
-        self.assertIn('"event_role": "founded"', case["prompt"])
-        self.assertIn('"event_role": "job"', case["prompt"])
+        self.assertIn('"event_role":"founded"', case["prompt"])
+        self.assertIn('"event_role":"job"', case["prompt"])
         self.assertNotIn("fixture_id", case["prompt"])
 
     def test_catalog_live_path_validates_the_model_response(self) -> None:

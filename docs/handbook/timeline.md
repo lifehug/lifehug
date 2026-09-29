@@ -825,6 +825,18 @@ checked by the same validator, recorded as `settled_by` and `rule_settlements`
 on the classification; no digest, prompt version or extractor version moves,
 so the release itself queues nothing.
 
+**The prompt that is left is small** (v374). A timeline refresh prompt opens
+with its fixed instructions (identical for every story, ending at `## Source
+File`, so a host can cache them) and then carries one story's data as compact
+JSON: only the events that need judgment, only the candidates those events
+name, and none of the freshness bookkeeping (`grounding_identity`, canonical
+roster terms, episode ids, fingerprints, an old resolution's candidate list).
+The model no longer echoes each event's `candidate_ids`; it returns a status
+and a reason, and the framework fills the list from the same context it
+validates against, so the stored classification is shaped exactly as before.
+On the owner's vault the prompts that still need a model shrank from a mean of
+168k characters to 56k.
+
 ### The laws that protect the drawing
 
 Deciding two tellings are one event, and deciding a landmark entry no longer
