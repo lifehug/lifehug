@@ -233,7 +233,8 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         self.assertIn("provisional full-extraction", full_prompt)
         self.assertIn("context is retrieval input", " ".join(full_prompt.split()))
         self.assertNotIn("across the ENTIRE supplied candidate list", full_prompt)
-        self.assertIn('"event_contexts": {}', timeline_prompt)
+        # v374: the timeline prompt's data blocks are compact JSON.
+        self.assertIn('"event_contexts":{}', timeline_prompt)
         self.assertIn("Treat each `event_contexts[event_key]` entry independently", timeline_prompt)
         for prompt in (full_prompt, timeline_prompt):
             normalized = " ".join(prompt.split())

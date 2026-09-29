@@ -855,6 +855,8 @@ and human-decision changes invalidate only affected readings. A refresh settles
 by rule every event whose outcome the validator already fixes, and remaps a link
 whose node was only re-keyed; the prompt carries only the rest, and a story with
 nothing left needs no model call (`settle: rule` in `--refresh-targets`, v373).
+The timeline prompt opens with fixed, cacheable instructions and sends only
+compact data for the events that need judgment (v374).
 
 ```bash
 python3 system/lifehug.py classify-story --classify answers/A14.md

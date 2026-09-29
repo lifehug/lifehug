@@ -113,6 +113,25 @@ snapshot (`link_remap`, `candidate_identity`) and are excluded from every prompt
 and from `context_digest`; `PROMPT_VERSION` and `EXTRACTOR_VERSION` are
 unchanged, so adopting v373 queues no refresh.
 
+### v374 amendment: a smaller timeline prompt
+
+The timeline prompt puts `classify_story.timeline_instruction_block()` first
+(byte-identical for every source; the per-source data begins at
+`TIMELINE_DATA_MARKER`) and renders its data blocks as compact JSON. Its
+context carries only the judged events' contexts and candidates, and the
+prompt copy of a candidate omits `PROMPT_OMITTED_CANDIDATE_FIELDS`
+(`grounding_identity`, `canonical_roster_terms`, `episode_id`); event contexts
+omit `input_fingerprint`; stored events show only an old resolution's `status`
+and `reason`. The snapshot and `context_digest` inputs are unchanged. The model
+returns `timeline_resolution` as `{status, reason}`; the validator fills
+`candidate_ids` from the event context before the unchanged exact-quote,
+eligibility and coverage checks, so the stored resolution keeps its shape and
+neither `PROMPT_VERSION` nor `EXTRACTOR_VERSION` moves. A response that still
+echoes the list is accepted and checked as before. Full mode keeps the shared
+eligibility block verbatim; the timeline prompt carries the same block with the
+four echo sentences replaced (`_timeline_eligibility_without_echo`, which fails
+loudly if the shared block drifts).
+
 ## Consequences
 
 - Filing or publishing classifier output still cannot feed its contextual

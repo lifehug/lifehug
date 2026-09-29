@@ -1584,6 +1584,12 @@ def validate_response(
         }
         relation = event.get("timeline_relation")
         raw_resolution = event.get("timeline_resolution")
+        if (mode == "timeline" and isinstance(raw_resolution, dict)
+                and "candidate_ids" not in raw_resolution):
+            # v374: the timeline prompt no longer asks the model to echo the
+            # event-local set; the framework fills it from the same context
+            # it validates against, so the stored resolution is unchanged.
+            raw_resolution = {**raw_resolution, "candidate_ids": list(candidate_ids)}
         try:
             _validate_relation(
                 relation, candidates=candidates, context=context, story_text=story_text,

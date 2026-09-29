@@ -799,6 +799,10 @@ build time, never at read time; everything unlabeled defaults to `private`.**
   (v373: every event's outcome is forced by rule or its link was only re-keyed;
   `timeline_settlement`), `model` means a prompt goes out carrying only the
   events that still need judgment. `settle_counts` totals both over the backlog.
+  The timeline prompt (v374) opens with a fixed, cacheable instruction block,
+  carries compact JSON with only the judged events and their candidates, and
+  asks for each resolution's `status` and `reason` only; the framework fills
+  `candidate_ids`.
   Published calculated nodes carry `usable_placement: bool`, derived by the
   same predicate as work items and counts; clients consume it directly rather
   than interpreting `temporal_state`, width, or possible-value presence.
