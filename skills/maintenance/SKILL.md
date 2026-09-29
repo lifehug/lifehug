@@ -81,6 +81,9 @@ classifications — classify first so this week's queue sees this week's answers
    ingestion refuses it and preserves the prior accepted classification and
    claims. `classify-story --refresh-targets --limit 50` is the canonical
    bounded freshness/target report; `complete: false` means work remains.
+   A target marked `settle: rule` needs no model: file
+   `timeline_settlement.rule_response_text(snapshot)` for it (the local
+   `--classify` / `--classify-all` paths do this themselves, v373).
 
    Context is folded once from independent evidence, excluding classifier
    claims before deriving candidates. Compiling accepted readings must not

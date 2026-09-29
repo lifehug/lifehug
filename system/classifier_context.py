@@ -36,6 +36,10 @@ EXTRACTOR_VERSION = "story-classifier:2"
 MAX_CONTEXT_CANDIDATES = 64
 MAX_CONTEXT_DECISIONS = 64
 MAX_REFRESH_TARGETS = 50
+#: v373 snapshot keys read only by `timeline_settlement`; never in a prompt
+#: and never in ``context_digest``.
+LINK_REMAP_FIELD = "link_remap"
+CANDIDATE_IDENTITY_FIELD = "candidate_identity"
 SNAPSHOT_KEYS = (
     "source_revision",
     "context_digest",
@@ -722,6 +726,85 @@ def _derive_context_timeline(vault_root: Path, index: dict, records: dict, roste
     )
 
 
+def _landmark_place_refs(vault_root: Path) -> dict[str, str]:
+    """``{landmark source_id: place_ref}`` for every promoted landmark record.
+
+    v373. A landmark stay names the roster place it is (``place_ref``) while
+    its node is keyed on the words it is called by (its nickname or label).
+    When the person renames a stay the node id moves and the place does not;
+    this map is how a stored link finds the renamed stay again
+    (``timeline_settlement.A_RE_KEYED_LINK_REMAPS_BY_IDENTITY``). Unreadable
+    records are skipped, the way every landmark reader degrades.
+    """
+    try:
+        import landmark_projection  # noqa: PLC0415 - avoids an import cycle
+
+        rows = landmark_projection.load_landmark_sources(vault_root)
+    except Exception:  # noqa: BLE001 - an identity hint, never a failure
+        return {}
+    refs: dict[str, str] = {}
+    for row in rows or ():
+        if not isinstance(row, dict):
+            continue
+        record = row.get("record") if isinstance(row.get("record"), dict) else {}
+        source_id = str(row.get("source_id") or "")
+        place_ref = str(record.get("place_ref") or "")
+        if source_id and place_ref:
+            refs[source_id] = place_ref
+    return refs
+
+
+def _candidate_identity(
+    node: dict,
+    row: dict,
+    claim_ids: object,
+    claims_by_id: dict[str, dict],
+    landmark_place_refs: dict[str, str],
+) -> dict:
+    """What a candidate IS, for re-key remapping only (v373).
+
+    Never in the prompt and never in ``context_digest``: it is read only by
+    ``timeline_settlement`` to prove that a vanished node id is this node under
+    an earlier name. ``identity_refs`` are the candidate's own entity refs plus
+    the roster place a landmark record says the stay is; ``discriminators`` are
+    every value the node-id minters use to separate repeats (a stated start, a
+    promoted source id, an episode id).
+    """
+    import identity_resolution as ident  # noqa: PLC0415
+
+    refs = {str(ref) for ref in row.get("entity_refs") or () if ref}
+    discriminators: set[str] = set()
+    for value in (node.get("episode_id"),):
+        if value:
+            discriminators.add(str(value))
+    best = node.get("best_temporal_value")
+    if isinstance(best, dict):
+        for key in ("best", "earliest"):
+            text = str(best.get(key) or "").split("/")[0].strip()
+            if text:
+                discriminators.add(text)
+    for claim_id in sorted(str(value) for value in claim_ids or () if value):
+        claim = claims_by_id.get(claim_id)
+        if not isinstance(claim, dict):
+            continue
+        source_ref = claim.get("source_ref") if isinstance(claim.get("source_ref"), dict) else {}
+        source_id = str(source_ref.get("source_id") or "")
+        if source_id in landmark_place_refs:
+            refs.add(landmark_place_refs[source_id])
+            discriminators.add(source_id)
+        value = claim.get("temporal_value")
+        if isinstance(value, dict):
+            text = ident.episode_discriminator(value)
+            if text:
+                discriminators.add(text)
+    return {
+        "node_kind": str(node.get("node_kind") or ""),
+        "event_kind": str(node.get("event_kind") or ""),
+        "identity_refs": sorted(refs),
+        "discriminators": sorted(discriminators),
+    }
+
+
 def _load_context_catalog(vault_root: Path) -> dict:
     """Load source-independent classifier context for one invocation."""
     import episode_fold  # noqa: PLC0415 - avoids the timeline import cycle
@@ -775,6 +858,8 @@ def _load_context_catalog(vault_root: Path) -> dict:
         if ref in explicit_refs and path:
             human_tellings_by_source.setdefault(path, set()).add(ref)
 
+    landmark_place_refs = _landmark_place_refs(vault_root)
+    candidate_identity: dict[str, dict] = {}
     candidates: list[tuple[dict, frozenset[str]]] = []
     for node in projection.nodes:
         if not isinstance(node, dict):
@@ -784,6 +869,9 @@ def _load_context_catalog(vault_root: Path) -> dict:
         )
         row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters)
         if row is not None:
+            candidate_identity[str(row["candidate_id"])] = _candidate_identity(
+                node, row, claim_ids, independent_claims_by_id, landmark_place_refs,
+            )
             row["grounding_identity"] = _grounding_identity(
                 claim_ids, independent_claims_by_id
             )
@@ -834,6 +922,9 @@ def _load_context_catalog(vault_root: Path) -> dict:
             row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters)
             if row is None:
                 continue
+            candidate_identity.setdefault(str(row["candidate_id"]), _candidate_identity(
+                node, row, claim_ids, baseline_claims_by_id, landmark_place_refs,
+            ))
             row["grounding_identity"] = _grounding_identity(
                 claim_ids, baseline_claims_by_id
             )
@@ -860,6 +951,13 @@ def _load_context_catalog(vault_root: Path) -> dict:
         "retracted_paths": retracted_paths,
         "candidates": candidates,
         "baseline_candidates": baseline_candidates,
+        # v373: re-key remapping inputs. Neither reaches a prompt or a digest.
+        "candidate_identity": candidate_identity,
+        "node_aliases": {
+            str(key): str(value)
+            for key, value in dict(getattr(projection, "node_aliases", None) or {}).items()
+            if key and value
+        },
     }
 
 
@@ -1083,7 +1181,42 @@ def _build_context_snapshot_from_catalog(
         # rereads may rekey these identities and must not trigger themselves.
         "prior_event_identities": prior_identities,
     }
+    # v373: what `timeline_settlement` needs to remap a stored link whose node
+    # id no longer exists. Excluded from context_digest and from every prompt:
+    # it is how the framework avoids a model call, not what the model reads.
+    snapshot[LINK_REMAP_FIELD] = _link_remap_inputs(stored_events, candidates, catalog)
+    snapshot[CANDIDATE_IDENTITY_FIELD] = {
+        str(row.get("candidate_id") or ""): catalog.get("candidate_identity", {}).get(
+            str(row.get("candidate_id") or "")
+        ) or {}
+        for row in selected
+    }
     return snapshot
+
+
+def _link_remap_inputs(stored_events: list[dict], candidates: list[dict], catalog: dict) -> dict:
+    """Per vanished stored link id: the projection's own alias and the linked
+    entities' roster terms (the words the old node could have been keyed on)."""
+    present = {str(row.get("candidate_id") or "") for row in candidates}
+    roster_aliases = catalog.get("roster_aliases") or {}
+    node_aliases = catalog.get("node_aliases") or {}
+    remap: dict[str, dict] = {}
+    for event in stored_events:
+        relation = event.get("timeline_relation")
+        if not isinstance(relation, dict):
+            continue
+        old = str(relation.get("candidate_id") or "")
+        if not old or old in present:
+            continue
+        terms = remap.setdefault(old, {
+            "alias": str(node_aliases.get(old) or "") or None,
+            "subject_terms": {},
+        })["subject_terms"]
+        for ref in relation.get("entity_refs") or ():
+            ref = str(ref or "")
+            if ref and not timeline_evidence.is_generic_owner_reference(ref):
+                terms[ref] = sorted(set(roster_aliases.get(ref, ())))
+    return remap
 
 
 def build_context_snapshot(
@@ -1673,6 +1806,7 @@ def select_refresh_targets(
             "remaining_count": 0,
             "complete": True,
             "limit": cap,
+            "settle_counts": {"rule": 0, "model": 0},
         }
 
     records = _classification_records(root) if classifications is None else classifications
@@ -1685,7 +1819,14 @@ def select_refresh_targets(
         record = records.get(relative)
         reason = refresh_reason(snapshot, record)
         if reason:
-            pending.append({"source_path": relative, "reason": reason, "snapshot": snapshot_metadata(snapshot)})
+            pending.append({
+                "source_path": relative,
+                "reason": reason,
+                "snapshot": snapshot_metadata(snapshot),
+                # v373: still pending, but "rule" needs no model call — the
+                # count a host budgets model calls by.
+                "settle": _settle(source, snapshot, record, reason),
+            })
             if unfinished_search_blocks_a_moment(record):
                 blocked.add(relative)
     # Unfinished searches first (v333), then newest information (issue
@@ -1710,7 +1851,26 @@ def select_refresh_targets(
         "remaining_count": max(0, len(pending) - len(targets)),
         "complete": len(pending) <= len(targets),
         "limit": cap,
+        "settle_counts": {
+            value: sum(1 for row in pending if row["settle"] == value)
+            for value in ("rule", "model")
+        },
     }
+
+
+def _settle(source: Path, snapshot: dict, record: object, reason: str) -> str:
+    """``timeline_settlement.settle_mode`` for one pending report row."""
+    import timeline_settlement  # noqa: PLC0415 - it imports this module
+
+    if reason not in timeline_settlement.TIMELINE_REFRESH_REASONS:
+        return timeline_settlement.SETTLE_MODEL
+    try:
+        import classify_story  # noqa: PLC0415 - the one story-text reader
+
+        _fm, story_text = classify_story.load_source_text(source)
+    except Exception:  # noqa: BLE001 - the model reads what we cannot
+        return timeline_settlement.SETTLE_MODEL
+    return timeline_settlement.settle_mode(snapshot, record, story_text, reason=reason)
 
 
 __all__ = [

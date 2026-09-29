@@ -213,12 +213,19 @@ def run_batch(
         if selected_model is None:
             selected_model = classify_story.get_model(SimpleNamespace(model=None))
         for item in plan["items"]:
-            response = classify_story.classify_with_ai(item["prompt"], selected_model)
+            if item.get("settle") == "rule":
+                # v373: settled by rule, no model call.
+                response_text = classify_story.timeline_settlement.rule_response_text(
+                    item["snapshot"]
+                )
+            else:
+                response = classify_story.classify_with_ai(item["prompt"], selected_model)
+                response_text = json.dumps(response, sort_keys=True)
             response_items.append(
                 {
                     "source_path": item["source_path"],
                     "mode": item["mode"],
-                    "response_text": json.dumps(response, sort_keys=True),
+                    "response_text": response_text,
                 }
             )
 

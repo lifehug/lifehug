@@ -45,6 +45,7 @@ LEGACY_FOCUS_KEY = "spot" "light_opportunities"
 from ai_provider import AIResponseError, failure_metadata, normalize_question_records
 import classifier_context as classifier_ctx
 import timeline_evidence
+import timeline_settlement
 
 from lifehug_core import (
     ANSWERS_DIR,
@@ -797,8 +798,23 @@ Every `timeline_resolution.reason` must contain 1 to
 """
 
 
-def _timeline_prompt_context(context_snapshot: dict) -> str:
-    """Render existing context facts without changing the stored snapshot."""
+def _timeline_prompt_context(
+    context_snapshot: dict,
+    *,
+    event_keys: list[str] | None = None,
+) -> str:
+    """Render existing context facts without changing the stored snapshot.
+
+    ``event_keys`` (v373, timeline mode) narrows the event contexts to the
+    events that still need judgment. Rule-settled events are never shown.
+    """
+    candidates = list(context_snapshot.get("candidates") or [])
+    event_contexts = context_snapshot.get("event_contexts", {})
+    if event_keys is not None:
+        wanted = set(event_keys)
+        event_contexts = {
+            key: value for key, value in (event_contexts or {}).items() if key in wanted
+        }
     return json.dumps({
         "classification_snapshot": classifier_ctx.snapshot_metadata(context_snapshot),
         "context_complete": context_snapshot.get("context_complete", False),
@@ -806,17 +822,50 @@ def _timeline_prompt_context(context_snapshot: dict) -> str:
         "remaining_candidate_count": context_snapshot.get("remaining_candidate_count", 0),
         "catalog_omitted_count": context_snapshot.get("catalog_omitted_count", 0),
         "remaining_decision_count": context_snapshot.get("remaining_decision_count", 0),
-        "candidates": context_snapshot.get("candidates", []),
+        "candidates": candidates,
         "identity_blocked_candidate_ids": sorted(
             str(candidate["candidate_id"])
-            for candidate in context_snapshot.get("candidates") or ()
+            for candidate in candidates
             if isinstance(candidate, dict) and candidate.get("candidate_id")
             and not classifier_ctx.candidate_identity_is_resolved(candidate)
         ),
         "human_identity_decisions": context_snapshot.get("human_identity_decisions", []),
         "prior_event_identities": context_snapshot.get("prior_event_identities", []),
-        "event_contexts": context_snapshot.get("event_contexts", {}),
+        "event_contexts": event_contexts,
     }, indent=2, sort_keys=True)
+
+
+def timeline_settlement_for(
+    source_path: Path,
+    context_snapshot: dict,
+    *,
+    story_text: str | None = None,
+) -> dict:
+    """The v373 rule/judgment split of one timeline refresh (reads only)."""
+    _path, existing = _existing_classification(source_path)
+    if story_text is None:
+        _fm, story_text = load_source_text(source_path)
+    return timeline_settlement.settle(context_snapshot, existing, story_text)
+
+
+def settle_for(
+    source_path: Path,
+    context_snapshot: dict,
+    *,
+    mode: str | None,
+    reason: str | None = None,
+) -> str:
+    """``"rule"`` when this pending source needs no model call (v373)."""
+    if mode != "timeline":
+        return timeline_settlement.SETTLE_MODEL
+    _path, existing = _existing_classification(source_path)
+    _fm, story_text = load_source_text(source_path)
+    return timeline_settlement.settle_mode(
+        context_snapshot,
+        existing,
+        story_text,
+        reason=reason or classifier_ctx.refresh_reason(context_snapshot, existing),
+    )
 
 
 def _build_timeline_prompt(
@@ -827,11 +876,17 @@ def _build_timeline_prompt(
 ) -> str:
     """Ask only for the temporal fields that can legitimately be refreshed."""
     _path, existing = _existing_classification(source_path)
-    stored_events = copy.deepcopy((existing or {}).get("events") or [])
-    for event in stored_events:
+    settlement = timeline_settlement.settle(context_snapshot, existing, story_text)
+    judgment_keys = set(settlement["judgment_keys"])
+    stored_events = []
+    for event in copy.deepcopy((existing or {}).get("events") or []):
         if isinstance(event, dict):
             timeline_evidence.ensure_event_key(event)
-    timeline_context = _timeline_prompt_context(context_snapshot)
+            if event["event_key"] in judgment_keys:
+                stored_events.append(event)
+    timeline_context = _timeline_prompt_context(
+        context_snapshot, event_keys=settlement["judgment_keys"]
+    )
     return f"""You are refreshing only the timeline evidence in an existing Lifehug story classification.
 
 {load_how_words_arrive()}
@@ -848,7 +903,7 @@ Type: {fm.get('type', 'unknown')}
 ## Canonical Timeline Context
 {timeline_context}
 
-## Existing Events (immutable except the three link fields)
+## Existing Events (immutable except the three link fields; only those needing judgment)
 {json.dumps(stored_events, indent=2, sort_keys=True)}
 
 Return ONLY one raw JSON object with exactly these fields:
@@ -863,8 +918,10 @@ Return ONLY one raw JSON object with exactly these fields:
 {_TIMELINE_EVIDENCE_DECISIONS}
 {_TIMELINE_CANDIDATE_ELIGIBILITY}
 
-Return each existing event key exactly once. Do not re-extract, rename, reorder,
-add, or omit events. Return only the four event-delta fields shown. The framework
+Return each event key listed under Existing Events exactly once, and no
+other key: events the framework already settled by rule are not
+shown and must not be returned. Do not re-extract, rename, reorder, add, or omit
+events. Return only the four event-delta fields shown. The framework
 merges only grounding, relation and resolution into the stored event. Never infer
 a calendar year. Do not return any document-level extraction field. Echo the
 mode and four-key snapshot exactly.
@@ -1470,6 +1527,40 @@ def _revalidated_stored_grounding(
         return None
 
 
+def _with_rule_settlement(result: dict, settlement: dict, existing: dict) -> dict:
+    """One timeline response: the rule's deltas plus the model's for the rest.
+
+    The model answers only ``judgment_keys``; a delta it returns for an event
+    the rule settled (a pre-v373 prompt showed every event) is ignored in
+    favor of the rule's, which is the only outcome the validator allows there
+    anyway. A missing, extra or duplicated key is left for the validator to
+    refuse exactly as before.
+    """
+    supplied = result.get("events")
+    if not isinstance(supplied, list):
+        return result
+    keys = [
+        str(event.get("event_key") or "") if isinstance(event, dict) else ""
+        for event in supplied
+    ]
+    if len(keys) != len(set(keys)) or "" in keys:
+        return result
+    by_key = dict(zip(keys, supplied))
+    stored_keys = [
+        timeline_evidence.event_key(event)
+        for event in existing.get("events") or () if isinstance(event, dict)
+    ]
+    rule = settlement.get("deltas") or {}
+    merged: list[dict] = []
+    for key in stored_keys:
+        if key in rule:
+            merged.append(copy.deepcopy(rule[key]))
+        elif key in by_key:
+            merged.append(by_key[key])
+    merged.extend(by_key[key] for key in keys if key not in set(stored_keys))
+    return {**result, "events": merged}
+
+
 def prepare_classification(
     source_path: Path,
     model: str,
@@ -1506,6 +1597,12 @@ def prepare_classification(
         include_candidates=not skip_candidates,
     )
     _path, existing = _existing_classification(source_path)
+    settlement: dict | None = None
+    if mode == "timeline" and isinstance(existing, dict):
+        # v373: the rule settles what it can from THIS snapshot; the response
+        # answers only the rest. Both pass the one validator below.
+        settlement = timeline_settlement.settle(snapshot, existing, story_text)
+        result = _with_rule_settlement(result, settlement, existing)
     downgrades: list[dict] = []
     classifier_ctx.validate_response(
         result,
@@ -1566,7 +1663,15 @@ def prepare_classification(
         classification["events"] = merged_events
         classification["classification_snapshot"] = classifier_ctx.snapshot_metadata(snapshot)
         classification["classified_at"] = classified_at
-        classification["model_used"] = model
+        rule_only = settlement is not None and not settlement["judgment_keys"]
+        if not rule_only:
+            classification["model_used"] = model
+        classification[timeline_settlement.SETTLED_BY_FIELD] = (
+            timeline_settlement.SETTLE_RULE if rule_only else timeline_settlement.SETTLE_MODEL
+        )
+        classification[timeline_settlement.RULE_SETTLEMENTS_FIELD] = copy.deepcopy(
+            (settlement or {}).get("notes") or []
+        )
         classification["validation_downgrades"] = downgrades
         new_candidates: list[dict] = []
         updated_store = candidate_store
@@ -1675,8 +1780,20 @@ def classify_file(
     if mode is None:
         print(f"Already current: {_relative_path(source_path)}")
         return 0
+    rule_only = (
+        precomputed_result is None
+        and mode == "timeline"
+        and not timeline_settlement_for(
+            source_path, prompt_snapshot, story_text=story_text
+        )["judgment_keys"]
+    )
     if precomputed_result is not None:
         ai_result = precomputed_result
+    elif rule_only:
+        # v373 A_RULE_FORCED_OUTCOME_NEEDS_NO_MODEL: nothing here needs judgment.
+        ai_result = timeline_settlement.rule_response(prompt_snapshot)
+        if verbose:
+            print(f"[verbose] settled by rule, no model call: {source_path}")
     else:
         prompt = build_prompt(
             source_path,
@@ -1997,6 +2114,13 @@ def build_batch_plan(
             "reason": row["reason"],
             "mode": row["mode"],
             "snapshot": row["snapshot"],
+            # v373: "rule" means no model call is needed; file
+            # `timeline_settlement.rule_response_text(snapshot)` as this item's
+            # response_text. The prompt stays for hosts that predate the key.
+            timeline_settlement.SETTLE_FIELD: settle_for(
+                row["source"], row["context_snapshot"], mode=row["mode"],
+                reason=row["reason"],
+            ),
             "prompt": build_prompt(
                 row["source"],
                 fm,
@@ -2727,9 +2851,18 @@ def emit_prompts(
                 include_candidates=not skip_candidates,
             ),
         )
+        settle = settle_for(source_path, snapshot, mode=mode)
+        if settle == timeline_settlement.SETTLE_RULE:
+            # v373: the response needs no agent; write it so the ingest
+            # command files it like any other.
+            write_text(
+                out_dir / f"{stem}.response.json",
+                timeline_settlement.rule_response_text(snapshot) + "\n",
+            )
         items.append({
             "source": _relative_path(source_path),
             "mode": mode,
+            timeline_settlement.SETTLE_FIELD: settle,
             "skip_candidates": skip_candidates,
             "prompt": prompt_file.name,
             "response": f"{stem}.response.json",
