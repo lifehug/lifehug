@@ -452,11 +452,12 @@ class StableFreshnessTests(ContextCase):
             [(row["source_path"], row["reason"]) for row in report["targets"]],
             [(cc._relative_source(self.root, stuck), "context_changed")],
         )
-        # The batch size does not move and the report shape is unchanged.
+        # The batch size does not move. v373 adds exactly one row key,
+        # `settle`, so a host can count the model calls a batch will cost.
         self.assertEqual((report["limit"], report["pending_count"], report["remaining_count"]), (1, 2, 1))
         self.assertEqual(
             {key for row in report["targets"] for key in row},
-            {"source_path", "reason", "snapshot"},
+            {"source_path", "reason", "snapshot", "settle"},
         )
         full = cc.select_refresh_targets(
             self.root, [stuck, told], classifications=records, limit=50

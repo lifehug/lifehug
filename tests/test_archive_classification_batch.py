@@ -551,6 +551,22 @@ class ArchiveClassificationBatchTests(unittest.TestCase):
         old = snapshot(self.a, "old")
         current = snapshot(self.a, "new")
         prior = self.existing(self.a, old)
+        # v373: an event with no candidate is settled by rule and a response may
+        # omit it. Give this event one resolvable candidate so it needs
+        # judgment and its key is still required.
+        key = te.event_key(prior["events"][0])
+        current["candidates"] = [{
+            "candidate_id": "node:synthetic-stay",
+            "entity_refs": ["place/synthetic"],
+            "unresolved_entity_mentions": [],
+            "entity_ref_ambiguities": [],
+        }]
+        current["event_contexts"] = {key: {
+            "event_key": key,
+            "candidate_ids": ["node:synthetic-stay"],
+            "complete": True,
+            "input_fingerprint": "sha256:" + "e" * 64,
+        }}
         valid = timeline_delta(prior["events"][0], current)
         cases = {
             "omitted": [],

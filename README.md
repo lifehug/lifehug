@@ -851,7 +851,10 @@ ages may become independent candidate facts; contextual links never do. Search
 is event-local, keeps same-entity competitors, and is not capped by unrelated
 owner facts. A date-only correction to a known anchor flows through an existing
 link without another model call, while identity, alias, competitor, correction,
-and human-decision changes invalidate only affected readings.
+and human-decision changes invalidate only affected readings. A refresh settles
+by rule every event whose outcome the validator already fixes, and remaps a link
+whose node was only re-keyed; the prompt carries only the rest, and a story with
+nothing left needs no model call (`settle: rule` in `--refresh-targets`, v373).
 
 ```bash
 python3 system/lifehug.py classify-story --classify answers/A14.md

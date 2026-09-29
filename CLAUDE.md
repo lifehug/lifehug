@@ -795,6 +795,10 @@ build time, never at read time; everything unlabeled defaults to `private`.**
   Direct stated dates remain separate claims and survive beside the relation.
   Run `classify-story --refresh-targets --limit N` for the canonical bounded
   source/context freshness report used by maintenance and hosted scheduling.
+  Each target carries `settle`: `rule` means the refresh needs no model call
+  (v373: every event's outcome is forced by rule or its link was only re-keyed;
+  `timeline_settlement`), `model` means a prompt goes out carrying only the
+  events that still need judgment. `settle_counts` totals both over the backlog.
   Published calculated nodes carry `usable_placement: bool`, derived by the
   same predicate as work items and counts; clients consume it directly rather
   than interpreting `temporal_state`, width, or possible-value presence.

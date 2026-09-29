@@ -1,7 +1,7 @@
 {
-  "version": 372,
-  "released": "2026-09-28",
-  "changelog": "v372: the graph is a portrait. Node size is an entity's share of the answers that name it, compared with others of its type. A focus draws a ring for the target it is trying to reach. A relationship is an edge, thicker as more of that target has been told. WHAT HE WILL NOTICE: people and the other entities size by how much of the telling is theirs, a ring shows the aim, and the bonds between them are the thick lines.",
+  "version": 373,
+  "released": "2026-09-29",
+  "changelog": "v373: a context refresh asks the model only what needs judgment. A_RULE_FORCED_OUTCOME_NEEDS_NO_MODEL: an event whose candidate search is incomplete, whose complete search is empty, or whose every candidate is identity-blocked gets the one outcome the validator allows (incomplete / missing_evidence / ambiguous), written by the framework with its candidate_ids and snapshot metadata. A_RE_KEYED_LINK_REMAPS_BY_IDENTITY: a stored link whose node id vanished moves, same relation and quote, to the one candidate provably equal to it (the projection's node_aliases, or the old id recomputed from that candidate's kind and discriminator with a roster name of an entity the link cited), noted as remapped_from and validated like any link. The prompt carries only the remaining events; a story with none is filed with no model call. New additive fields: classification settled_by (rule|model) and rule_settlements; timeline_relation.remapped_from; --refresh-targets rows settle (rule|model) plus settle_counts; --batch-plan items settle (file timeline_settlement.rule_response_text(snapshot) for a rule item). Hosts with extra=forbid report/plan models must add settle. No context_digest, PROMPT_VERSION or EXTRACTOR_VERSION change: on the owner's vault all 612 digests match v372 byte for byte, so the release queues nothing. Measured on that vault (321 pending, 318 timeline): 153 refreshes need no model (144 wholly forced, 9 by remap; 29 links remapped in 17 stories), 581 of 1064 events settle by rule, and prompt characters sent drop from 58.4M in 318 calls to 27.8M in 165. WHAT HE WILL NOTICE: nearly half of the background re-reads stop costing a model call, and a renamed landmark stay keeps the moments linked to it.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -403,6 +403,7 @@
     "system/timeline_evals.py",
     "system/timeline_gain.py",
     "system/timeline_interaction.py",
+    "system/timeline_settlement.py",
     "system/update.py",
     "system/update_readme.py",
     "system/vault_contract.json",

@@ -90,6 +90,29 @@ stored snapshots, membership or digests.
 Clarifying these existing requirements leaves validator policy and cache versions
 unchanged, so accepted results are not re-run solely for clearer instructions.
 
+### v373 amendment: settle what the rule decides
+
+A timeline refresh first asks `timeline_settlement.settle` which events need
+judgment. Two rules answer without a model:
+`A_RULE_FORCED_OUTCOME_NEEDS_NO_MODEL` writes the one outcome the validator
+would allow (incomplete search → `incomplete`; complete and empty →
+`missing_evidence`; every candidate identity-blocked → `ambiguous`; a prior
+`not_temporal` is kept in the last two), and `A_RE_KEYED_LINK_REMAPS_BY_IDENTITY`
+moves a stored link whose node id vanished to the unique candidate provably
+equal to it, keeping relation and quote and noting `remapped_from`. Both
+produce the same four-key deltas a model returns and pass the same validator.
+The prompt carries only the remaining events; a response names only those keys
+(a pre-v373 response that names every key still files, and the rule's delta
+wins for the keys it settled). A source with nothing left is filed with no
+model call, reported as `settle: "rule"` by `--refresh-targets` (rows plus
+`settle_counts`) and `--batch-plan` (items; the response to file is
+`timeline_settlement.rule_response_text(snapshot)`). The classification records
+`settled_by` (`rule` | `model`) and `rule_settlements`; `model_used` keeps the
+last model reader when no model read this refresh. Remap inputs travel in the
+snapshot (`link_remap`, `candidate_identity`) and are excluded from every prompt
+and from `context_digest`; `PROMPT_VERSION` and `EXTRACTOR_VERSION` are
+unchanged, so adopting v373 queues no refresh.
+
 ## Consequences
 
 - Filing or publishing classifier output still cannot feed its contextual
