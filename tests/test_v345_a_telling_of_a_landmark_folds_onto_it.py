@@ -863,7 +863,7 @@ class TheRulesAreNamedTests(unittest.TestCase):
         because the number is a monotonic marker that the rules moved and later
         releases move it again — v346 took ``:15``, v347 ``:16`` the same day,
         v350 ``:17`` and v357 ``:18``."""
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:26")
 
     def test_the_binder_exports_its_new_tables(self):
         for name in ("A_TELLING_OF_A_LANDMARK_FOLDS_ONTO_IT",

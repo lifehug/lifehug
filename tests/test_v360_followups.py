@@ -609,7 +609,7 @@ class TheRulesAreNamedTests(unittest.TestCase):
             self.assertGreater(len(rule), 40)
 
     def test_the_rule_versions_moved(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:26")
         self.assertEqual(rw.RELATION_WORD_RULE_VERSION, "relation-words:2")
 
 

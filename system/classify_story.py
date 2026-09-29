@@ -623,7 +623,7 @@ def classification_mode(
     reason = classifier_ctx.refresh_reason(snapshot, existing)
     if reason is None:
         return None
-    return "timeline" if reason in ("context_changed", "relationship_changed") else "full"
+    return "timeline" if reason in timeline_settlement.TIMELINE_REFRESH_REASONS else "full"
 
 
 def _corrections_block(source_path: Path) -> str:
@@ -1789,7 +1789,9 @@ def prepare_classification(
                 merged[field] = copy.deepcopy(delta[field])
             merged_events.append(merged)
         classification["events"] = merged_events
-        classification["classification_snapshot"] = classifier_ctx.snapshot_metadata(snapshot)
+        classification["classification_snapshot"] = (
+            classifier_ctx.snapshot_metadata_after_timeline_refile(snapshot)
+        )
         classification["classified_at"] = classified_at
         rule_only = settlement is not None and not settlement["judgment_keys"]
         if not rule_only:

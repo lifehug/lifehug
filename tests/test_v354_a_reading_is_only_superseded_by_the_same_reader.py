@@ -704,7 +704,7 @@ class NothingDerivedMovesForThisTests(unittest.TestCase):
         argued: two fresh clones of the owner's vault at one head, one per
         framework, publish byte-identical `calculated-timeline.json` and
         `work-items.json` (generation 188, 1265 nodes, 69 work items)."""
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:26")
 
     def test_the_index_schema_is_additive(self):
         """``extractor_identity`` on a source row and ``readings`` in the counts

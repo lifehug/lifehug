@@ -125,3 +125,74 @@ results will be posted as PR evidence, without changing the head merely to
 replace this checkpoint. No CI verdict is claimed here.
 
 Generated with Codex.
+
+## Amendment 2026-09-29 — a re-key is not a change to a life
+
+Owner ruling, 2026-09-29, in his words:
+
+> "A software re-key is not a change to my life; carry links over."
+
+This spec already binds, in its Local Evidence, that "clock advancement, machine
+manifest rekeys and ordinary publication cannot alter freshness. Real date,
+roster and human authority changes still invalidate dependent contexts." Until
+v375 the digest honoured that sentence for the telling manifest and not for node
+ids. A node id is a machine key too: `temporal_projection.derive_node_id` hashes
+kind, subject WORDS and discriminator, so a rule move that re-mints ids (v350's
+identity re-key, a roster word that newly resolves, a landmark redraw) changed
+`candidate_ids` and every candidate's `candidate_id` inside `input_fingerprint`,
+and `refresh_reason` returned `context_changed` for stories whose words,
+candidates and meaning had not moved (Sep 27-28: ~800 model calls, ~40M tokens;
+56% of the rewrites changed no status and no link).
+
+v375 (`classifier_context.A_RE_KEY_IS_NOT_A_CHANGE_TO_A_LIFE`) makes the digest
+honour the sentence for node ids too.
+
+**What the digest now keys a candidate by.** Its identity, written in the id
+space its classification was filed in:
+
+1. a candidate whose node id the stored reading filed (in an event's
+   `timeline_resolution.candidate_ids` or its link) keeps that id;
+2. a candidate whose id is new stands for a filed id that vanished from the
+   catalog when that id is provably the same thing: the projection's own
+   `node_aliases` walks to it, or, when no other candidate of the event shares
+   its node kind, event kind and entities, the vanished id recomputes as
+   `derive_node_id(node_kind, event_kind, [a word its entities are known by],
+   a discriminator it carries)` (v373's proof). The pairing must be one-to-one;
+3. anything else keeps its own id, and the change is honest.
+
+The identity tuple is therefore node kind, event kind, the entity refs the
+candidate is about (plus the roster place a landmark stay is), and the
+discriminators its minters use (episode id, stated start, promoted landmark
+source id). With no filed id vanished, the digest input is the v374 input byte
+for byte, so `CONTEXT_SCHEMA_VERSION` stays 1 and no stored snapshot becomes
+`legacy_snapshot`. The prompt still reads today's ids; only the digest names.
+
+**What still invalidates.** Every other field stays in the digest exactly as
+before: canonical roster terms, entity refs, unresolved mentions and
+ambiguities, basis, conflict state, alternatives, reference keys, grounding
+identity, completeness and remaining counts, human identity decisions and
+source roster authority. New or removed candidates, source edits, corrections,
+prompt/extractor versions and human decisions invalidate exactly as they did.
+(Recorded, not changed: `supported_bounds` has not been part of the event
+fingerprint since 7f4d748, 2026-09-17, by ADR 0036's design that a date-only
+correction flows through an existing link without another model call.)
+
+**Links.** A stored link whose node id vanished follows the same redirect at
+read time: the fold follows this generation's `node_aliases` for an anchor that
+names a re-keyed node (`temporal_timeline.A_LINK_FOLLOWS_ITS_NODE_THROUGH_A_RE_KEY`,
+`timeline-rules:26`). A link the drawing neither draws nor redirects is pending
+with the new reason `link_orphaned` (ranked after `classifier_changed` and before
+`relationship_changed`/`context_changed`), a timeline-mode refresh: settled by
+rule when v373's remap proves one target, by the model otherwise. It is never a
+silent `anchor_unresolved`.
+
+**Known risk.** A rename that also changes meaning. When a digested field moves
+together with the id (a new entity ref, basis, conflict state), the digest
+changes and the story refreshes, as it should. When two candidates share kind
+and entities, only a discriminator separates them, and a re-key that re-orders
+discriminators would make recomputation prove the wrong stay; such candidates
+are therefore never paired by recomputation (only by the projection's redirect),
+and v373's rule remap refuses them too, so the link goes to the model as
+`link_orphaned`. A projection redirect that is itself wrong would carry a link
+to the wrong node; that is the fold's contract (`episode_fold`,
+`AN_IDENTITY_RE_KEY_IS_A_WAY_A_NODE_ID_MOVES`), not this digest's. ADR 0039.

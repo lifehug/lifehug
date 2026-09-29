@@ -380,7 +380,7 @@ class ThePlaceAnchorTests(VaultTestCase):
         self.assertEqual(len(timeline.load_landmarks().get("residences")), 6)
 
     def test_the_rule_version_moved(self) -> None:
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:26")
 
 
 class TheFoldTests(VaultTestCase):

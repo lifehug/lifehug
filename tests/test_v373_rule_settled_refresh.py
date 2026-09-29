@@ -165,7 +165,9 @@ class RekeyedLinkTests(VaultFixture, unittest.TestCase):
         before = self.stored(self.source)
         self.rename_stay()
         snapshot = cc.build_context_snapshot(self.root, self.source)
-        self.assertEqual(cc.refresh_reason(snapshot, before), "context_changed")
+        # v375: the retired nickname leaves no redirect the fold can follow,
+        # so the stored links are named `link_orphaned` (still settled by rule).
+        self.assertEqual(cc.refresh_reason(snapshot, before), cc.LINK_ORPHANED)
         self.assertEqual([row["candidate_id"] for row in snapshot["candidates"]], [NEW_NODE])
         settled = cs.timeline_settlement_for(self.source, snapshot)
         self.assertEqual(settled["judgment_keys"], [])
@@ -280,7 +282,17 @@ class DigestStabilityTests(VaultFixture, unittest.TestCase):
         self.build_vault()
 
     def test_every_digest_is_byte_identical_to_v372(self) -> None:
-        self.assertEqual(fixture_digests(self), V372_DIGESTS)
+        digests = fixture_digests(self)
+        # v375 (A_RE_KEY_IS_NOT_A_CHANGE_TO_A_LIFE) names the renamed stay by
+        # the id the story filed, so the one digest a rename touches is keyed
+        # differently; it still differs from the stored one, because the rename
+        # also changed what the stay is about (its entity refs). Every other
+        # digest is the v372 digest byte for byte.
+        after = digests.pop("story:after")
+        self.assertNotEqual(after, digests["story:stored"])
+        expected = dict(V372_DIGESTS)
+        expected.pop("story:after")
+        self.assertEqual(digests, expected)
 
     def test_versions_are_unchanged(self) -> None:
         self.assertEqual(cc.PROMPT_VERSION, "contextual-timeline:3")

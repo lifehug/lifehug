@@ -84,6 +84,9 @@ classifications — classify first so this week's queue sees this week's answers
    A target marked `settle: rule` needs no model: file
    `timeline_settlement.rule_response_text(snapshot)` for it (the local
    `--classify` / `--classify-all` paths do this themselves, v373).
+   A `link_orphaned` target (v375) holds a stored link whose node the drawing
+   neither draws nor redirects; it refreshes like `context_changed`. A rule
+   move that only re-keys node ids is not a change and queues nothing.
 
    Context is folded once from independent evidence, excluding classifier
    claims before deriving candidates. Compiling accepted readings must not

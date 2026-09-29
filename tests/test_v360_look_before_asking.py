@@ -613,7 +613,7 @@ class TheRulesAreNamedTests(unittest.TestCase):
                 self.assertGreater(len(getattr(module, name)), 60)
 
     def test_the_rule_version_moved_for_the_identity_change(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:26")
 
 
 if __name__ == "__main__":

@@ -507,7 +507,7 @@ class TheMissionIsMeasuredFromHisFathersBirthTests(unittest.TestCase):
 class TheRuleVersionMovesTests(unittest.TestCase):
 
     def test_calculation_rule_version(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:26")
 
 
 if __name__ == "__main__":
