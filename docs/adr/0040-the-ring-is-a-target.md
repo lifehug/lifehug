@@ -69,3 +69,27 @@ page drew large).
 
 Cross-references: `system/research/graph-vis.md` (#435) D3–D7;
 `system/research/life-portrait-targets.md`; ADR 0030 (eras, age frames).
+
+## Amendment 2026-09-30 — one scale (v380)
+
+The owner, on v378: "the biggest things would be my dad and my mom, to tell a
+story about myself … why is Forgiveness two or three times the size of
+Katie?" Per-type calibration let the best-told theme ("Family", tagged in
+nearly every source) set every theme's target at 80 while people's were
+about 21, keeping the within-type half of the owner table (D4) and dropping
+the cross-type half. Amended: `scale(type)` is `type_scale[type] × anchor`
+(`ONE_SCALE_FOR_THE_WHOLE_PORTRAIT`), where `anchor` is the
+`calibration.anchor.quantile` of `credit / (weight × tier × type_scale)`
+over the credited parents, spouses and partners (the owner's page still
+excluded), and `type_scale` is the owner's provisional table — person 1.0,
+life 1.0, place 0.6, period 0.6, project 0.5, lifes_work 0.6, object 0.3,
+theme 0.3 (rationale: the research note's "Amendment 2026-09-30 — one
+scale"). D7 is unchanged: nothing is summed across types. Told may now
+exceed target: `over = max(0, told/target − 1)` is emitted, the fill is
+capped at the ring with a thinner over-told ring outside it, and `doctor`
+lists the most over-told per type beside the largest gaps. The v378
+behaviour is `calibration.mode: per_type` and reproduces its numbers
+exactly. Same day, `A_FOCUS_WEARS_GOLD`: an active Focus wears a static gold
+halo outside its ring and a project a second-colour halo
+(`drawing.focus_halo`, `drawing.project_halo`); nodes carry `focus` and
+`project` flags, and the Focus name moved to `focus_label`.

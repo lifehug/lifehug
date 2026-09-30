@@ -207,8 +207,16 @@ The graph view's vocabulary ([handbook page](graph.md); research
   name in the text; an unclassified source earns nothing.
 - **Target** — what a well-told life holds for an entity: the owner table's
   weight for its type and kind (`system/research/life-portrait-targets.md`)
-  × its Focus tier multiplier × its type's calibration scale (ADR 0040).
+  × its Focus tier multiplier × its type's calibration scale (ADR 0040). By
+  default (v380) that scale is the type's `type_scale` (a fraction of a
+  parent: theme 0.3, place 0.6 …) × ONE anchor scale set by the best-told
+  parent, spouse or partner (`ONE_SCALE_FOR_THE_WHOLE_PORTRAIT`).
 - **Gap** — `max(0, 1 − told/target)`, on every node and relationship edge.
+- **Over / over-told** — `max(0, told/target − 1)`: telling past the target
+  (v380). Drawn as a second, thinner ring; `doctor` lists the most over-told
+  per type — a tag applied to almost everything shows there.
+- **Gold halo** — the mark of an active Focus on the graph
+  (`A_FOCUS_WEARS_GOLD`, v380); a project wears a halo of a second colour.
 - **Kind** — what an entity is within its type: a person's relation, a
   place's kind (residence, school, workplace, city …), a period's (era, age
   frame, job).

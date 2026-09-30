@@ -252,6 +252,11 @@ parent's ring and a home's ring can be read on one canvas, which is the table
 Weights compare only within a type: a theme at 1.0 and a parent at 1.0 are
 not "equal", they are each the top of their own type.
 
+*Amended 2026-09-30 (v380): calibration is now ONE scale for the whole
+portrait, anchored on people, with a `type_scale` per type — see "Amendment
+2026-09-30 — one scale" below. Per-type calibration is `calibration.mode:
+per_type`.*
+
 ### 5.2 People and relationships
 
 | Kind | Weight | Rationale |
@@ -380,6 +385,8 @@ Numbered so a contract can cite them.
    and §3 records it.
 3. **T3. Calibration is per type** (D5): the best-told member of a type sits
    on its target; nothing is summed across types (D7).
+   *Amended 2026-09-30: one scale anchored on people, `type_scale` per type;
+   per type is `calibration.mode: per_type`.*
 4. **T4. told is credit**, through the relevance gate (§6), split 1/n.
 5. **T5. gap = max(0, 1 − told/target)** is the one number a planner or the
    platform reads; percentile ranking is dropped as the size signal.
@@ -417,6 +424,94 @@ Numbered so a contract can cite them.
   a read of the eras store.
 
 ---
+
+## Amendment 2026-09-30 — one scale
+
+**Status: decided (owner observation 2026-09-30), implemented in v380 as
+`ONE_SCALE_FOR_THE_WHOLE_PORTRAIT`. Amends §5.1 and T3; everything else
+stands.**
+
+The owner, looking at v378 on his own vault: *"the intended surface for
+Nostalgia is three times the radius of Anthon James Taylor … the biggest
+things would be my dad and my mom, to tell a story about myself … why is
+Forgiveness two or three times the size of Katie?"*
+
+**Cause.** §5.1 calibrated per type: at `calibration.quantile` 1.0 the
+best-told member of each type sits on its target. The best-told theme is
+"Family", tagged in nearly every source, so every theme's target became 80
+while people's were about 21 — a theme's ring outsized a parent's. That kept
+the within-type half of the owner table (graph-vis D4: ideal radii by type
+AND relation) and discarded the cross-type half. D7 still holds: nothing is
+summed across types; one scale only lets two rings be compared by eye, which
+is what the owner did.
+
+**Decision.** One calibration scale for the whole graph, anchored on people:
+
+```
+anchor    = quantile(anchor.quantile) of credit / (weight × tier × type_scale[T])
+            over the credited anchor members (type person, kind parent | spouse | partner;
+            never an exclude_kinds kind such as owner)
+target(e) = weight(T, kind(e)) × tier(e) × type_scale[T] × anchor
+over(e)   = max(0, told(e) / target(e) − 1)
+```
+
+At quantile 1.0 the best-told parent, spouse or partner sits on its target
+and every other entity is measured against that same unit. With no credited
+anchor member the anchor falls back to the same quantile over every credited
+entity. v378's per-type calibration stays one config line away:
+`{"calibration": {"mode": "per_type"}}`.
+
+**`type_scale`** — the owner's provisional numbers, fractions of a parent's
+target, revisitable like every other number here:
+
+| Type | type_scale | Rationale |
+|---|---|---|
+| person | 1.0 | The anchor: "the biggest things would be my dad and my mom". |
+| life | 1.0 | The hub is the self-portrait, as large as a parent; an A–E arc keeps its 0.6 table weight (§5.4), so a chapter is 0.6 of a parent. |
+| place | 0.6 | A home is where the story happens, not who it is about — a step below the people. |
+| period | 0.6 | A named era is a chapter (McAdams, §1.4): the same step down as a place. |
+| project | 0.5 | "Jobs are smaller" than family (#434 §2); work sits a half-step below settings and chapters. |
+| lifes_work | 0.6 | The strand a life's work runs through is chapter-sized, above one project. |
+| object | 0.3 | An object is a prop in a scene. |
+| theme | 0.3 | A theme runs through the story rather than being told on its own: "why is Forgiveness two or three times the size of Katie?" |
+| relationship | 1.0 | *Builder's choice, not in the owner's list:* a bond is measured on its person's own scale. |
+| self | 0.6 | *Builder's choice, not in the owner's list:* a reflection page sits with the chapters, not the people. |
+
+**Told can exceed target.** On one scale a tag applied to almost everything
+is told far past its target (Family: over 17.8). The fill is drawn capped at
+the ring with a second, thinner ring marking the excess; `over` is emitted on
+every node and relationship edge; `doctor` lists the ten most over-told per
+type beside the ten largest gaps. That list is the honest signal that a tag
+is doing too much work.
+
+**Measured on a scratch copy of the owner's vault** (v378 → v380; ring px on
+the shipped 6 + 30·√(value / largest target) scale):
+
+| Entity | kind | told | v378 target | v378 gap | v378 ring px | v380 target | v380 gap | v380 over | v380 ring px |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Dad | parent | 17.8 | 17.8 | 0.00 | 20 | 17.8 | 0.00 | 0.00 | 30 |
+| Katie | spouse | 9.8 | 21.3 | 0.54 | 21 | 21.3 | 0.54 | 0.00 | 32 |
+| Mom | parent | 5.7 | 21.3 | 0.73 | 21 | 21.3 | 0.73 | 0.00 | 32 |
+| sibling (Anthon) | sibling | 7.3 | 17.0 | 0.57 | 20 | 17.0 | 0.57 | 0.00 | 29 |
+| Family | theme | 80.1 | 80.1 | 0.00 | 36 | 4.3 | 0.00 | 17.80 | 18 |
+| Nostalgia | theme | 8.0 | 80.1 | 0.90 | 36 | 4.3 | 0.00 | 0.89 | 18 |
+| Forgiveness | theme | 1.2 | 80.1 | 0.98 | 36 | 4.3 | 0.71 | 0.00 | 18 |
+
+Dad anchors the scale (14.21 per unit of weight × tier — the same number v378
+found for people, so no person's target moved); every theme's target fell
+from 80.1 to 4.3. The most over-told themes: Family, Rootlessness, Education,
+Hunger, Faith, Financial Instability, Belonging, Etherfuse, Friendship,
+Nostalgia — ten themes told past a theme's target, which says the theme tags
+are applied broadly, not that those themes are finished.
+
+**Same day — A_FOCUS_WEARS_GOLD.** The owner: *"I wanted it to be a little
+clearer which things are the focus, like a golden orb around the intended
+size. The entities that have been picked to be focuses or projects should be
+distinct."* v372's ring marked a Focus; v378 gave every entity a ring and the
+mark was lost. v380 draws a static gold halo just outside the target ring of
+every active Focus and a second-colour halo around every project
+(`drawing.focus_halo`, `drawing.project_halo`); nodes carry `focus` and
+`project` flags.
 
 ## Sources
 

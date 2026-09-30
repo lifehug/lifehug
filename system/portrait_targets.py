@@ -34,11 +34,24 @@ ENUMS: dict[str, tuple[str, ...]] = {
     "credit.split": ("equal", "whole"),
     "credit.answer_rule": ("listed", "tagged"),
     "credit.classified_rule": ("tagged", "none"),
+    "calibration.mode": ("per_type", "shared"),
 }
 
-#: Tables a vault may extend with NEW rows (a new kind, a new type): any
-#: dotted key under these prefixes may be added if its value is a number >= 0.
-OPEN_PREFIXES: tuple[str, ...] = ("targets.",)
+#: Tables a vault may extend with NEW rows (a new kind, a new type): a dotted
+#: key under one of these prefixes, at exactly this many dots, may be added if
+#: its value is a number >= 0 (``targets.person.aunt``, ``type_scale.pet``).
+OPEN_TABLES: dict[str, int] = {"targets.": 2, "type_scale.": 1}
+OPEN_PREFIXES: tuple[str, ...] = tuple(OPEN_TABLES)
+
+#: Knobs that are fractions of a distribution (a quantile) and must be in (0, 1].
+QUANTILE_KEYS: tuple[str, ...] = ("calibration.quantile", "calibration.anchor.quantile")
+
+#: Roadmap focus phases (``roadmap.py --phase``) a halo may be drawn for.
+FOCUS_PHASES: tuple[str, ...] = ("active", "finishing", "maintenance")
+
+#: String knobs that must be a ``#rrggbb`` colour.
+COLOR_KEYS: tuple[str, ...] = ("drawing.focus_halo.color", "drawing.project_halo.color")
+_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 #: String knobs that must compile as a regular expression.
 REGEX_KEYS: tuple[str, ...] = ("kinds.age_frame_pattern",)
@@ -92,7 +105,7 @@ def validate_override(framework: dict, override: dict) -> list[str]:
                 errors.append(f"schema_version {value!r} != framework {framework.get('schema_version')!r}")
             continue
         if key not in flat_fw:
-            if any(key.startswith(p) for p in OPEN_PREFIXES) and key.count(".") == 2:
+            if any(key.startswith(p) and key.count(".") == n for p, n in OPEN_TABLES.items()):
                 if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
                     errors.append(f"{key}: must be a number >= 0")
                 continue
@@ -111,8 +124,20 @@ def validate_override(framework: dict, override: dict) -> list[str]:
                 re.compile(str(value))
             except re.error as exc:
                 errors.append(f"{key}: not a regular expression ({exc})")
-        if key == "calibration.quantile" and not 0 < float(value) <= 1:
+        if key in QUANTILE_KEYS and not 0 < float(value) <= 1:
             errors.append(f"{key}: must be in (0, 1]")
+        if key == "calibration.anchor.type":
+            types = set(framework.get("targets", {})) | set((override.get("targets") or {}))
+            if value not in types:
+                errors.append(f"{key}: {value!r} is not a type in targets")
+        if key in COLOR_KEYS and not _COLOR.match(str(value)):
+            errors.append(f"{key}: {value!r} is not a #rrggbb colour")
+        if key == "drawing.focus_halo.phases" and not set(value) <= set(FOCUS_PHASES):
+            errors.append(f"{key}: {value!r} not all in {list(FOCUS_PHASES)}")
+        if key.endswith(".opacity") and not 0 <= float(value) <= 1:
+            errors.append(f"{key}: must be in [0, 1]")
+        if key == "calibration.anchor.kinds" and not all(isinstance(v, str) and v for v in value):
+            errors.append(f"{key}: must be a list of kind names")
     return errors
 
 
@@ -190,6 +215,28 @@ RADIUS_SPAN = _FW["drawing"]["radius_span"]
 CREDIT_SPLIT = _FW["credit"]["split"]
 CALIBRATION_QUANTILE = _FW["calibration"]["quantile"]
 CALIBRATION_MIN_PEERS = _FW["calibration"]["min_peers"]
+CALIBRATION_MODE = _FW["calibration"]["mode"]
+ANCHOR_TYPE = _FW["calibration"]["anchor"]["type"]
+ANCHOR_KINDS = tuple(_FW["calibration"]["anchor"]["kinds"])
+ANCHOR_QUANTILE = _FW["calibration"]["anchor"]["quantile"]
+TYPE_SCALE_PERSON = _FW["type_scale"]["person"]
+TYPE_SCALE_LIFE = _FW["type_scale"]["life"]
+TYPE_SCALE_PLACE = _FW["type_scale"]["place"]
+TYPE_SCALE_PERIOD = _FW["type_scale"]["period"]
+TYPE_SCALE_PROJECT = _FW["type_scale"]["project"]
+TYPE_SCALE_LIFES_WORK = _FW["type_scale"]["lifes_work"]
+TYPE_SCALE_OBJECT = _FW["type_scale"]["object"]
+TYPE_SCALE_THEME = _FW["type_scale"]["theme"]
+OVER_RING_OFFSET = _FW["drawing"]["over_ring_offset"]
+FOCUS_HALO_COLOR = _FW["drawing"]["focus_halo"]["color"]
+FOCUS_HALO_WIDTH = _FW["drawing"]["focus_halo"]["width"]
+FOCUS_HALO_GAP = _FW["drawing"]["focus_halo"]["gap"]
+PROJECT_HALO_COLOR = _FW["drawing"]["project_halo"]["color"]
+PROJECT_HALO_WIDTH = _FW["drawing"]["project_halo"]["width"]
+
+#: v380: an active roadmap Focus is drawn with a static gold halo outside its
+#: target ring (owner 2026-09-30), and a project with a second-colour halo.
+A_FOCUS_WEARS_GOLD = "A_FOCUS_WEARS_GOLD"
 TIER_NONE = _FW["tiers"]["none"]
 TIER_BASIC = _FW["tiers"]["basic"]
 TIER_STANDARD = _FW["tiers"]["standard"]
@@ -202,14 +249,22 @@ WEIGHT_RESIDENCE = _FW["targets"]["place"]["residence"]
 WEIGHT_WORKPLACE = _FW["targets"]["place"]["workplace"]
 
 
-# --- The target model (v378: the ring is a target) -------------------------
+# --- The target model (v378: the ring is a target; v380: one scale) --------
 #
-# Every entity gets a target (graph-vis D4: an owner table, not learned from
-# citations; the table and its rationale: system/research/life-portrait-
-# targets.md). told = credit. target = table weight x tier multiplier x the
-# type's calibration scale, on the same scale as credit. gap = max(0, 1 -
-# told/target). Peers compare only within a type (D5); nothing sums across
-# types (D7).
+# Every entity gets a target (graph-vis D4: an owner table by type AND
+# relation, not learned from citations; the table and its rationale:
+# system/research/life-portrait-targets.md). told = credit. target = table
+# weight x tier multiplier x the type's calibration scale, on the same scale
+# as credit. In the default shared mode (v380, ONE_SCALE_FOR_THE_WHOLE_
+# PORTRAIT) a type's calibration scale is type_scale[type] x ONE anchor scale
+# set by the best-told parent/spouse/partner, so a theme's target is 0.3 of a
+# parent's; in per_type mode (v378) each type calibrates on itself. gap =
+# max(0, 1 - told/target); over = max(0, told/target - 1). Nothing sums
+# across types (D7).
+
+#: The v380 ruling, by name: one calibration scale for the whole graph,
+#: anchored on people (owner observation 2026-09-30).
+ONE_SCALE_FOR_THE_WHOLE_PORTRAIT = "ONE_SCALE_FOR_THE_WHOLE_PORTRAIT"
 
 #: The credit relevance gate (owner ruling 2026-09-29; research note §6): a
 #: non-answer source tells only the entities its current classification tags.
@@ -248,8 +303,65 @@ def _quantile(values: list[float], q: float) -> float:
     return ordered[idx]
 
 
+def type_scale(cfg: PortraitConfig, etype: str) -> float:
+    """``type_scale[etype]`` on the shared scale; a type not listed scales 1.0."""
+    return float(cfg.values.get("type_scale", {}).get(etype, 1.0))
+
+
+def calibration_anchor(rows: list[dict], cfg: PortraitConfig) -> dict:
+    """The ONE scale of shared mode, and which entity set it.
+
+    Over the credited anchor members (``calibration.anchor.type``, kind in
+    ``calibration.anchor.kinds``, never an ``exclude_kinds`` kind), the anchor
+    ``quantile`` of credit / (base x type_scale) — at 1.0 the best-told
+    parent/spouse/partner sits exactly on its target. With no credited anchor
+    member, the same quantile over every credited, non-excluded entity
+    (``source`` ``fallback``); with no credit at all, 1.0 (``default``).
+    Returns ``{"scale", "source", "id", "type", "kind"}`` (``id`` is the row
+    whose ratio is the quantile, when rows carry ids).
+    """
+    anchor = cfg.get("calibration.anchor")
+    q = float(anchor["quantile"])
+    kinds = set(anchor["kinds"])
+    exclude = set(cfg.get("calibration.exclude_kinds"))
+
+    def ratios(pick) -> list[tuple[float, dict]]:
+        out = []
+        for row in rows:
+            denom = row["base"] * type_scale(cfg, row["type"])
+            if row["credit"] > 0 and denom > 0 and row["kind"] not in exclude and pick(row):
+                out.append((row["credit"] / denom, row))
+        return out
+
+    found = ratios(lambda r: r["type"] == anchor["type"] and r["kind"] in kinds)
+    source = "anchor"
+    if not found:
+        found, source = ratios(lambda r: True), "fallback"
+    if not found:
+        return {"scale": 1.0, "source": "default", "id": None, "type": None, "kind": None}
+    scale = _quantile([r for r, _ in found], q)
+    row = next(row for r, row in found if r == scale)
+    return {"scale": scale, "source": source, "id": row.get("id"),
+            "type": row["type"], "kind": row["kind"]}
+
+
 def calibrate(rows: list[dict], cfg: PortraitConfig) -> dict[str, dict]:
-    """Per-type scale putting ``base`` (weight x tier) on the credit scale.
+    """Scale per type putting ``base`` (weight x tier) on the credit scale.
+
+    ``calibration.mode`` ``shared`` (v380 default): every type's scale is
+    ``type_scale[type]`` x the one anchor scale (:func:`calibration_anchor`);
+    source ``anchor`` (or ``fallback``/``default`` as the anchor reports).
+    ``per_type`` (v378): :func:`calibrate_per_type`.
+    """
+    if cfg.get("calibration.mode") == "per_type":
+        return calibrate_per_type(rows, cfg)
+    anchor = calibration_anchor(rows, cfg)
+    return {t: {"scale": type_scale(cfg, t) * anchor["scale"], "source": anchor["source"]}
+            for t in {row["type"] for row in rows}}
+
+
+def calibrate_per_type(rows: list[dict], cfg: PortraitConfig) -> dict[str, dict]:
+    """v378: each type calibrates on itself (``calibration.mode: per_type``).
 
     ``rows``: ``{"type", "kind", "credit", "base"}``. The scale of a type is the
     ``calibration.quantile`` of credit/base over its credited, non-excluded
@@ -286,12 +398,26 @@ def gap(told: float, target: float) -> float:
     return max(0.0, 1.0 - told / target)
 
 
+def over(told: float, target: float) -> float:
+    """How far the telling has outgrown the target: max(0, told/target - 1).
+
+    Told can exceed target (a theme tagged in nearly every source will). The
+    drawing caps the fill at the ring and marks the excess; doctor lists the
+    most over-told entities — the honest signal that a tag is applied to
+    almost everything.
+    """
+    if target <= 0:
+        return 0.0
+    return max(0.0, told / target - 1.0)
+
+
 def apply_targets(rows: list[dict], cfg: PortraitConfig) -> dict[str, dict]:
-    """Fill ``target`` and ``gap`` on every row in place; return the calibration."""
+    """Fill ``target``, ``gap`` and ``over`` on every row in place; return the calibration."""
     cal = calibrate(rows, cfg)
     for row in rows:
         row["target"] = row["base"] * cal[row["type"]]["scale"]
         row["gap"] = gap(row["credit"], row["target"])
+        row["over"] = over(row["credit"], row["target"])
     return cal
 
 

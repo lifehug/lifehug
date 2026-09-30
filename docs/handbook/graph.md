@@ -36,11 +36,17 @@ page describes what is built.
 - **Kind** — what an entity is within its type: a person's relation (parent,
   spouse, sibling …), a place's kind (residence, school, city …), a period's
   (era, age frame, job).
-- **Target** — table weight for (type, kind) × Focus tier multiplier × the
-  type's calibration scale, on the credit scale.
+- **Target** — table weight for (type, kind) × Focus tier multiplier ×
+  `type_scale` for the type × ONE anchor scale set by the best-told parent,
+  spouse or partner (v380), on the credit scale.
 - **Gap** — `max(0, 1 − told/target)`.
+- **Over** — `max(0, told/target − 1)`: how far the telling has outgrown the
+  target (v380).
 - **Ring** — the target, drawn on the same radius scale as the fill; its
-  colour is the gap (red large, green small).
+  colour is the gap (red large, green small). A second, thinner ring outside
+  it marks an over-told entity.
+- **Gold halo** — an active Focus (`A_FOCUS_WEARS_GOLD`, v380); a project
+  wears a halo of a second colour.
 - **Portrait config** — every number above, in one file (§6).
 
 ## 3. How it works
@@ -78,12 +84,14 @@ title first ("Dave & Mom"). A title part that is the owner's `name`,
 it lists everything the page links to, and its second entry is usually a
 theme or a period. One resolved end joins the hub.
 
-**The target (v378, ADR 0040).** For every entity *e* of type *T*:
+**The target (v378, ADR 0040; one scale v380).** For every entity *e* of type *T*:
 
 ```
 told(e)   = credit(e)
 target(e) = weight(T, kind(e)) × tier(e) × scale(T)
+scale(T)  = type_scale[T] × anchor                 (shared mode, the default)
 gap(e)    = max(0, 1 − told(e) / target(e))
+over(e)   = max(0, told(e) / target(e) − 1)
 ```
 
 The weights, tier multipliers and their reasons are the owner's table in
@@ -103,12 +111,46 @@ Tier multipliers: none 1.0, basic 1.25, standard 1.5, extreme 2.0.
 <!-- parity: portrait_targets.TIER_STANDARD = 1.5 -->
 <!-- parity: portrait_targets.TIER_EXTREME = 2.0 -->
 
-**Calibration.** `scale(T)` is the quantile (shipped: 1.0, the maximum) of
-`credit / (weight × tier)` over the type's credited members, so the
-best-told member of each type sits exactly on its target (graph-vis D5). A
-type with fewer than 2 credited members borrows the median scale of the
-others. The owner's own person page (kind `owner`) is not calibrated on.
-Nothing is summed across types (D7).
+**Calibration — ONE_SCALE_FOR_THE_WHOLE_PORTRAIT (v380).** The owner, on
+v378: "the biggest things would be my dad and my mom, to tell a story about
+myself … why is Forgiveness two or three times the size of Katie?" So the
+whole graph shares one scale, anchored on people. `anchor` is the quantile
+(shipped: 1.0, the maximum) of `credit / (weight × tier × type_scale)` over
+the credited anchor members — type `person`, kind `parent`, `spouse` or
+`partner` (`calibration.anchor`) — so the best-told of them sits exactly on
+its target and every other entity is measured in the same unit. With no
+credited anchor member, the same quantile over every credited entity is
+used. `type_scale` says how big a type is next to a parent (the owner's
+provisional numbers; rationale per row in the research note's "Amendment
+2026-09-30 — one scale"):
+<!-- parity: portrait_targets.CALIBRATION_MODE = shared -->
+<!-- parity: portrait_targets.ANCHOR_TYPE = person -->
+<!-- parity: portrait_targets.ANCHOR_QUANTILE = 1.0 -->
+
+| Type | person | life | place | period | project | lifes_work | object | theme |
+|---|---|---|---|---|---|---|---|---|
+| `type_scale` | 1.0 | 1.0 | 0.6 | 0.6 | 0.5 | 0.6 | 0.3 | 0.3 |
+<!-- parity: portrait_targets.TYPE_SCALE_PERSON = 1.0 -->
+<!-- parity: portrait_targets.TYPE_SCALE_LIFE = 1.0 -->
+<!-- parity: portrait_targets.TYPE_SCALE_PLACE = 0.6 -->
+<!-- parity: portrait_targets.TYPE_SCALE_PERIOD = 0.6 -->
+<!-- parity: portrait_targets.TYPE_SCALE_PROJECT = 0.5 -->
+<!-- parity: portrait_targets.TYPE_SCALE_LIFES_WORK = 0.6 -->
+<!-- parity: portrait_targets.TYPE_SCALE_OBJECT = 0.3 -->
+<!-- parity: portrait_targets.TYPE_SCALE_THEME = 0.3 -->
+
+`relationship` 1.0 and `self` 0.6 are the builder's choice (not in the
+owner's list); a type not listed scales 1.0. A theme's target is therefore
+0.3 of a parent's; an A–E arc (table weight 0.6, life 1.0) is 0.6 of one.
+The owner's own person page (kind `owner`) is never calibrated on. Nothing is
+summed across types (D7): one scale lets two rings be compared by eye.
+
+**Per-type calibration (v378) is one config line away:**
+`{"calibration": {"mode": "per_type"}}`. Then `scale(T)` is the same
+quantile of `credit / (weight × tier)` over the type's own credited members
+(the best-told member of each type sits on its target); a type with fewer
+than 2 credited members borrows the median scale of the others; `type_scale`
+is ignored. This reproduces v378's numbers exactly.
 <!-- parity: portrait_targets.CALIBRATION_QUANTILE = 1.0 -->
 <!-- parity: portrait_targets.CALIBRATION_MIN_PEERS = 2 -->
 
@@ -124,10 +166,28 @@ frame. The life hub is `hub`, the A–E pages `arc`.
 the table weight for that entity.
 
 **Drawing.** Fill and ring share one scale:
-`radius = radius_min + radius_span × sqrt(value / largest value on the canvas)`
-(shipped: 6 and 30 px), so area is proportional to credit and nothing told
-draws at the minimum. The ring is drawn over the fill, so it shows even when
-the telling has outgrown it. A relationship edge's width is
+`radius = radius_min + radius_span × sqrt(value / largest target on the canvas)`
+(shipped: 6 and 30 px), so area is proportional to credit, the ring sits at
+the target, and nothing told draws at the minimum. The fill is capped at the
+ring (v380): an entity told past its target draws a full disc and a second,
+thinner ring `over_ring_offset` px (shipped 3) outside the target ring,
+so one over-told tag cannot shrink every other node.
+<!-- parity: portrait_targets.OVER_RING_OFFSET = 3 -->
+
+**A_FOCUS_WEARS_GOLD (v380).** The owner: "a little clearer which things are
+the focus, like a golden orb around the intended size. The entities that have
+been picked to be focuses or projects should be distinct." Every entity that
+is a roadmap Focus in an active phase (`drawing.focus_halo.phases`, shipped
+`["active"]`), resolved through the same `focus_pages` join as its target,
+wears a static gold halo (`drawing.focus_halo`: colour, width, gap, opacity)
+just outside its target ring — outside the over-told ring when there is one.
+Every project node wears a solid halo of a second colour
+(`drawing.project_halo`), outside the gold one when a project is also a
+Focus. No animation (graph-vis D11/D12), never dashed (D18). Nodes carry
+`focus: true|false` and `project: true|false` so the platform can draw the
+same; the Focus's name moved to `focus_label`.
+<!-- parity: portrait_targets.FOCUS_HALO_COLOR = #d4a72c -->
+<!-- parity: portrait_targets.PROJECT_HALO_COLOR = #2f6f9f --> A relationship edge's width is
 `edge_min + edge_span × min(1, told/target)`. Percentile ranking (v372–v376)
 is gone.
 <!-- parity: portrait_targets.RADIUS_MIN = 6 -->
@@ -153,15 +213,22 @@ resolve to an existing page went from 8 of 10 to 10 of 10 (v376). With the
 target model (v378), the median told/target is 0.65 for people, 0.54 for life
 pages and projects, 0.23 for places, 0.21 for periods and 0.06 for themes —
 one theme is tagged in most sources and sets the theme scale (see §7).
+With one scale (v380), Dad anchors it at 14.21 — the scale v378 already had
+for people, so no person's target moved — and every theme's target fell from
+80.1 to 4.3: Forgiveness's ring went from 36 px (larger than Katie's 21) to
+18 px (Katie's is 32). Family is told 18.8× a theme's target (`over` 17.8),
+and ten themes are over-told — the tags are broad, which doctor now shows.
 
 ## 5. In the loop
 
 Loop-adjacent. The graph reads compiled pages, the roadmap, the rosters,
 current classifications, landmarks and the portrait config; it writes
-nothing. `doctor` reports its joins, the effective config, and the largest
-gaps per type (`doctor.gap_rows_per_type`, shipped 10). Each node carries
-`told`, `target`, `gap` and `kind` for the planner and the platform to read
-later; nothing reads them yet.
+nothing. `doctor` reports its joins, the effective config, the calibration
+(mode, the anchor entity and its scale, each type's scale), the largest gaps
+per type (`doctor.gap_rows_per_type`, shipped 10) and the most over-told per
+type (`doctor.over_rows_per_type`, shipped 10). Each node carries `told`,
+`target`, `gap`, `over`, `kind`, `focus` and `project` for the planner and
+the platform to read later; nothing reads them yet.
 
 ## 6. Where it lives
 
@@ -177,8 +244,9 @@ later; nothing reads them yet.
 - `system/serve_wiki.py` — `graph_data()`, `graph_focus_joins()`, `_GRAPH_HTML`.
 
 To change a number: copy the key into `state/portrait_targets.json`, e.g.
-`{"targets": {"person": {"sibling": 0.9, "aunt": 0.4}}, "calibration": {"quantile": 0.9}}`
-(a new kind may be added to any `targets` table), then run `lifehug doctor`
+`{"targets": {"person": {"sibling": 0.9, "aunt": 0.4}}, "type_scale": {"theme": 0.2}, "calibration": {"quantile": 0.9}}`
+(a new kind may be added to any `targets` table, a new type to `type_scale`;
+`{"calibration": {"mode": "per_type"}}` restores v378's calibration), then run `lifehug doctor`
 and check the line reads `<- vault state/portrait_targets.json`. For one
 entity, set `portrait_weight` on its Focus or roster entry. Every number's
 rationale: `system/research/life-portrait-targets.md` §5–§7.
@@ -189,7 +257,8 @@ rationale: `system/research/life-portrait-targets.md` §5–§7.
   table), D5 (peers within type), D7 (no cross-type sum).
 - Owner rulings 2026-09-29: the 1/n split; every entity gets a target; the
   graph is a companion view; every knob adjustable in one config.
-- ADR 0040 "The ring is a target" (ratified, owner 2026-09-29).
+- ADR 0040 "The ring is a target" (ratified, owner 2026-09-29), amended
+  2026-09-30 for one scale and the gold halo (v380).
 - The target table and the credit relevance gate, with sources and a
   rationale for every weight: `system/research/life-portrait-targets.md`
   (v377; implemented in v378).

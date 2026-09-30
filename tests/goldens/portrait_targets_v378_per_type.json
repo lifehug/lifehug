@@ -1,0 +1,172 @@
+{
+  "calibration": {
+    "life": {
+      "scale": 0.4167,
+      "source": "own"
+    },
+    "person": {
+      "scale": 1.7333,
+      "source": "own"
+    },
+    "project": {
+      "scale": 1.1667,
+      "source": "borrowed"
+    },
+    "relationship": {
+      "scale": 0.9333,
+      "source": "own"
+    },
+    "theme": {
+      "scale": 1.1667,
+      "source": "own"
+    }
+  },
+  "nodes": [
+    {
+      "credit": 0.25,
+      "gap": 0.7,
+      "id": "wiki/life/david-james-taylor.md",
+      "kind": "hub",
+      "target": 0.833,
+      "tier": "extreme",
+      "told": 0.25,
+      "weight": 1.0
+    },
+    {
+      "credit": 0.25,
+      "gap": 0.0,
+      "id": "wiki/life/origins.md",
+      "kind": "arc",
+      "target": 0.25,
+      "tier": "none",
+      "told": 0.25,
+      "weight": 0.6
+    },
+    {
+      "credit": 0.0,
+      "gap": 1.0,
+      "id": "wiki/people/dad.md",
+      "kind": "unknown",
+      "target": 0.65,
+      "tier": "basic",
+      "told": 0.0,
+      "weight": 0.3
+    },
+    {
+      "credit": 0.0,
+      "gap": 1.0,
+      "id": "wiki/people/grandma-betty-jo.md",
+      "kind": "unknown",
+      "target": 0.52,
+      "tier": "none",
+      "told": 0.0,
+      "weight": 0.3
+    },
+    {
+      "credit": 0.583,
+      "gap": 0.701,
+      "id": "wiki/people/katie.md",
+      "kind": "spouse",
+      "target": 1.95,
+      "tier": "basic",
+      "told": 0.583,
+      "weight": 0.9
+    },
+    {
+      "credit": 2.167,
+      "gap": 0.0,
+      "id": "wiki/people/mom.md",
+      "kind": "parent",
+      "target": 2.167,
+      "tier": "basic",
+      "told": 2.167,
+      "weight": 1.0
+    },
+    {
+      "credit": 0.0,
+      "gap": 1.0,
+      "id": "wiki/people/solothurn.md",
+      "kind": "unknown",
+      "target": 0.78,
+      "tier": "standard",
+      "told": 0.0,
+      "weight": 0.3
+    },
+    {
+      "credit": 0.0,
+      "gap": 1.0,
+      "id": "wiki/projects/the-insight.md",
+      "kind": "project",
+      "target": 1.458,
+      "tier": "basic",
+      "told": 0.0,
+      "weight": 1.0
+    },
+    {
+      "credit": 0.5,
+      "gap": 0.657,
+      "id": "wiki/projects/the-problem.md",
+      "kind": "project",
+      "target": 1.458,
+      "tier": "basic",
+      "told": 0.5,
+      "weight": 1.0
+    },
+    {
+      "credit": 0.25,
+      "gap": 0.786,
+      "id": "wiki/themes/agency.md",
+      "kind": "theme",
+      "target": 1.167,
+      "tier": "none",
+      "told": 0.25,
+      "weight": 1.0
+    },
+    {
+      "credit": 0.333,
+      "gap": 0.714,
+      "id": "wiki/themes/belonging.md",
+      "kind": "theme",
+      "target": 1.167,
+      "tier": "none",
+      "told": 0.333,
+      "weight": 1.0
+    },
+    {
+      "credit": 1.167,
+      "gap": 0.0,
+      "id": "wiki/themes/family.md",
+      "kind": "theme",
+      "target": 1.167,
+      "tier": "none",
+      "told": 1.167,
+      "weight": 1.0
+    },
+    {
+      "credit": 0.5,
+      "gap": 0.571,
+      "id": "wiki/themes/financial-instability.md",
+      "kind": "theme",
+      "target": 1.167,
+      "tier": "none",
+      "told": 0.5,
+      "weight": 1.0
+    }
+  ],
+  "relationships": [
+    {
+      "gap": 0.444,
+      "goal": 1.05,
+      "page": "wiki/relationships/dave-and-katie.md",
+      "relation": "spouse",
+      "told": 0.583
+    },
+    {
+      "gap": 0.0,
+      "goal": 1.167,
+      "page": "wiki/relationships/dave-and-mom.md",
+      "relation": "parent",
+      "told": 1.167
+    }
+  ]
+}
