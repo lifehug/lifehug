@@ -2283,17 +2283,18 @@ def graph_source_count(fm: str) -> int:
         return 0
 
 
-def _percentile(value: float, peers: list[float]) -> float:
-    """Midrank percentile in ``peers``. A type with one entity is the whole type."""
+def _percentile(value: float, peers: list[float]) -> float | None:
+    """Midrank percentile in ``peers``. A type with one member is not ranked."""
     if len(peers) <= 1:
-        return 1.0
+        return None
     less = sum(1 for v in peers if v < value)
     same = sum(1 for v in peers if v == value)
     return (less + 0.5 * same) / len(peers)
 
 
-def _answer_source(path: str) -> bool:
-    return path.startswith("answers/") and path.endswith(".md")
+def _credited_source(path: str, prefixes: list[str]) -> bool:
+    """Whether ``path`` earns telling credit (``credit.source_prefixes``)."""
+    return path.endswith(".md") and any(path.startswith(p) for p in prefixes)
 
 
 _REL_TITLE = re.compile(r"\s+(?:&|and)\s+", re.IGNORECASE)
@@ -2301,21 +2302,35 @@ _REL_TITLE = re.compile(r"\s+(?:&|and)\s+", re.IGNORECASE)
 
 def _relationship_ends(label: str, related: list[str], slug_to_id: dict[str, str],
                        label_to_id: dict[str, str], life_id: str | None,
-                       self_id: str) -> tuple[str, str] | None:
-    """The two entities a relationship page joins. One named end uses the life hub."""
+                       self_id: str, owner_names: tuple[str, ...] = ()) -> tuple[str, str] | None:
+    """The two entities a relationship page joins (A_RELATIONSHIP_HAS_TWO_ENDS).
+
+    The title names the ends ("Dave & Mom"). A title part that is the owner's
+    name — ``name``, ``full_name`` or the hub's slug — is the life hub, never a
+    person page that happens to share the name. ``related:`` is only a fallback
+    for an end the title does not resolve: it is a list of everything the page
+    links to, and its second item is usually a theme or a period, not the other
+    end. One resolved end joins the life hub.
+    """
+    owners = {n.casefold() for n in owner_names if n} | {slugify(n) for n in owner_names if n}
     ends: list[str] = []
 
     def add(nid: str | None) -> None:
         if nid and nid != self_id and nid not in ends:
             ends.append(nid)
 
-    for slug in related:
-        add(slug_to_id.get(slug))
     for part in _REL_TITLE.split(label or ""):
         part = part.strip()
         if not part:
             continue
+        if life_id and (part.casefold() in owners or slugify(part) in owners):
+            add(life_id)
+            continue
         add(slug_to_id.get(slugify(part)) or label_to_id.get(part.casefold()))
+    for slug in related:
+        if len(ends) >= 2:
+            break
+        add(slug_to_id.get(slug))
     if len(ends) == 1:
         add(life_id)
     if len(ends) >= 2:
@@ -2323,25 +2338,82 @@ def _relationship_ends(label: str, related: list[str], slug_to_id: dict[str, str
     return None
 
 
+GRAPH_LOG = logging.getLogger("lifehug.graph")
+
+
+def graph_focus_joins(wiki_root: Path | None = None) -> dict:
+    """Every roadmap Focus resolved to its compiled page(s), or why not.
+
+    ``{"joins": [focus_pages.resolve_roadmap rows], "focuses": [...], "error": str|None}``. A
+    broken roadmap or bank is an ``error`` here and a logged warning, never a
+    silent empty ring set.
+    """
+    import focus_pages  # noqa: PLC0415
+
+    root = wiki_root if wiki_root is not None else WIKI_DIR.parent
+    try:
+        bank = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
+        categories = parse_categories(bank)
+        author, author_full = focus_pages.author_names(load_config())
+        focuses = list(load_roadmap().get("focuses", []))
+        joins = focus_pages.resolve_roadmap(focuses, categories, author, author_full, root)
+    except Exception as exc:  # noqa: BLE001 — reported, never swallowed
+        GRAPH_LOG.warning("graph: the roadmap could not be read, so no focus draws a ring: %r", exc)
+        return {"joins": [], "focuses": [], "error": f"roadmap unreadable: {exc!r}"}
+    return {"joins": joins, "focuses": focuses, "error": None}
+
+
 def graph_data() -> dict:
     """Entity graph from compiled wiki pages.
 
     Node size is the percentile, within entity type, of distinct-answer credit.
-    An answer listed on n entity pages gives 1/n to each. A focus match draws
-    a ghost ring (no focus, no ring). A relationship page is an edge between
-    the entities it joins, not a node. Thickness is how much of that
-    relationship's focus target has been answered. Other ``related:`` links
-    stay thin.
+    An answer listed on n entity pages gives 1/n to each (``credit.split``).
+    Zero credit, and the only member of its type, are not ranked: they draw
+    at the minimum radius. A Focus reaches its page through the compiler's
+    own category→page rule (``focus_pages``) and draws a ring there. A
+    relationship page is an edge between the owner and the person it names,
+    not a node; its thickness is how much of its Focus's target is told.
+    Other ``related:`` links stay thin. Every number comes from
+    ``portrait_targets`` (framework file + vault override). Problems — an
+    unreadable roadmap, a Focus whose page is missing, an invalid override —
+    are listed in ``warnings``.
     """
+    import focus_pages  # noqa: PLC0415
+    import portrait_targets  # noqa: PLC0415
+
+    warnings: list[str] = []
+    cfg = portrait_targets.load(STATE_DIR)
+    warnings.extend(cfg.errors)
+    prefixes = list(cfg.get("credit.source_prefixes"))
+    split_equal = cfg.get("credit.split") == "equal"
+    rank_singleton = bool(cfg.get("ranking.rank_singleton_type"))
+    rank_zero = bool(cfg.get("ranking.rank_zero_credit"))
+
     focus_by_path: dict[str, dict] = {}
+    focus_label_by_path: dict[str, str] = {}
+    rel_fill: dict[str, dict] = {}
+    questions: list[dict] = []
     try:
         questions = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8")) if QUESTIONS_FILE.exists() else []
-        for f in load_roadmap().get("focuses", []):
-            node = f.get("wiki_node")
-            if node:
-                focus_by_path[node] = focus_fill(f, questions)
-    except Exception:
-        questions = []
+    except Exception as exc:  # noqa: BLE001 — reported, never swallowed
+        GRAPH_LOG.warning("graph: the question bank could not be read: %r", exc)
+        warnings.append(f"question bank unreadable: {exc!r}")
+    joined = graph_focus_joins()
+    if joined["error"]:
+        warnings.append(joined["error"])
+    focuses_by_id = {f.get("id"): f for f in joined["focuses"]}
+    for row in joined["joins"]:
+        focus = focuses_by_id.get(row["focus_id"])
+        if focus is None:
+            continue
+        fill = focus_fill(focus, questions)
+        for page in row["pages"]:
+            focus_by_path.setdefault(page, fill)
+            focus_label_by_path.setdefault(page, str(row["label"]))
+        for page in row["relationships"]:
+            rel_fill.setdefault(page, fill)
+        for page in row["missing"] + row["missing_relationships"]:
+            warnings.append(f"focus {row['label']!r}: page {page} does not exist")
 
     pages = []
     for p in wiki_pages():
@@ -2372,60 +2444,76 @@ def graph_data() -> dict:
         slug_to_id[Path(p["id"]).stem] = p["id"]
         label_to_id[p["label"].casefold()] = p["id"]
 
+    author, author_full = focus_pages.author_names(load_config())
+    ids = {p["id"] for p in entities}
     life_nodes = [p for p in entities if p["type"] == "life"]
-    life_id = None
-    for p in life_nodes:
-        if p["id"].endswith("/my-life.md"):
-            life_id = p["id"]
-            break
-    if life_id is None and len(life_nodes) == 1:
-        life_id = life_nodes[0]["id"]
-    elif life_id is None and life_nodes:
-        life_id = max(life_nodes, key=lambda p: p["sources"])["id"]
+    life_id = focus_pages.hub_page(author_full)
+    if life_id not in ids:
+        life_id = None
+        for p in life_nodes:
+            if p["id"].endswith("/my-life.md"):
+                life_id = p["id"]
+                break
+        if life_id is None and len(life_nodes) == 1:
+            life_id = life_nodes[0]["id"]
+        elif life_id is None and life_nodes:
+            life_id = max(life_nodes, key=lambda p: p["sources"])["id"]
+    owner_names = (author, author_full, focus_pages.hub_slug(author_full))
 
     holders: dict[str, list[str]] = {}
     for p in entities:
         for src in p["source_paths"]:
-            if _answer_source(src):
+            if _credited_source(src, prefixes):
                 holders.setdefault(src, []).append(p["id"])
     credit = {p["id"]: 0.0 for p in entities}
-    for ids in holders.values():
-        share = 1.0 / len(ids)
-        for i in ids:
+    for ids_ in holders.values():
+        share = 1.0 / len(ids_) if split_equal else 1.0
+        for i in ids_:
             credit[i] += share
     by_type: dict[str, list[str]] = {}
     for p in entities:
         by_type.setdefault(p["type"], []).append(p["id"])
-    percentile = {}
-    for ids in by_type.values():
-        vals = [credit[i] for i in ids]
-        for i in ids:
-            percentile[i] = _percentile(credit[i], vals)
+    percentile: dict[str, float | None] = {}
+    for ids_ in by_type.values():
+        vals = [credit[i] for i in ids_]
+        for i in ids_:
+            if len(ids_) <= 1 and not rank_singleton:
+                percentile[i] = None
+            elif credit[i] <= 0 and not rank_zero:
+                percentile[i] = None
+            else:
+                pct = _percentile(credit[i], vals)
+                percentile[i] = 1.0 if pct is None else pct
 
     nodes = []
     for p in entities:
         fill = focus_by_path.get(p["id"])
+        pct = percentile[p["id"]]
         node = {
             "id": p["id"],
             "label": p["label"],
             "type": p["type"],
             "sources": p["sources"],
             "credit": round(credit[p["id"]], 3),
-            "percentile": round(percentile[p["id"]], 3),
+            "percentile": None if pct is None else round(pct, 3),
+            "ranked": pct is not None,
         }
         if fill is not None:
             node["sat"] = fill["saturation"]
             node["target"] = fill["target"]
             node["ring"] = True
+            node["focus"] = focus_label_by_path.get(p["id"], "")
         nodes.append(node)
 
     rel_edges: dict[tuple[str, str], dict] = {}
     for p in relationships:
-        ends = _relationship_ends(p["label"], p["related"], slug_to_id, label_to_id, life_id, p["id"])
+        ends = _relationship_ends(p["label"], p["related"], slug_to_id, label_to_id,
+                                  life_id, p["id"], owner_names)
         if not ends:
+            warnings.append(f"relationship {p['label']!r}: could not find its two ends")
             continue
         key = tuple(sorted(ends))
-        fill = focus_by_path.get(p["id"])
+        fill = rel_fill.get(p["id"])
         told = 0.0
         if fill is not None:
             told = max(0.0, min(1.0, float(fill["saturation"])))
@@ -2433,7 +2521,7 @@ def graph_data() -> dict:
         if prev is None or told > prev["told"]:
             rel_edges[key] = {
                 "source": ends[0], "target": ends[1], "weight": 1,
-                "kind": "relationship", "told": round(told, 3),
+                "kind": "relationship", "told": round(told, 3), "page": p["id"],
             }
 
     edges = list(rel_edges.values())
@@ -2452,12 +2540,15 @@ def graph_data() -> dict:
             edges.append({
                 "source": p["id"], "target": tgt, "weight": 1 + shared, "kind": "related",
             })
-    return {"nodes": nodes, "edges": edges}
+    style = {k: cfg.get(f"drawing.{k}") for k in
+             ("radius_min", "radius_span", "ring_gap_min", "ring_gap_span")}
+    return {"nodes": nodes, "edges": edges, "style": style, "warnings": warnings}
 
 
 _GRAPH_HTML = """<h1>Graph</h1>
 <div class="graph-legend">
   <span>Node size = this entity's share of the telling, among its type</span>
+  <span>Smallest size = nothing told yet, or the only one of its type (not ranked)</span>
   <span>Ring = the focus target, when the page is a focus</span>
   <span>Brown edges are relationships, thicker as more of that target is told</span>
   <span>First tap highlights. Second tap opens the page.</span>
@@ -2496,9 +2587,21 @@ _GRAPH_HTML = """<h1>Graph</h1>
     }
     var W = 900, H = 640;
     var byId = {};
+    // Every portrait number comes from system/portrait_targets.json (+ vault override).
+    var ST = data.style || {};
+    if (data.warnings && data.warnings.length) {
+      var warn = document.createElement('details');
+      warn.className = 'graph-warnings';
+      warn.innerHTML = '<summary>' + data.warnings.length + ' graph warning(s)</summary><ul></ul>';
+      data.warnings.forEach(function (w) {
+        var li = document.createElement('li'); li.textContent = w; warn.querySelector('ul').appendChild(li);
+      });
+      stage.parentNode.insertBefore(warn, stage);
+    }
     nodes.forEach(function (n, i) {
-      n.r = 8 + (n.percentile != null ? n.percentile : 0) * 16;
-      var room = n.ring ? (4 + (1 - Math.max(0, Math.min(1, n.sat || 0))) * 14) : 0;
+      // Unranked (zero credit, or alone in its type) draws at the minimum.
+      n.r = ST.radius_min + (n.ranked ? n.percentile : 0) * ST.radius_span;
+      var room = n.ring ? (ST.ring_gap_min + (1 - Math.max(0, Math.min(1, n.sat || 0))) * ST.ring_gap_span) : 0;
       n.outer = n.r + room;
       n.x = W / 2 + Math.cos(i) * 180 + (i % 7) * 12;
       n.y = H / 2 + Math.sin(i) * 180 + (i % 5) * 12;

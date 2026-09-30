@@ -55,6 +55,14 @@ from lifehug_core import (
 )
 from research_expand import DEFAULT_MODEL, parse_ai_json
 from roadmap import load_roadmap
+# The ONE category→page rule, shared with the roadmap and the graph (v376).
+from focus_pages import (  # noqa: E402
+    clean_focus_name,
+    focus_category_slug,
+    hub_slug,
+    project_category_slug,
+    relationship_slug,
+)
 
 # `Entity Type` is the code/frontmatter routing term. Most values are graph
 # node types. `relationship` stays here for compatibility, but it writes a
@@ -111,18 +119,6 @@ SYNTH_DIR = SYNTHESIS_DIR
 MAX_RELATED = 12  # total related links per page
 MAX_SHARED = 8    # shared-source links added per page
 OLD_FOCUS_TERM = "Spot" "light"
-
-
-def clean_focus_name(name: str) -> str:
-    for prefix in (
-        "Focus — ", "Focus - ", "Focus: ", "Focus ",
-        f"{OLD_FOCUS_TERM} — ", f"{OLD_FOCUS_TERM} - ",
-        f"{OLD_FOCUS_TERM}: ", f"{OLD_FOCUS_TERM} ",
-    ):
-        if name.startswith(prefix):
-            name = name[len(prefix):]
-            break
-    return re.sub(r"\s*\(.*?\)\s*$", "", name).strip()
 
 
 def rel(path: Path) -> str:
@@ -838,7 +834,7 @@ def plan_focuses(categories, questions, answers, manual_sources, person_roster=N
         if info.get("group") != "focus":
             continue
         title = clean_focus_name(info["name"])
-        slug = slugify(title)
+        slug = focus_category_slug(info["name"])
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
 
         # Mention enrichment: pull answers/sources that mention this person by
@@ -1038,7 +1034,7 @@ def plan_projects(categories, questions, answers, manual_sources):
         if info.get("group") != "project":
             continue
         title = info["name"]
-        slug = slugify(title)
+        slug = project_category_slug(title)
         project = project_label(info.get("qualifier", ""))
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
         source_items = matching_sources(manual_sources, [title, title.replace("The ", "")])
@@ -1149,7 +1145,6 @@ def plan_relationships(categories, questions, answers, manual_sources, author, p
                        known_people=()):
     descs = []
     author = author or "Me"
-    author_slug = slugify(author)
     alias_map = _focus_alias_map(person_roster, _focus_slugs(categories))
     for cat_id, info in sorted(categories.items()):
         if info.get("group") != "focus":
@@ -1171,7 +1166,7 @@ def plan_relationships(categories, questions, answers, manual_sources, author, p
             continue
 
         title = f"{author} & {person}"
-        slug = f"{author_slug}-and-{person_slug}"
+        slug = relationship_slug(author, person)
         supporting_items = []
         if answer_items:
             supporting_items.extend(extra_answers)
@@ -1267,7 +1262,7 @@ def plan_life_story(categories, questions, answers, manual_sources, author_full)
                 hub_items.append(items[i])
     if hub_items:
         descs.insert(0, _descriptor(
-            "life", author_full, slugify(author_full),
+            "life", author_full, hub_slug(author_full),
             [a["source"] for a in hub_items], hub_items, [],
             summary=f"{author_full} — a self-portrait synthesized from the life story so far: "
                     f"who they are, what they value, what they fear, and who they're becoming.",

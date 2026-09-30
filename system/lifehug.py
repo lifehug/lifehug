@@ -35,6 +35,7 @@ from lifehug_core import (
     QUESTION_QUEUE_FILE,
     QUESTIONS_FILE,
     REPO_DIR,
+    ROADMAP_FILE,
     ROTATION_FILE,
     STATE_DIR,
     WIKI_DIR,
@@ -3511,6 +3512,48 @@ def loop_health_checks() -> int:
     return failures
 
 
+def graph_portrait_checks() -> None:
+    """Doctor: the graph's joins and its portrait knobs (v376, issue #434).
+
+    Warns — never fails — when a Focus resolves to a page the compiler has not
+    written (A_FOCUS_KNOWS_ITS_OWN_PAGE), when the roadmap cannot be read, or
+    when the vault's portrait override is invalid; then prints every
+    effective portrait value and where it came from.
+    """
+    import focus_pages  # noqa: PLC0415
+    import portrait_targets  # noqa: PLC0415
+
+    try:
+        bank = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
+        author, author_full = focus_pages.author_names(load_config())
+        focuses = (read_json(ROADMAP_FILE, default={}) or {}).get("focuses", [])
+        joins = focus_pages.resolve_roadmap(
+            focuses, parse_categories(bank), author, author_full, WIKI_DIR.parent)
+    except Exception as exc:  # noqa: BLE001 — doctor reports, never crashes
+        warn("graph focus pages", f"roadmap unreadable, no focus can draw a ring: {exc!r}")
+        joins = []
+    else:
+        missing = [(r["label"], p) for r in joins for p in r["missing"] + r["missing_relationships"]]
+        resolved = sum(1 for r in joins if r["pages"] or r["relationships"])
+        if missing:
+            warn("graph focus pages",
+                 f"{len(missing)} focus page(s) not written yet (compile, or fix the focus)")
+            for label, page in missing[:10]:
+                print(f"  - {label}: {page}")
+        else:
+            check("graph focus pages", True, f"{resolved}/{len(joins)} focuses resolve to a page")
+    try:
+        cfg = portrait_targets.load(STATE_DIR)
+    except portrait_targets.PortraitConfigError as exc:
+        warn("graph portrait config", str(exc))
+        return
+    if cfg.errors:
+        warn("graph portrait override rejected", "; ".join(cfg.errors))
+    print("graph portrait config (effective value <- origin):")
+    for key, value, origin in portrait_targets.effective_rows(cfg):
+        print(f"  {key} = {json.dumps(value)} <- {origin}")
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     failures = 0
     config = load_config(CONFIG_FILE)
@@ -3567,6 +3610,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         check("ambiguous answer acknowledgments", True, "none")
 
     failures += loop_health_checks()
+    graph_portrait_checks()
 
     print()
     print("checking next question...", flush=True)

@@ -942,6 +942,11 @@ Most of these grow on their own through **entity graduation** — the system det
 
 Every page cites the answers it's built from, and links to related pages — so the wiki is a navigable graph, not a flat list. Synthesis is cached and idempotent: re-compiling is cheap, and it runs **keyless on the desktop** (the agent writes each page's prose; the next compile folds it into the graph). Browse it locally with `python3 system/lifehug.py serve`. Source Integrity also opens each manifested answer or source as a read-only rendered body, with one-click links back to its integrity row and additive reflection/correction/retraction actions. Raw-body GETs stay loopback-only, never write, never cache, and fail closed on traversal, untracked files, directories, or any symlink.
 
+
+### The graph view
+
+Reflect → **Graph** draws the compiled wiki as a portrait: each entity page is a node, each relationship page is a thick edge between the two lives it joins, and a Focus draws a ring for its target. A node's size is its share of the telling among nodes of its own type — an answer cited by *n* pages gives 1/*n* to each — and a node with nothing told yet, or the only one of its type, draws at the minimum size (it is not ranked). The owner is the **life hub** (`wiki/life/<your-full-name>.md`): the primary Focus rings it, and "Dave & Mom" is the edge from the hub to Mom, read from the title rather than from the page's `related:` list. Every Focus reaches its page through the same category→page rule the compiler writes with (`system/focus_pages.py`) — a `## Focuses` category is a person page, a grouped project Focus is one page per category — and a Focus whose page does not exist is listed by `lifehug doctor`, never silently dropped. Every graph number lives in one file, `system/portrait_targets.json`; override any of them in your vault's `state/portrait_targets.json`, and `doctor` prints each effective value and where it came from. Details: [handbook — The Graph](docs/handbook/graph.md).
+
 ### Source integrity
 
 Lifehug treats `answers/` and `sources/` as the source-of-truth layer. The wiki, planner reports, question candidates, and artifact drafts are derived from those sources. Approved artifact finals can re-enter the source layer under `sources/artifacts/`.

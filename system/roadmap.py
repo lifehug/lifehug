@@ -61,6 +61,8 @@ TYPE_TO_WIKI_DIR = {
     "event": "events",
     "lifes_work": "lifes_work",
     "self": "self",
+    # A relationship Focus is a Relationship Edge page (A_RELATIONSHIP_HAS_TWO_ENDS).
+    "relationship": "relationships",
 }
 
 OLD_FOCUS_TERM = "Spot" "light"
@@ -76,10 +78,26 @@ def tier_for_size(num_questions: int) -> str:
 
 
 def _wiki_node_for(focus_type: str, label: str) -> str | None:
+    """A type-based GUESS, used only for a Focus with no bank category.
+
+    A Focus with categories takes its page from the compiler's own rule
+    (:func:`_wiki_node_by_rule`, ``focus_pages.A_FOCUS_KNOWS_ITS_OWN_PAGE``).
+    """
     subdir = TYPE_TO_WIKI_DIR.get(focus_type)
     if not subdir:
         return None
     return f"wiki/{subdir}/{slugify(label)}.md"
+
+
+def _wiki_node_by_rule(focus: dict, categories: dict) -> str | None:
+    """The page the compiler actually writes for this Focus, or None."""
+    import focus_pages  # noqa: PLC0415 — keeps roadmap import-light
+
+    author, author_full = focus_pages.author_names(load_config())
+    hit = focus_pages.focus_pages(focus, categories, author, author_full)
+    if hit["rule"] in ("wiki_node", "none"):
+        return None
+    return (hit["pages"] or hit["relationships"] or [None])[0]
 
 
 _HEADER_RE = re.compile(r"^## ([A-Z]): (.+?)(?:\s*\((.*)\))?\s*$", re.MULTILINE)
@@ -366,6 +384,14 @@ def derive_roadmap(md_text: str, existing: dict | None = None) -> dict:
         if fid not in seen:
             merged.append(old)
 
+    # A_FOCUS_KNOWS_ITS_OWN_PAGE (v376): wiki_node is the page the compiler
+    # writes for the Focus's categories, whatever an older roadmap stored.
+    categories = parse_categories(md_text)
+    for focus in merged:
+        node = _wiki_node_by_rule(focus, categories)
+        if node:
+            focus["wiki_node"] = node
+
     return {"version": 1, "generated_at": now_utc(), "focuses": merged}
 
 
@@ -554,7 +580,9 @@ def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
         if deliverable:
             focus["deliverable"] = deliverable
         focus["target_depth"] = max(TIER_TARGETS.get(tier, 20), int(focus.get("target_depth", 0)))
-        focus["wiki_node"] = _wiki_node_for(focus_type, label)
+        focus["wiki_node"] = (
+            _wiki_node_by_rule(focus, parse_categories(new_md))
+            or _wiki_node_for(focus_type, label))
         roadmap["generated_at"] = now_utc()
         write_json(ROADMAP_FILE, roadmap)
 
@@ -744,12 +772,13 @@ def cli(argv: list[str] | None = None) -> int:
                 focus["deliverable"] = args.deliverable
             if getattr(args, "label", None):
                 focus["label"] = args.label
-                focus["wiki_node"] = _wiki_node_for(
-                    focus.get("type", "theme"), args.label)
             if getattr(args, "focus_type", None):
                 focus["type"] = args.focus_type
-                focus["wiki_node"] = _wiki_node_for(
-                    args.focus_type, focus.get("label", focus["id"]))
+            if getattr(args, "label", None) or getattr(args, "focus_type", None):
+                bank = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
+                focus["wiki_node"] = (
+                    _wiki_node_by_rule(focus, parse_categories(bank))
+                    or _wiki_node_for(focus.get("type", "theme"), focus.get("label", focus["id"])))
             if getattr(args, "relationship", None):
                 focus["relationship"] = args.relationship
             if getattr(args, "living", None) is not None:
