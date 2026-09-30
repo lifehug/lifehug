@@ -126,7 +126,7 @@ relationship page joins the owner (the hub) and the person its title names
 (`A_RELATIONSHIP_HAS_TWO_ENDS`). Never hand-set `wiki_node`; `roadmap-rebuild`
 refreshes it from the rule. Graph numbers live in `system/portrait_targets.json`
 (vault override: `state/portrait_targets.json`); `doctor` prints them.
-**The ring is a target (v378, ADR 0039):** every entity has
+**The ring is a target (v378, ADR 0040):** every entity has
 `told` (credit, 1/n; a non-answer source counts only for entities its current
 classification tags — `A_SOURCE_TELLS_ONLY_ITS_SUBJECTS`), `target` (owner
 table weight × tier × per-type calibration) and `gap`. When the owner wants a

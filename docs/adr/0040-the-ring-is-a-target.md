@@ -1,4 +1,4 @@
-# ADR 0039: The ring is a target
+# ADR 0040: The ring is a target
 
 Date: 2026-09-29
 Status: ratified (owner, 2026-09-29) — v378, issue #434

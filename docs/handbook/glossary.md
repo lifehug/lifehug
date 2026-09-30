@@ -207,7 +207,7 @@ The graph view's vocabulary ([handbook page](graph.md); research
   name in the text; an unclassified source earns nothing.
 - **Target** — what a well-told life holds for an entity: the owner table's
   weight for its type and kind (`system/research/life-portrait-targets.md`)
-  × its Focus tier multiplier × its type's calibration scale (ADR 0039).
+  × its Focus tier multiplier × its type's calibration scale (ADR 0040).
 - **Gap** — `max(0, 1 − told/target)`, on every node and relationship edge.
 - **Kind** — what an entity is within its type: a person's relation, a
   place's kind (residence, school, workplace, city …), a period's (era, age

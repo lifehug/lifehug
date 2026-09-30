@@ -78,7 +78,7 @@ title first ("Dave & Mom"). A title part that is the owner's `name`,
 it lists everything the page links to, and its second entry is usually a
 theme or a period. One resolved end joins the hub.
 
-**The target (v378, ADR 0039).** For every entity *e* of type *T*:
+**The target (v378, ADR 0040).** For every entity *e* of type *T*:
 
 ```
 told(e)   = credit(e)
@@ -189,7 +189,7 @@ rationale: `system/research/life-portrait-targets.md` §5–§7.
   table), D5 (peers within type), D7 (no cross-type sum).
 - Owner rulings 2026-09-29: the 1/n split; every entity gets a target; the
   graph is a companion view; every knob adjustable in one config.
-- ADR 0039 "The ring is a target" (ratified, owner 2026-09-29).
+- ADR 0040 "The ring is a target" (ratified, owner 2026-09-29).
 - The target table and the credit relevance gate, with sources and a
   rationale for every weight: `system/research/life-portrait-targets.md`
   (v377; implemented in v378).

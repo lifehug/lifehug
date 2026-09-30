@@ -1,7 +1,7 @@
 {
-  "version": 378,
-  "released": "2026-09-29",
-  "changelog": "v378: the ring is a target (ADR 0039). Every entity on the graph now has told, target and gap. told is its credit: a source held by n entities gives 1/n to each; answers count for the pages that list them, and a conversation, email, manual or landmark source counts only for the entities its current classification tags as subjects (A_SOURCE_TELLS_ONLY_ITS_SUBJECTS; never a bare name, never an unclassified import). target is the owner table's weight for the entity's type and kind (the table decided in v377's research note: parents, spouse, children 1.0, grandparents 0.85, siblings 0.8, friends 0.5; a home 1.0, a school 0.8, a workplace 0.7; a named era 1.0, an age frame 0.8 ...) times its Focus tier multiplier (1.0/1.25/1.5/2.0), calibrated per type so the best-told entity of each type sits on its target. gap = max(0, 1 - told/target), emitted on every node and relationship edge for the planner and the platform to read later. Kinds come from what the vault records (Focus or roster relationship, the classifier's relation words, landmark homes/schools/jobs, roster place_kind, age-frame slugs). The ring is drawn at the target's radius on the fill's own sqrt scale, coloured by the gap; percentile ranking is dropped. A relationship edge uses the same definition. The table, tiers, calibration, gate and radii all live in system/portrait_targets.json (schema 2), overridable in state/portrait_targets.json, with portrait_weight on a Focus or roster entry for one entity; doctor prints the effective values and the largest gaps per type. Measured on the owner's vault: median told/target people 0.65, life pages 0.54, projects 0.54, places 0.23, periods 0.21, themes 0.06. WHAT HE WILL NOTICE: every node has a ring now, the ring shows what a well-told life would hold for it, and a red ring marks where the story is thin; three of his children have the most open rings among the people.",
+  "version": 379,
+  "released": "2026-09-30",
+  "changelog": "v379: two ADRs, one number (docs only). v375's re-key ruling and v378's ring-is-a-target ruling were both ratified 2026-09-29 and both merged as ADR 0039 (`docs/adr/0039-a-re-key-is-not-a-change-to-a-life.md`, `docs/adr/0039-the-ring-is-a-target.md`). The re-key ADR merged first and keeps 0039; the ring ADR (merged later, in v378) is renumbered to 0040 — file renamed to `docs/adr/0040-the-ring-is-a-target.md`, its title updated, and every cross-reference fixed (CLAUDE.md, README.md, docs/handbook/glossary.md, docs/handbook/graph.md, system/version.json's own v378 changelog text and framework_files manifest). tests/test_v379_adr_numbers_are_unique.py now asserts every docs/adr/ file (besides TEMPLATE.md) has a distinct 4-digit prefix, so a repeat gets caught in CI rather than merged. No behavior change. WHAT HE WILL NOTICE: nothing — ADR 0039 now unambiguously means the re-key ruling, and ADR 0040 means the ring ruling.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -645,6 +645,7 @@
     "system/portrait_targets.json",
     "docs/handbook/graph.md",
     "system/research/life-portrait-targets.md",
-    "docs/adr/0039-the-ring-is-a-target.md"
+    "docs/adr/0040-the-ring-is-a-target.md",
+    "tests/test_v379_adr_numbers_are_unique.py"
   ]
 }
