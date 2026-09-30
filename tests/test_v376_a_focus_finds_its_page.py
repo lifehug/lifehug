@@ -221,22 +221,22 @@ class RealShapedVaultTests(unittest.TestCase):
         # told reaches the edge through the Mom focus: 2 answered of target 20.
         self.assertGreater(rels["wiki/relationships/dave-and-mom.md"]["told"], 0)
 
-    def test_rings_land_on_the_hub_and_every_project_page(self):
+    def test_focus_pages_carry_their_focus(self):
+        # v378: every entity has a target ring; a Focus page also names its Focus.
         by_id = {n["id"]: n for n in self.graph["nodes"]}
-        self.assertTrue(by_id["wiki/life/david-james-taylor.md"].get("ring"))
+        self.assertEqual(by_id["wiki/life/david-james-taylor.md"]["focus"], "David James Taylor")
         for page in ("wiki/projects/the-problem.md", "wiki/projects/the-insight.md"):
-            self.assertTrue(by_id[page].get("ring"), page)
             self.assertEqual(by_id[page]["focus"], "Etherfuse")
+            self.assertGreater(by_id[page]["target"], 0)
 
     def test_zero_credit_draws_at_the_minimum(self):
-        for node in self.graph["nodes"]:
-            if node["credit"] == 0:
-                self.assertFalse(node["ranked"], node["id"])
-                self.assertIsNone(node["percentile"], node["id"])
+        # Radius is radius_min + span * sqrt(told / value_max): told 0 is the minimum.
         self.assertEqual(self.graph["style"]["radius_min"], portrait_targets.RADIUS_MIN)
+        self.assertTrue(any(n["told"] == 0 for n in self.graph["nodes"]))
 
     def test_doctor_prints_effective_portrait_values_and_origin(self):
-        self.assertIn("drawing.radius_min = 8 <- framework system/portrait_targets.json", self.doctor)
+        self.assertIn(f"drawing.radius_min = {portrait_targets.RADIUS_MIN} <- framework "
+                      "system/portrait_targets.json", self.doctor)
 
 
 class RelationshipEndsTests(unittest.TestCase):

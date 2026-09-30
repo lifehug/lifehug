@@ -1,21 +1,107 @@
 {
-  "schema_version": 1,
-  "_about": "Graph portrait knobs. The framework ships this file; a vault overrides any subset in state/portrait_targets.json (same shape, validated on load). `lifehug doctor` prints every effective value and where it came from. Keys starting with _ are comments.",
-  "drawing": {
-    "_about": "Pixel radii in the graph view. A node's fill radius is radius_min + percentile * radius_span; a node that is not ranked draws at radius_min.",
-    "radius_min": 8,
-    "radius_span": 16,
-    "ring_gap_min": 4,
-    "ring_gap_span": 14
+  "schema_version": 2,
+  "_about": "The graph portrait: every number it uses. The framework ships this file; a vault overrides any subset in state/portrait_targets.json (same shape, validated on load; an invalid override is rejected whole). `lifehug doctor` prints every effective value and where it came from. Rationale for each weight: system/research/life-portrait-targets.md. Keys starting with _ are comments.",
+  "targets": {
+    "_about": "Relative target weight per entity type and kind (graph-vis D4: an owner table, not learned from citations). Weights compare only within a type (D5); calibration (below) puts them on the credit scale. A roster entry or a roadmap focus with `portrait_weight` replaces the table weight for that entity.",
+    "person": {
+      "spouse": 1.0,
+      "partner": 1.0,
+      "parent": 1.0,
+      "child": 1.0,
+      "sibling": 0.8,
+      "grandparent": 0.85,
+      "friend": 0.5,
+      "mentor": 0.45,
+      "colleague": 0.3,
+      "other": 0.25,
+      "unknown": 0.3,
+      "owner": 1.0
+    },
+    "relationship": {
+      "spouse": 1.0,
+      "partner": 1.0,
+      "parent": 1.0,
+      "child": 1.0,
+      "sibling": 0.8,
+      "grandparent": 0.85,
+      "friend": 0.5,
+      "mentor": 0.45,
+      "colleague": 0.3,
+      "other": 0.25,
+      "unknown": 0.3
+    },
+    "place": {
+      "residence": 1.0,
+      "school": 0.8,
+      "workplace": 0.7,
+      "city": 0.6,
+      "neighborhood": 0.5,
+      "building": 0.5,
+      "region": 0.4,
+      "other": 0.4,
+      "country": 0.3
+    },
+    "period": {
+      "era": 1.0,
+      "age_frame": 0.8,
+      "job": 0.6
+    },
+    "project": {
+      "project": 1.0
+    },
+    "lifes_work": {
+      "lifes_work": 1.0
+    },
+    "life": {
+      "hub": 1.0,
+      "arc": 0.6
+    },
+    "theme": {
+      "theme": 1.0
+    },
+    "object": {
+      "object": 1.0
+    },
+    "self": {
+      "self": 1.0
+    }
+  },
+  "tiers": {
+    "_about": "Multiplier on the table weight when the entity's page is a Focus page, by Focus tier. none = not a Focus.",
+    "none": 1.0,
+    "basic": 1.25,
+    "standard": 1.5,
+    "extreme": 2.0
+  },
+  "kinds": {
+    "_about": "How an entity's kind is read. age_frame_pattern: a period page slug matching this regex is an age frame.",
+    "age_frame_pattern": "^(childhood|early-childhood|my-teens|teen-years|my-[0-9]+s)$"
+  },
+  "calibration": {
+    "_about": "Puts table weights on the credit scale, per type: scale = the `quantile` of credit / (weight x tier) over the type's credited members (1.0 = the best-told member sits exactly at its target). A type with fewer than min_peers credited members borrows the median scale of the other types. exclude_kinds are never calibrated on (the owner's own person page duplicates the hub).",
+    "quantile": 1.0,
+    "min_peers": 2,
+    "exclude_kinds": ["owner"]
   },
   "credit": {
-    "_about": "How a source's telling is shared among the entity pages that cite it. split: equal = an answer on n pages gives 1/n to each (owner ruling, 2026-09-29); whole = 1 to each. source_prefixes: which vault-relative source paths earn credit.",
+    "_about": "How a source's telling is shared. split: equal = a source held by n entity pages gives 1/n to each (owner ruling 2026-09-29); whole = 1 to each. Answers under answer_prefixes: rule listed = every page that lists the answer holds it; tagged = only pages the answer's classification tags. Other sources under classified_prefixes (conversation, email, manual, landmarks) earn credit only for the entities their CURRENT classification tags as subjects in tag_fields (the relevance gate: never a bare name occurrence; an unclassified source earns nothing). A person tag needs at least min_person_mentions.",
     "split": "equal",
-    "source_prefixes": ["answers/"]
+    "answer_prefixes": ["answers/"],
+    "answer_rule": "listed",
+    "classified_prefixes": ["sources/"],
+    "classified_rule": "tagged",
+    "tag_fields": ["people", "places", "themes", "time_periods", "projects"],
+    "min_person_mentions": 1
   },
-  "ranking": {
-    "_about": "Peer percentile within a type (graph-vis D5). A type with one member has no peers to rank against; zero credit is not a rank.",
-    "rank_singleton_type": false,
-    "rank_zero_credit": false
+  "drawing": {
+    "_about": "Pixels. Fill and ring share one scale: radius = radius_min + radius_span * sqrt(value / largest value on the canvas), so area is proportional to credit. A node with no credit draws at radius_min. Relationship edges: width = edge_min + edge_span * min(1, told/target).",
+    "radius_min": 6,
+    "radius_span": 30,
+    "edge_min": 1.25,
+    "edge_span": 6.5
+  },
+  "doctor": {
+    "_about": "How many of the largest gaps doctor lists per type.",
+    "gap_rows_per_type": 10
   }
 }
