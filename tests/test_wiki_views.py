@@ -3,6 +3,7 @@
 import json
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -810,7 +811,11 @@ class WikiViewsTests(unittest.TestCase):
 
     def test_graph_nodes_edges_and_weight(self):
         self._populate()
-        g = serve_wiki.graph_data()
+        # A_PRIMARY_FOCUS_IS_THE_HUB (v376): the primary focus is the life hub
+        # the compiler writes at wiki/life/<slug(full_name)>.md.
+        with mock.patch.object(serve_wiki, "load_config",
+                               return_value={"name": "Me", "full_name": "My Life"}):
+            g = serve_wiki.graph_data()
         self.assertEqual(len(g["nodes"]), 2)
         self.assertEqual(len(g["edges"]), 1)
         self.assertEqual(g["edges"][0]["weight"], 2)  # shared answers/A1.md -> 1 + 1
@@ -879,20 +884,24 @@ class WikiViewsTests(unittest.TestCase):
 
     def test_graph_portrait_credit_ring_and_relationship_edge(self):
         # Distinct answers, split 1/n across the entity pages that cite them.
-        # Percentile is within type. A relationship page is an edge, not a node.
-        # The ring is the focus target. No focus means no ring.
+        # Percentile is within type; the only member of a type and zero credit
+        # are not ranked. A relationship page is an edge, not a node. The ring
+        # is the focus target on the page the compiler writes for the focus
+        # (v376: a ## Focuses category is a person page and an owner-and-person
+        # relationship page; the stored wiki_node is not trusted).
         self._populate()
-        roadmap.ROADMAP_FILE.write_text(
-            '{"version":1,"focuses":['
-            '{"id":"my-life","label":"My Life","type":"life_story","categories":["A"],'
-            '"target_depth":4,"wiki_node":"wiki/life/my-life.md"},'
-            '{"id":"ann","label":"Ann","type":"person","categories":["A"],'
-            '"target_depth":8,"wiki_node":"wiki/people/ann.md"},'
-            '{"id":"me-ann","label":"Me and Ann","type":"relationship","categories":["A"],'
-            '"target_depth":8,"wiki_node":"wiki/relationships/me-and-ann.md"}'
-            ']}',
-            encoding="utf-8",
-        )
+        bank = self._write("question-bank.md",
+            "## A: Origins (Childhood)\n- [x] A1: Earliest? *(2026-01-01)*\n- [ ] A2: Where?\n"
+            "## Focuses\n## K: Focus — Ann\n- [x] K1: Who is Ann? *(2026-01-02)*\n"
+            "- [ ] K2: What does Ann love?\n")
+        serve_wiki.QUESTIONS_FILE = bank
+        roadmap.QUESTIONS_FILE = bank
+        roadmap.ROADMAP_FILE.write_text(json.dumps({"version": 1, "focuses": [
+            {"id": "my-life", "label": "My Life", "type": "life_story", "primary": True,
+             "categories": ["A"], "target_depth": 4, "wiki_node": None},
+            {"id": "ann", "label": "Ann", "type": "person", "categories": ["K"],
+             "target_depth": 8, "wiki_node": "wiki/people/stale-guess.md"},
+        ]}), encoding="utf-8")
 
         def page(rel: str, title: str, paths: list[str], related: list[str]) -> None:
             lines = ["---", f'title: "{title}"', "type: person", "sources:"]
@@ -906,24 +915,34 @@ class WikiViewsTests(unittest.TestCase):
 
         page("wiki/people/ann.md", "Ann", ["answers/Q1.md"], [])
         page("wiki/people/ben.md", "Ben", ["answers/Q1.md", "answers/Q2.md"], [])
+        page("wiki/people/cal.md", "Cal", [], [])
         page("wiki/places/town.md", "Town", ["answers/Q2.md"], [])
-        page("wiki/relationships/me-and-ann.md", "Me & Ann", ["answers/Q1.md"], ["ann"])
+        # Real shape: owner first in the title, related: lists more than the ends.
+        page("wiki/relationships/me-and-ann.md", "Me & Ann", ["answers/Q1.md"],
+             ["ann", "town", "emma"])
 
-        g = serve_wiki.graph_data()
+        with mock.patch.object(serve_wiki, "load_config",
+                               return_value={"name": "Me", "full_name": "My Life"}):
+            g = serve_wiki.graph_data()
         ids = {n["id"] for n in g["nodes"]}
         self.assertNotIn("wiki/relationships/me-and-ann.md", ids)
         by_id = {n["id"]: n for n in g["nodes"]}
-        ann, ben, town = (by_id["wiki/people/ann.md"], by_id["wiki/people/ben.md"],
-                          by_id["wiki/places/town.md"])
+        ann, ben, cal, town = (by_id["wiki/people/ann.md"], by_id["wiki/people/ben.md"],
+                               by_id["wiki/people/cal.md"], by_id["wiki/places/town.md"])
         self.assertAlmostEqual(ann["credit"], 0.5)
         self.assertAlmostEqual(ben["credit"], 1.0)
         self.assertAlmostEqual(town["credit"], 0.5)
         self.assertLess(ann["percentile"], ben["percentile"])
-        self.assertEqual(town["percentile"], 1.0)
+        # The only place is not ranked; zero credit is not ranked.
+        self.assertIsNone(town["percentile"])
+        self.assertFalse(town["ranked"])
+        self.assertEqual(cal["credit"], 0)
+        self.assertFalse(cal["ranked"])
         self.assertTrue(ann["ring"])
         self.assertEqual(ann["target"], 8)
         self.assertAlmostEqual(ann["sat"], 0.125)
         self.assertNotIn("ring", ben)
+        self.assertTrue(by_id["wiki/life/my-life.md"]["ring"])
 
         rels = [e for e in g["edges"] if e.get("kind") == "relationship"]
         self.assertEqual(len(rels), 1)
@@ -936,9 +955,12 @@ class WikiViewsTests(unittest.TestCase):
             and {e["source"], e["target"]} == {"wiki/life/my-life.md", "wiki/people/emma.md"}
         )
         self.assertEqual(emma_edge["weight"], 2)
+        self.assertEqual(g["style"]["radius_min"], 8)
         body = serve_wiki.view_graph()[1]
         self.assertIn("n.ring", body)
         self.assertIn("relationship", body)
+        self.assertIn("ST.radius_min", body)
+        self.assertIn("not ranked", body)
 
 
 class RevisionFooterTests(unittest.TestCase):

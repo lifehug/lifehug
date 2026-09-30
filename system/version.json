@@ -1,7 +1,7 @@
 {
-  "version": 375,
+  "version": 376,
   "released": "2026-09-29",
-  "changelog": "v375: a re-key is not a change to a life (owner ruling 2026-09-29: \"A software re-key is not a change to my life; carry links over\"; ADR 0039). Classifier freshness now names each candidate by its identity in the id space the story was filed in: a candidate whose node id the stored reading filed keeps it; a re-keyed candidate stands for the vanished filed id when the projection's node_aliases walks to it, or, when no other candidate of the event shares its kind and entities, when the old id recomputes from its identity (v373's proof); otherwise it keeps its own id. Every other digested field is unchanged, CONTEXT_SCHEMA_VERSION stays 1, and a source with no vanished filed id has its v374 digest byte for byte. The fold follows node_aliases for an anchor naming a re-keyed node (timeline-rules:26, temporal_timeline.A_LINK_FOLLOWS_ITS_NODE_THROUGH_A_RE_KEY). A stored link the drawing neither draws nor redirects is a new pending reason, link_orphaned (timeline-mode refresh, ranked after classifier_changed and before relationship_changed/context_changed; settled by rule when v373's remap proves one target). v373's rule remap now refuses a recomputed proof when two candidates share kind and entities (a discriminator re-order must not swap two stays). New snapshot keys orphaned_links and refiled_context_digest are outside the four snapshot keys and never in a prompt. WHAT HE WILL NOTICE: a rule move that only re-mints node ids no longer re-reads his stories, and a story linked to a re-keyed stay keeps its place on the timeline instead of turning into a question.",
+  "changelog": "v376: a focus finds its page. The graph now reaches every Focus through the compiler's own category-to-page rule (system/focus_pages.py, A_FOCUS_KNOWS_ITS_OWN_PAGE): a ## Focuses category is a person page whatever its type, a grouped project Focus is one page per category, and the primary Focus is the life hub (A_PRIMARY_FOCUS_IS_THE_HUB); the roadmap's wiki_node is refreshed from the same rule, and a Focus whose page does not exist is listed by doctor and in the graph's warnings instead of silently losing its ring. A relationship page joins the owner and the person its title names (A_RELATIONSHIP_HAS_TWO_ENDS: title first, the owner's name is the hub, related: only as a fallback; roadmap TYPE_TO_WIKI_DIR gains relationship). A broken roadmap is logged, not swallowed. Zero credit, and the only member of a type, are not ranked and draw at the minimum size. Every graph number moves into one declarative file, system/portrait_targets.json, which a vault overrides in state/portrait_targets.json (validated on load; doctor prints each effective value and its origin). Measured on the owner's vault: relationship edges joining the owner and the right person 0/8 -> 8/8; Focuses resolving to an existing page 8/10 -> 10/10; the told thickness of those edges is no longer always 0. WHAT HE WILL NOTICE: every \"Dave & ...\" line now runs from his own hub to that person, his life hub and the Etherfuse pages carry rings, and Mirror no longer draws at full size with nothing told.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -639,6 +639,10 @@
     "tests/test_v364_binder_condition_seven_counted_once.py",
     "tests/test_v367_his_words_place_the_card.py",
     "docs/adr/0039-a-re-key-is-not-a-change-to-a-life.md",
-    "tests/test_v375_a_re_key_is_not_a_change_to_a_life.py"
+    "tests/test_v375_a_re_key_is_not_a_change_to_a_life.py",
+    "system/focus_pages.py",
+    "system/portrait_targets.py",
+    "system/portrait_targets.json",
+    "docs/handbook/graph.md"
   ]
 }

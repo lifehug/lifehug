@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "_about": "Graph portrait knobs. The framework ships this file; a vault overrides any subset in state/portrait_targets.json (same shape, validated on load). `lifehug doctor` prints every effective value and where it came from. Keys starting with _ are comments.",
+  "drawing": {
+    "_about": "Pixel radii in the graph view. A node's fill radius is radius_min + percentile * radius_span; a node that is not ranked draws at radius_min.",
+    "radius_min": 8,
+    "radius_span": 16,
+    "ring_gap_min": 4,
+    "ring_gap_span": 14
+  },
+  "credit": {
+    "_about": "How a source's telling is shared among the entity pages that cite it. split: equal = an answer on n pages gives 1/n to each (owner ruling, 2026-09-29); whole = 1 to each. source_prefixes: which vault-relative source paths earn credit.",
+    "split": "equal",
+    "source_prefixes": ["answers/"]
+  },
+  "ranking": {
+    "_about": "Peer percentile within a type (graph-vis D5). A type with one member has no peers to rank against; zero credit is not a rank.",
+    "rank_singleton_type": false,
+    "rank_zero_credit": false
+  }
+}

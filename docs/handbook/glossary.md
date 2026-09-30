@@ -191,3 +191,29 @@ Two different kinds of period, kept as two different facts (ADR 0030,
   the publisher's signature tracks instead of the wall clock, so
   re-publishing inside one epoch is a true no-op. **Merged**,
   v238/lifehug#259.
+
+---
+
+## Graph
+
+The graph view's vocabulary ([handbook page](graph.md); research
+`system/research/graph-vis.md`; issue #434).
+
+- **Credit** — how much of the telling an entity holds. Each credited source
+  (today `answers/*.md`) gives `1/n` to each of the `n` entity pages that cite
+  it (owner ruling, 2026-09-29).
+- **Percentile / not ranked** — a node's credit ranked among its own type
+  (graph-vis D5). Zero credit and the only member of a type are *not ranked*
+  and draw at the minimum size.
+- **Life hub** — the owner's self-portrait page, `wiki/life/<slug(full_name)>.md`.
+  The primary Focus is the hub (`A_PRIMARY_FOCUS_IS_THE_HUB`), and the owner
+  is one end of every relationship edge through it.
+- **Relationship edge** — a `wiki/relationships/` page drawn as a line between
+  its two ends, read from the title first (`A_RELATIONSHIP_HAS_TWO_ENDS`).
+- **The page rule** — `system/focus_pages.py`: which page a question-bank
+  category compiles to, read by the compiler, the roadmap, the graph and
+  `doctor` alike (`A_FOCUS_KNOWS_ITS_OWN_PAGE`).
+- **Portrait config** — `system/portrait_targets.json`, every graph-portrait
+  number in one file; a vault overrides any subset in
+  `state/portrait_targets.json`, and `doctor` prints each effective value
+  with its origin.

@@ -117,6 +117,16 @@ restatement of a landmark ("Brief residence in Solothurn"), fold into it by
 themselves (`landmark_fold`). `timeline-move-decide` is the read-only preview
 of a drop's window. A saved gesture needs no conversation.
 
+**The graph's joins (v376, issue #434).** A Focus's page is decided by the
+compiler's one category→page rule, `system/focus_pages.py`
+(`A_FOCUS_KNOWS_ITS_OWN_PAGE`): a `## Focuses` category is a person page
+whatever the Focus type, a grouped project Focus is one page per category,
+the primary Focus is the life hub (`A_PRIMARY_FOCUS_IS_THE_HUB`). A
+relationship page joins the owner (the hub) and the person its title names
+(`A_RELATIONSHIP_HAS_TWO_ENDS`). Never hand-set `wiki_node`; `roadmap-rebuild`
+refreshes it from the rule. Graph numbers live in `system/portrait_targets.json`
+(vault override: `state/portrait_targets.json`); `doctor` prints them.
+
 ## First Session: Setup
 
 If there are no project-specific categories in `system/question-bank.md` (only A-E), this is a new user. Run the setup flow:
