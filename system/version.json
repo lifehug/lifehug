@@ -1,7 +1,7 @@
 {
-  "version": 377,
+  "version": 378,
   "released": "2026-09-29",
-  "changelog": "v377: what a life portrait holds (docs only). A research note, system/research/life-portrait-targets.md, reviews what biography, oral-history, life-story and life-review practice say about which people, places, periods, themes and work belong in a well-told life (sourced; what could not be obtained is marked), maps it onto the vault's own types and FOCUS_RELATIONSHIPS, and DECIDES the graph's target table: a relative weight per type and kind (spouse, partner, parent, child 1.0; grandparent 0.85; sibling 0.8; friend 0.5; residence 1.0, school 0.8, workplace 0.7; named era 1.0, age frame 0.8, job 0.6; ...), each with a one-line rationale; tier multipliers (none 1.0, basic 1.25, standard 1.5, extreme 2.0); per-type calibration so the best-told entity of a type sits on its target; a per-entity portrait_weight override; and the credit relevance gate A_SOURCE_TELLS_ONLY_ITS_SUBJECTS (a conversation, email or manual source counts only for the entities its current classification tags; unclassified imports earn nothing). A 'how to change a number' section points at system/portrait_targets.json and its vault override. No behavior changes in this release; v378 implements the table. WHAT HE WILL NOTICE: nothing yet; the numbers the graph will aim at are written down, with reasons, where he can change them.",
+  "changelog": "v378: the ring is a target (ADR 0039). Every entity on the graph now has told, target and gap. told is its credit: a source held by n entities gives 1/n to each; answers count for the pages that list them, and a conversation, email, manual or landmark source counts only for the entities its current classification tags as subjects (A_SOURCE_TELLS_ONLY_ITS_SUBJECTS; never a bare name, never an unclassified import). target is the owner table's weight for the entity's type and kind (the table decided in v377's research note: parents, spouse, children 1.0, grandparents 0.85, siblings 0.8, friends 0.5; a home 1.0, a school 0.8, a workplace 0.7; a named era 1.0, an age frame 0.8 ...) times its Focus tier multiplier (1.0/1.25/1.5/2.0), calibrated per type so the best-told entity of each type sits on its target. gap = max(0, 1 - told/target), emitted on every node and relationship edge for the planner and the platform to read later. Kinds come from what the vault records (Focus or roster relationship, the classifier's relation words, landmark homes/schools/jobs, roster place_kind, age-frame slugs). The ring is drawn at the target's radius on the fill's own sqrt scale, coloured by the gap; percentile ranking is dropped. A relationship edge uses the same definition. The table, tiers, calibration, gate and radii all live in system/portrait_targets.json (schema 2), overridable in state/portrait_targets.json, with portrait_weight on a Focus or roster entry for one entity; doctor prints the effective values and the largest gaps per type. Measured on the owner's vault: median told/target people 0.65, life pages 0.54, projects 0.54, places 0.23, periods 0.21, themes 0.06. WHAT HE WILL NOTICE: every node has a ring now, the ring shows what a well-told life would hold for it, and a red ring marks where the story is thin; three of his children have the most open rings among the people.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -644,6 +644,7 @@
     "system/portrait_targets.py",
     "system/portrait_targets.json",
     "docs/handbook/graph.md",
-    "system/research/life-portrait-targets.md"
+    "system/research/life-portrait-targets.md",
+    "docs/adr/0039-the-ring-is-a-target.md"
   ]
 }

@@ -3552,6 +3552,34 @@ def graph_portrait_checks() -> None:
     print("graph portrait config (effective value <- origin):")
     for key, value, origin in portrait_targets.effective_rows(cfg):
         print(f"  {key} = {json.dumps(value)} <- {origin}")
+    for line in graph_gap_lines(int(cfg.get("doctor.gap_rows_per_type"))):
+        print(line)
+
+
+def graph_gap_lines(per_type: int) -> list[str]:
+    """The largest portrait gaps (1 - told/target), per entity type — names only."""
+    try:
+        import serve_wiki  # noqa: PLC0415
+
+        graph = serve_wiki.graph_data()
+    except Exception as exc:  # noqa: BLE001 — doctor reports, never crashes
+        return [f"warn: graph portrait gaps - graph unreadable: {exc!r}"]
+    by_type: dict[str, list[dict]] = {}
+    for node in graph.get("nodes", []):
+        if node.get("gap", 0) > 0:
+            by_type.setdefault(node["type"], []).append(node)
+    lines = [f"graph portrait gaps (largest {per_type} per type; gap = 1 - told/target):"]
+    for etype in sorted(by_type):
+        rows = sorted(by_type[etype], key=lambda n: (-n["gap"], -n["target"], n["label"]))
+        lines.append(f"  {etype}:")
+        for node in rows[:per_type]:
+            lines.append(f"    {node['gap']:.2f}  {node['label']} ({node['kind']})")
+    edges = [e for e in graph.get("edges", []) if e.get("kind") == "relationship" and e.get("gap", 0) > 0]
+    if edges:
+        lines.append("  relationships:")
+        for edge in sorted(edges, key=lambda e: -e["gap"])[:per_type]:
+            lines.append(f"    {edge['gap']:.2f}  {Path(edge['page']).stem} ({edge['relation']})")
+    return lines
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:

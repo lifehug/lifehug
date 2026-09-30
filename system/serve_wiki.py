@@ -2283,20 +2283,6 @@ def graph_source_count(fm: str) -> int:
         return 0
 
 
-def _percentile(value: float, peers: list[float]) -> float | None:
-    """Midrank percentile in ``peers``. A type with one member is not ranked."""
-    if len(peers) <= 1:
-        return None
-    less = sum(1 for v in peers if v < value)
-    same = sum(1 for v in peers if v == value)
-    return (less + 0.5 * same) / len(peers)
-
-
-def _credited_source(path: str, prefixes: list[str]) -> bool:
-    """Whether ``path`` earns telling credit (``credit.source_prefixes``)."""
-    return path.endswith(".md") and any(path.startswith(p) for p in prefixes)
-
-
 _REL_TITLE = re.compile(r"\s+(?:&|and)\s+", re.IGNORECASE)
 
 
@@ -2363,58 +2349,7 @@ def graph_focus_joins(wiki_root: Path | None = None) -> dict:
     return {"joins": joins, "focuses": focuses, "error": None}
 
 
-def graph_data() -> dict:
-    """Entity graph from compiled wiki pages.
-
-    Node size is the percentile, within entity type, of distinct-answer credit.
-    An answer listed on n entity pages gives 1/n to each (``credit.split``).
-    Zero credit, and the only member of its type, are not ranked: they draw
-    at the minimum radius. A Focus reaches its page through the compiler's
-    own category→page rule (``focus_pages``) and draws a ring there. A
-    relationship page is an edge between the owner and the person it names,
-    not a node; its thickness is how much of its Focus's target is told.
-    Other ``related:`` links stay thin. Every number comes from
-    ``portrait_targets`` (framework file + vault override). Problems — an
-    unreadable roadmap, a Focus whose page is missing, an invalid override —
-    are listed in ``warnings``.
-    """
-    import focus_pages  # noqa: PLC0415
-    import portrait_targets  # noqa: PLC0415
-
-    warnings: list[str] = []
-    cfg = portrait_targets.load(STATE_DIR)
-    warnings.extend(cfg.errors)
-    prefixes = list(cfg.get("credit.source_prefixes"))
-    split_equal = cfg.get("credit.split") == "equal"
-    rank_singleton = bool(cfg.get("ranking.rank_singleton_type"))
-    rank_zero = bool(cfg.get("ranking.rank_zero_credit"))
-
-    focus_by_path: dict[str, dict] = {}
-    focus_label_by_path: dict[str, str] = {}
-    rel_fill: dict[str, dict] = {}
-    questions: list[dict] = []
-    try:
-        questions = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8")) if QUESTIONS_FILE.exists() else []
-    except Exception as exc:  # noqa: BLE001 — reported, never swallowed
-        GRAPH_LOG.warning("graph: the question bank could not be read: %r", exc)
-        warnings.append(f"question bank unreadable: {exc!r}")
-    joined = graph_focus_joins()
-    if joined["error"]:
-        warnings.append(joined["error"])
-    focuses_by_id = {f.get("id"): f for f in joined["focuses"]}
-    for row in joined["joins"]:
-        focus = focuses_by_id.get(row["focus_id"])
-        if focus is None:
-            continue
-        fill = focus_fill(focus, questions)
-        for page in row["pages"]:
-            focus_by_path.setdefault(page, fill)
-            focus_label_by_path.setdefault(page, str(row["label"]))
-        for page in row["relationships"]:
-            rel_fill.setdefault(page, fill)
-        for page in row["missing"] + row["missing_relationships"]:
-            warnings.append(f"focus {row['label']!r}: page {page} does not exist")
-
+def _graph_pages() -> list[dict]:
     pages = []
     for p in wiki_pages():
         if p.parent == WIKI_DIR:
@@ -2434,7 +2369,91 @@ def graph_data() -> dict:
             "source_paths": _fm_list(fm, "sources"),
             "related": [slugify(r) for r in _fm_list(fm, "related")],
         })
+    return pages
 
+
+def _graph_classifications() -> dict[str, dict]:
+    """source_path -> its CURRENT classification (the one reader gate)."""
+    import classify_story  # noqa: PLC0415
+
+    out: dict[str, dict] = {}
+    for _path, data in classify_story.current_classification_files(CLASSIFICATIONS_DIR):
+        src = data.get("source_path")
+        if isinstance(src, str) and src:
+            out[src] = data
+    return out
+
+
+def _graph_landmarks() -> dict[str, set[str]]:
+    """Slugs the owner's landmarks name as a home, a school, or a job."""
+    data = read_json(STATE_DIR / "landmarks.json", default={}) or {}
+    domains = data.get("domains") if isinstance(data, dict) else None
+    out = {"residence": set(), "school": set(), "job": set()}
+    if not isinstance(domains, dict):
+        return out
+    keys = {"residences": ("residence", ("city", "place_ref", "label", "nickname")),
+            "schools": ("school", ("name", "label")),
+            "work": ("job", ("label", "what"))}
+    for domain, (kind, fields) in keys.items():
+        for entry in domains.get(domain) or []:
+            if not isinstance(entry, dict):
+                continue
+            for f in fields:
+                value = entry.get(f)
+                if isinstance(value, str) and value.strip():
+                    ref = value.split("/")[-1] if f == "place_ref" else value
+                    for variant in _pt().name_variants(ref):
+                        out[kind].add(slugify(variant))
+    return out
+
+
+def _pt():
+    import portrait_targets  # noqa: PLC0415
+
+    return portrait_targets
+
+
+def graph_data() -> dict:
+    """Entity graph from compiled wiki pages: a portrait and its target.
+
+    told = credit: each credited source gives ``1/n`` to each of the ``n``
+    entity pages that hold it. An answer is held by the pages that list it; a
+    conversation, email, manual or landmark source is held only by the
+    entities its CURRENT classification tags as subjects (the relevance gate,
+    A_SOURCE_TELLS_ONLY_ITS_SUBJECTS).
+    target = the owner table's weight for the entity's type and kind x its
+    Focus tier multiplier x the type's calibration scale, on the credit scale.
+    gap = max(0, 1 - told/target). The fill and the ring are drawn on one
+    radius scale. A relationship page is an edge between the owner (the life
+    hub) and the person it names, with told/target/gap by the same
+    definition. Every number comes from ``portrait_targets`` (framework file
+    + vault override). Problems are listed in ``warnings``.
+    """
+    import focus_pages  # noqa: PLC0415
+
+    pt = _pt()
+    warnings: list[str] = []
+    cfg = pt.load(STATE_DIR)
+    warnings.extend(cfg.errors)
+
+    focus_by_path: dict[str, dict] = {}
+    rel_focus: dict[str, dict] = {}
+    joined = graph_focus_joins()
+    if joined["error"]:
+        warnings.append(joined["error"])
+    focuses_by_id = {f.get("id"): f for f in joined["focuses"]}
+    for row in joined["joins"]:
+        focus = focuses_by_id.get(row["focus_id"])
+        if focus is None:
+            continue
+        for page in row["pages"]:
+            focus_by_path.setdefault(page, focus)
+        for page in row["relationships"]:
+            rel_focus.setdefault(page, focus)
+        for page in row["missing"] + row["missing_relationships"]:
+            warnings.append(f"focus {row['label']!r}: page {page} does not exist")
+
+    pages = _graph_pages()
     entities = [p for p in pages if p["type"] != "relationships"]
     relationships = [p for p in pages if p["type"] == "relationships"]
 
@@ -2459,70 +2478,229 @@ def graph_data() -> dict:
         elif life_id is None and life_nodes:
             life_id = max(life_nodes, key=lambda p: p["sources"])["id"]
     owner_names = (author, author_full, focus_pages.hub_slug(author_full))
+    owner_keys = {n.casefold() for n in owner_names} | {slugify(n) for n in owner_names}
 
-    holders: dict[str, list[str]] = {}
+    # Name -> page, for resolving classifier tags. Exact spellings only:
+    # the page slug, its title, and its roster entry's name, slug and aliases.
+    rosters: dict[str, dict] = {}
+    name_to_id: dict[str, str] = {}
+    for key, pid in list(slug_to_id.items()):
+        name_to_id.setdefault(key, pid)
+    for key, pid in label_to_id.items():
+        name_to_id.setdefault(slugify(key), pid)
+    for etype in ENTITY_TYPES:
+        try:
+            roster = load_roster(etype)
+        except Exception as exc:  # noqa: BLE001 — reported, never swallowed
+            warnings.append(f"{etype} roster unreadable: {exc!r}")
+            continue
+        for ent in roster.get("entities", []):
+            names = [ent.get("name") or "", ent.get("slug") or ""] + list(ent.get("aliases") or [])
+            pid = None
+            for n in names:
+                pid = slug_to_id.get(slugify(n)) if n else None
+                if pid:
+                    break
+            if not pid:
+                continue
+            rosters[pid] = ent
+            for n in names:
+                if n:
+                    name_to_id.setdefault(slugify(n), pid)
+
+    def resolve(name: str) -> str | None:
+        for variant in pt.name_variants(name):
+            key = slugify(variant)
+            if life_id and (variant.casefold() in owner_keys or key in owner_keys):
+                return life_id
+            if key in name_to_id:
+                return name_to_id[key]
+        return None
+
+    # --- credit: told --------------------------------------------------------
+    answer_prefixes = list(cfg.get("credit.answer_prefixes"))
+    classified_prefixes = list(cfg.get("credit.classified_prefixes"))
+    answer_rule = cfg.get("credit.answer_rule")
+    classified_rule = cfg.get("credit.classified_rule")
+    classifications = _graph_classifications()
+
+    def tagged(src: str) -> set[str]:
+        data = classifications.get(src)
+        if not data:
+            return set()
+        return {pid for pid in (resolve(n) for n in pt.tag_names(data, cfg)) if pid}
+
+    listed: dict[str, set[str]] = {}
     for p in entities:
         for src in p["source_paths"]:
-            if _credited_source(src, prefixes):
-                holders.setdefault(src, []).append(p["id"])
+            listed.setdefault(src, set()).add(p["id"])
+    all_sources = set(listed) | set(classifications)
+    holders: dict[str, set[str]] = {}
+    for src in all_sources:
+        if not src.endswith(".md"):
+            continue
+        if any(src.startswith(pfx) for pfx in answer_prefixes):
+            held = set(listed.get(src, set()))
+            if answer_rule == "tagged":
+                held &= tagged(src)
+        elif any(src.startswith(pfx) for pfx in classified_prefixes):
+            # The source must still exist: a reading of a removed file tells nothing.
+            present = (WIKI_DIR.parent / src).is_file()
+            held = tagged(src) if classified_rule == "tagged" and present else set()
+        else:
+            held = set()
+        held &= ids
+        if held:
+            holders[src] = held
     credit = {p["id"]: 0.0 for p in entities}
-    for ids_ in holders.values():
-        share = 1.0 / len(ids_) if split_equal else 1.0
-        for i in ids_:
-            credit[i] += share
-    by_type: dict[str, list[str]] = {}
-    for p in entities:
-        by_type.setdefault(p["type"], []).append(p["id"])
-    percentile: dict[str, float | None] = {}
-    for ids_ in by_type.values():
-        vals = [credit[i] for i in ids_]
-        for i in ids_:
-            if len(ids_) <= 1 and not rank_singleton:
-                percentile[i] = None
-            elif credit[i] <= 0 and not rank_zero:
-                percentile[i] = None
-            else:
-                pct = _percentile(credit[i], vals)
-                percentile[i] = 1.0 if pct is None else pct
+    for src, held in holders.items():
+        share = pt.split_share(len(held), cfg)
+        for pid in held:
+            credit[pid] += share
 
-    nodes = []
-    for p in entities:
-        fill = focus_by_path.get(p["id"])
-        pct = percentile[p["id"]]
-        node = {
-            "id": p["id"],
-            "label": p["label"],
-            "type": p["type"],
-            "sources": p["sources"],
-            "credit": round(credit[p["id"]], 3),
-            "percentile": None if pct is None else round(pct, 3),
-            "ranked": pct is not None,
-        }
-        if fill is not None:
-            node["sat"] = fill["saturation"]
-            node["target"] = fill["target"]
-            node["ring"] = True
-            node["focus"] = focus_label_by_path.get(p["id"], "")
-        nodes.append(node)
+    # --- kind, tier, weight: target -----------------------------------------
+    marks = _graph_landmarks()
+    age_frame = re.compile(str(cfg.get("kinds.age_frame_pattern")))
+    classified_relations: dict[str, dict[str, int]] = {}
+    classified_place_types: dict[str, dict[str, int]] = {}
+    import roster_relations  # noqa: PLC0415
 
-    rel_edges: dict[tuple[str, str], dict] = {}
+    for data in classifications.values():
+        for person in data.get("people") or []:
+            if isinstance(person, dict) and person.get("name"):
+                pid = resolve(str(person["name"]))
+                rel_word = roster_relations.roster_relationship_for(person.get("relationship") or "")
+                if pid and rel_word:
+                    bucket = classified_relations.setdefault(pid, {})
+                    bucket[rel_word] = bucket.get(rel_word, 0) + 1
+        for place in data.get("places") or []:
+            if isinstance(place, dict) and place.get("name") and place.get("type"):
+                pid = resolve(str(place["name"]))
+                if pid:
+                    bucket = classified_place_types.setdefault(pid, {})
+                    bucket[str(place["type"])] = bucket.get(str(place["type"]), 0) + 1
+
+    def majority(counts: dict[str, int] | None) -> str | None:
+        if not counts:
+            return None
+        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
+    def person_relation(pid: str) -> str:
+        focus = focus_by_path.get(pid) or {}
+        ent = rosters.get(pid) or {}
+        for value in (focus.get("relationship"), ent.get("relationship")):
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return majority(classified_relations.get(pid)) or "unknown"
+
+    def kind_of(p: dict) -> str:
+        etype = pt.DIR_TYPES.get(p["type"], p["type"])
+        stem = Path(p["id"]).stem
+        if etype == "person":
+            if p["label"].casefold() in owner_keys or stem in owner_keys:
+                return "owner"
+            return person_relation(p["id"])
+        if etype == "place":
+            ent = rosters.get(p["id"]) or {}
+            if stem in marks["residence"] or ent.get("place_kind") == "residence":
+                return "residence"
+            if stem in marks["school"]:
+                return "school"
+            if stem in marks["job"]:
+                return "workplace"
+            if isinstance(ent.get("place_kind"), str) and ent["place_kind"]:
+                return ent["place_kind"]
+            return majority(classified_place_types.get(p["id"])) or "other"
+        if etype == "period":
+            if age_frame.match(stem):
+                return "age_frame"
+            if stem in marks["job"]:
+                return "job"
+            return "era"
+        if etype == "life":
+            return "hub" if p["id"] == life_id else "arc"
+        return etype
+
+    def base_of(pid: str, etype: str, kind: str, focus: dict | None) -> tuple[float, float, str]:
+        weight = pt.table_weight(cfg, etype, kind)
+        for override in ((focus or {}).get("portrait_weight"), (rosters.get(pid) or {}).get("portrait_weight")):
+            if isinstance(override, (int, float)) and not isinstance(override, bool) and override >= 0:
+                weight = float(override)
+                break
+        tier = (focus or {}).get("tier") or "none"
+        return weight, pt.tier_multiplier(cfg, tier), tier
+
+    rows: list[dict] = []
+    row_by_id: dict[str, dict] = {}
+    for p in entities:
+        etype = pt.DIR_TYPES.get(p["type"], p["type"])
+        kind = kind_of(p)
+        focus = focus_by_path.get(p["id"])
+        weight, mult, tier = base_of(p["id"], etype, kind, focus)
+        row = {"id": p["id"], "type": etype, "kind": kind, "credit": credit[p["id"]],
+               "weight": weight, "tier": tier, "base": weight * mult,
+               "focus": (focus or {}).get("label") or ""}
+        rows.append(row)
+        row_by_id[p["id"]] = row
+
+    # --- relationship edges: same definition --------------------------------
+    rel_rows: list[dict] = []
     for p in relationships:
         ends = _relationship_ends(p["label"], p["related"], slug_to_id, label_to_id,
                                   life_id, p["id"], owner_names)
         if not ends:
             warnings.append(f"relationship {p['label']!r}: could not find its two ends")
             continue
-        key = tuple(sorted(ends))
-        fill = rel_fill.get(p["id"])
+        other = next((e for e in ends if e != life_id), ends[1])
         told = 0.0
-        if fill is not None:
-            told = max(0.0, min(1.0, float(fill["saturation"])))
+        for src in p["source_paths"]:
+            held = holders.get(src)
+            if held and other in held:
+                told += pt.split_share(len(held), cfg)
+        focus = rel_focus.get(p["id"])
+        relation = (focus or {}).get("relationship") or (
+            person_relation(other) if other in row_by_id else "unknown")
+        if relation == "owner":
+            relation = "unknown"
+        weight, mult, tier = base_of(p["id"], "relationship", relation, focus)
+        rel_rows.append({"id": p["id"], "type": "relationship", "kind": relation,
+                         "credit": told, "weight": weight, "tier": tier,
+                         "base": weight * mult, "ends": ends})
+
+    calibration = pt.apply_targets(rows + rel_rows, cfg)
+
+    nodes = []
+    for p in entities:
+        row = row_by_id[p["id"]]
+        node = {
+            "id": p["id"],
+            "label": p["label"],
+            "type": p["type"],
+            "sources": p["sources"],
+            "kind": row["kind"],
+            "credit": round(row["credit"], 3),
+            "told": round(row["credit"], 3),
+            "target": round(row["target"], 3),
+            "gap": round(row["gap"], 3),
+            "weight": row["weight"],
+            "tier": row["tier"],
+        }
+        if row["focus"]:
+            node["focus"] = row["focus"]
+        nodes.append(node)
+
+    rel_edges: dict[tuple[str, str], dict] = {}
+    for row in rel_rows:
+        key = tuple(sorted(row["ends"]))
+        edge = {
+            "source": row["ends"][0], "target": row["ends"][1], "weight": 1,
+            "kind": "relationship", "page": row["id"], "relation": row["kind"],
+            "told": round(row["credit"], 3), "goal": round(row["target"], 3),
+            "gap": round(row["gap"], 3),
+        }
         prev = rel_edges.get(key)
-        if prev is None or told > prev["told"]:
-            rel_edges[key] = {
-                "source": ends[0], "target": ends[1], "weight": 1,
-                "kind": "relationship", "told": round(told, 3), "page": p["id"],
-            }
+        if prev is None or edge["told"] > prev["told"]:
+            rel_edges[key] = edge
 
     edges = list(rel_edges.values())
     seen = set(rel_edges)
@@ -2540,17 +2718,23 @@ def graph_data() -> dict:
             edges.append({
                 "source": p["id"], "target": tgt, "weight": 1 + shared, "kind": "related",
             })
+    value_max = max([max(n["told"], n["target"]) for n in nodes] + [0.0])
     style = {k: cfg.get(f"drawing.{k}") for k in
-             ("radius_min", "radius_span", "ring_gap_min", "ring_gap_span")}
-    return {"nodes": nodes, "edges": edges, "style": style, "warnings": warnings}
+             ("radius_min", "radius_span", "edge_min", "edge_span")}
+    style["value_max"] = round(value_max, 3)
+    return {
+        "nodes": nodes, "edges": edges, "style": style, "warnings": warnings,
+        "calibration": {t: {"scale": round(v["scale"], 4), "source": v["source"]}
+                        for t, v in sorted(calibration.items())},
+    }
 
 
 _GRAPH_HTML = """<h1>Graph</h1>
 <div class="graph-legend">
-  <span>Node size = this entity's share of the telling, among its type</span>
-  <span>Smallest size = nothing told yet, or the only one of its type (not ranked)</span>
-  <span>Ring = the focus target, when the page is a focus</span>
-  <span>Brown edges are relationships, thicker as more of that target is told</span>
+  <span>Filled circle = what has been told about this entity (its share of the telling)</span>
+  <span>Ring = its target: what a well-told life holds for this kind of entity, from the owner table</span>
+  <span>Ring colour = the gap still untold (red large, green small); no credit draws smallest</span>
+  <span>Brown edges are relationships, thicker as more of that bond's target is told</span>
   <span>First tap highlights. Second tap opens the page.</span>
 </div>
 <div class="graph-toolbar">
@@ -2598,15 +2782,21 @@ _GRAPH_HTML = """<h1>Graph</h1>
       });
       stage.parentNode.insertBefore(warn, stage);
     }
+    function radius(v) {
+      // One scale for fill and ring: area is proportional to credit.
+      if (!(v > 0) || !(ST.value_max > 0)) return ST.radius_min;
+      return ST.radius_min + ST.radius_span * Math.sqrt(v / ST.value_max);
+    }
     nodes.forEach(function (n, i) {
-      // Unranked (zero credit, or alone in its type) draws at the minimum.
-      n.r = ST.radius_min + (n.ranked ? n.percentile : 0) * ST.radius_span;
-      var room = n.ring ? (ST.ring_gap_min + (1 - Math.max(0, Math.min(1, n.sat || 0))) * ST.ring_gap_span) : 0;
-      n.outer = n.r + room;
+      n.r = radius(n.told);
+      n.ringR = radius(n.target);
+      n.ring = n.target > 0;
+      n.outer = Math.max(n.r, n.ringR);
       n.x = W / 2 + Math.cos(i) * 180 + (i % 7) * 12;
       n.y = H / 2 + Math.sin(i) * 180 + (i % 5) * 12;
       n.vx = 0; n.vy = 0;
-      n.fill = (n.sat != null) ? satColor(n.sat) : (TYPE_COLORS[n.type] || '#8a7a63');
+      n.fill = TYPE_COLORS[n.type] || '#8a7a63';
+      n.ringColor = satColor(1 - (n.gap || 0));
       byId[n.id] = n;
     });
     edges = edges.filter(function (e) { return byId[e.source] && byId[e.target]; });
@@ -2656,7 +2846,8 @@ _GRAPH_HTML = """<h1>Graph</h1>
     svg.appendChild(world);
     edges.forEach(function (e) {
       var relEdge = e.kind === 'relationship';
-      var width = relEdge ? (1.25 + Math.max(0, Math.min(1, e.told || 0)) * 6.5) : 1;
+      var share = (e.goal > 0) ? Math.min(1, (e.told || 0) / e.goal) : 0;
+      var width = relEdge ? (ST.edge_min + share * ST.edge_span) : 1;
       e.line = el('line', {
         stroke: relEdge ? '#9a6b3f' : '#d8cdb8',
         'stroke-width': width
@@ -2665,13 +2856,16 @@ _GRAPH_HTML = """<h1>Graph</h1>
     });
     nodes.forEach(function (n) {
       var g = el('g', {});
+      g.appendChild(el('circle', { cx: 0, cy: 0, r: n.r, fill: n.fill, stroke: '#fff', 'stroke-width': 1.5 }));
       if (n.ring) {
+        // The target, on the fill's own scale: drawn over the fill so it shows
+        // even when the telling has outgrown it.
         g.appendChild(el('circle', {
-          cx: 0, cy: 0, r: n.outer, fill: 'none', stroke: 'rgba(124,79,29,0.45)', 'stroke-width': 1.5
+          cx: 0, cy: 0, r: n.ringR, fill: 'none', stroke: n.ringColor, 'stroke-width': 1.5,
+          'stroke-opacity': 0.8
         }));
       }
-      g.appendChild(el('circle', { cx: 0, cy: 0, r: n.r, fill: n.fill, stroke: '#fff', 'stroke-width': 1.5 }));
-      var t = el('text', { x: 0, y: -(n.r + 4), 'text-anchor': 'middle', 'font-size': 11, fill: '#3f3428' });
+      var t = el('text', { x: 0, y: -(n.outer + 4), 'text-anchor': 'middle', 'font-size': 11, fill: '#3f3428' });
       t.textContent = n.label;
       g.appendChild(t);
       n.g = g;

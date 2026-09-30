@@ -199,12 +199,19 @@ Two different kinds of period, kept as two different facts (ADR 0030,
 The graph view's vocabulary ([handbook page](graph.md); research
 `system/research/graph-vis.md`; issue #434).
 
-- **Credit** — how much of the telling an entity holds. Each credited source
-  (today `answers/*.md`) gives `1/n` to each of the `n` entity pages that cite
-  it (owner ruling, 2026-09-29).
-- **Percentile / not ranked** — a node's credit ranked among its own type
-  (graph-vis D5). Zero credit and the only member of a type are *not ranked*
-  and draw at the minimum size.
+- **Credit / told** — how much of the telling an entity holds. Each credited
+  source gives `1/n` to each of the `n` entities that hold it (owner ruling,
+  2026-09-29): an answer is held by the pages that list it; a conversation,
+  email, manual or landmark source only by the entities its current
+  classification tags (`A_SOURCE_TELLS_ONLY_ITS_SUBJECTS`) — never a bare
+  name in the text; an unclassified source earns nothing.
+- **Target** — what a well-told life holds for an entity: the owner table's
+  weight for its type and kind (`system/research/life-portrait-targets.md`)
+  × its Focus tier multiplier × its type's calibration scale (ADR 0039).
+- **Gap** — `max(0, 1 − told/target)`, on every node and relationship edge.
+- **Kind** — what an entity is within its type: a person's relation, a
+  place's kind (residence, school, workplace, city …), a period's (era, age
+  frame, job).
 - **Life hub** — the owner's self-portrait page, `wiki/life/<slug(full_name)>.md`.
   The primary Focus is the hub (`A_PRIMARY_FOCUS_IS_THE_HUB`), and the owner
   is one end of every relationship edge through it.

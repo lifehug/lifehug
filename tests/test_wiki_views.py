@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from tempdirs import root_parent_tmp  # noqa: E402
 import serve_wiki  # noqa: E402
 import roadmap  # noqa: E402
+import portrait_targets  # noqa: E402
 import recommend_focuses  # noqa: E402
 import entity_roster  # noqa: E402
 import lifehug_core  # noqa: E402
@@ -821,7 +822,9 @@ class WikiViewsTests(unittest.TestCase):
         self.assertEqual(g["edges"][0]["weight"], 2)  # shared answers/A1.md -> 1 + 1
         mylife = next(n for n in g["nodes"] if n["id"].endswith("my-life.md"))
         self.assertEqual(mylife["sources"], 3)
-        self.assertIn("sat", mylife)
+        self.assertEqual(mylife["focus"], "My Life")
+        self.assertEqual(mylife["tier"], "extreme")
+        self.assertGreater(mylife["target"], 0)
 
     def test_graph_source_count_survives_a_long_frontmatter(self):
         # frontmatter() writes sources_count after the whole sources list.
@@ -932,35 +935,35 @@ class WikiViewsTests(unittest.TestCase):
         self.assertAlmostEqual(ann["credit"], 0.5)
         self.assertAlmostEqual(ben["credit"], 1.0)
         self.assertAlmostEqual(town["credit"], 0.5)
-        self.assertLess(ann["percentile"], ben["percentile"])
-        # The only place is not ranked; zero credit is not ranked.
-        self.assertIsNone(town["percentile"])
-        self.assertFalse(town["ranked"])
-        self.assertEqual(cal["credit"], 0)
-        self.assertFalse(cal["ranked"])
-        self.assertTrue(ann["ring"])
-        self.assertEqual(ann["target"], 8)
-        self.assertAlmostEqual(ann["sat"], 0.125)
-        self.assertNotIn("ring", ben)
-        self.assertTrue(by_id["wiki/life/my-life.md"]["ring"])
+        self.assertEqual(cal["told"], 0)
+        self.assertEqual(cal["gap"], 1.0)
+        # v378: every entity has a target; Ann's page is the Ann focus's page.
+        for n in (ann, ben, cal, town):
+            self.assertGreater(n["target"], 0)
+            self.assertNotIn("percentile", n)
+        self.assertEqual(ann["focus"], "Ann")
+        self.assertNotIn("focus", ben)
+        self.assertEqual(by_id["wiki/life/my-life.md"]["kind"], "hub")
 
         rels = [e for e in g["edges"] if e.get("kind") == "relationship"]
         self.assertEqual(len(rels), 1)
         ends = {rels[0]["source"], rels[0]["target"]}
         self.assertEqual(ends, {"wiki/life/my-life.md", "wiki/people/ann.md"})
-        self.assertAlmostEqual(rels[0]["told"], 0.125)
+        # told on the edge: answers/Q1.md is held by Ann and Ben -> 1/2.
+        self.assertAlmostEqual(rels[0]["told"], 0.5)
+        self.assertGreater(rels[0]["goal"], 0)
         emma_edge = next(
             e for e in g["edges"]
             if e.get("kind") == "related"
             and {e["source"], e["target"]} == {"wiki/life/my-life.md", "wiki/people/emma.md"}
         )
         self.assertEqual(emma_edge["weight"], 2)
-        self.assertEqual(g["style"]["radius_min"], 8)
+        self.assertEqual(g["style"]["radius_min"], portrait_targets.RADIUS_MIN)
         body = serve_wiki.view_graph()[1]
         self.assertIn("n.ring", body)
         self.assertIn("relationship", body)
         self.assertIn("ST.radius_min", body)
-        self.assertIn("not ranked", body)
+        self.assertIn("Ring = its target", body)
 
 
 class RevisionFooterTests(unittest.TestCase):
