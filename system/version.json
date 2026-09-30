@@ -1,7 +1,7 @@
 {
-  "version": 376,
+  "version": 377,
   "released": "2026-09-29",
-  "changelog": "v376: a focus finds its page. The graph now reaches every Focus through the compiler's own category-to-page rule (system/focus_pages.py, A_FOCUS_KNOWS_ITS_OWN_PAGE): a ## Focuses category is a person page whatever its type, a grouped project Focus is one page per category, and the primary Focus is the life hub (A_PRIMARY_FOCUS_IS_THE_HUB); the roadmap's wiki_node is refreshed from the same rule, and a Focus whose page does not exist is listed by doctor and in the graph's warnings instead of silently losing its ring. A relationship page joins the owner and the person its title names (A_RELATIONSHIP_HAS_TWO_ENDS: title first, the owner's name is the hub, related: only as a fallback; roadmap TYPE_TO_WIKI_DIR gains relationship). A broken roadmap is logged, not swallowed. Zero credit, and the only member of a type, are not ranked and draw at the minimum size. Every graph number moves into one declarative file, system/portrait_targets.json, which a vault overrides in state/portrait_targets.json (validated on load; doctor prints each effective value and its origin). Measured on the owner's vault: relationship edges joining the owner and the right person 0/8 -> 8/8; Focuses resolving to an existing page 8/10 -> 10/10; the told thickness of those edges is no longer always 0. WHAT HE WILL NOTICE: every \"Dave & ...\" line now runs from his own hub to that person, his life hub and the Etherfuse pages carry rings, and Mirror no longer draws at full size with nothing told.",
+  "changelog": "v377: what a life portrait holds (docs only). A research note, system/research/life-portrait-targets.md, reviews what biography, oral-history, life-story and life-review practice say about which people, places, periods, themes and work belong in a well-told life (sourced; what could not be obtained is marked), maps it onto the vault's own types and FOCUS_RELATIONSHIPS, and DECIDES the graph's target table: a relative weight per type and kind (spouse, partner, parent, child 1.0; grandparent 0.85; sibling 0.8; friend 0.5; residence 1.0, school 0.8, workplace 0.7; named era 1.0, age frame 0.8, job 0.6; ...), each with a one-line rationale; tier multipliers (none 1.0, basic 1.25, standard 1.5, extreme 2.0); per-type calibration so the best-told entity of a type sits on its target; a per-entity portrait_weight override; and the credit relevance gate A_SOURCE_TELLS_ONLY_ITS_SUBJECTS (a conversation, email or manual source counts only for the entities its current classification tags; unclassified imports earn nothing). A 'how to change a number' section points at system/portrait_targets.json and its vault override. No behavior changes in this release; v378 implements the table. WHAT HE WILL NOTICE: nothing yet; the numbers the graph will aim at are written down, with reasons, where he can change them.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -643,6 +643,7 @@
     "system/focus_pages.py",
     "system/portrait_targets.py",
     "system/portrait_targets.json",
-    "docs/handbook/graph.md"
+    "docs/handbook/graph.md",
+    "system/research/life-portrait-targets.md"
   ]
 }

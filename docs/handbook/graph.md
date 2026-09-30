@@ -116,4 +116,7 @@ reads `<- vault state/portrait_targets.json`.
   table), D5 (peers within type), D7 (no cross-type sum).
 - Owner rulings 2026-09-29: the 1/n split; every entity gets a target; the
   graph is a companion view; every knob adjustable in one config.
+- The target table and the credit relevance gate, with sources and a
+  rationale for every weight: `system/research/life-portrait-targets.md`
+  (v377; implemented in v378).
 - Issue #434.
