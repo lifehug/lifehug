@@ -2,7 +2,7 @@
   "schema_version": 2,
   "_about": "The graph portrait: every number it uses. The framework ships this file; a vault overrides any subset in state/portrait_targets.json (same shape, validated on load; an invalid override is rejected whole). `lifehug doctor` prints every effective value and where it came from. Rationale for each weight: system/research/life-portrait-targets.md. Keys starting with _ are comments.",
   "targets": {
-    "_about": "Relative target weight per entity type and kind (graph-vis D4: an owner table, not learned from citations). Weights compare only within a type (D5); calibration (below) puts them on the credit scale. A roster entry or a roadmap focus with `portrait_weight` replaces the table weight for that entity.",
+    "_about": "Relative target weight per entity type and kind (graph-vis D4: an owner table by type AND relation, not learned from citations). Within a type these rank kinds; across types, type_scale (below) says how big a type is next to a parent. A roster entry or a roadmap focus with `portrait_weight` replaces the table weight for that entity.",
     "person": {
       "spouse": 1.0,
       "partner": 1.0,
@@ -73,12 +73,31 @@
     "standard": 1.5,
     "extreme": 2.0
   },
+  "type_scale": {
+    "_about": "v380 (owner observation 2026-09-30: 'the biggest things would be my dad and my mom, to tell a story about myself'). On the SHARED scale (calibration.mode = shared) every entity's target = table weight x tier x type_scale[type] x the anchor scale, so these are fractions of a parent's target. The owner's provisional numbers, revisitable; one-line rationale each in system/research/life-portrait-targets.md (Amendment 2026-09-30). A type missing here scales 1.0. Ignored in per_type mode.",
+    "person": 1.0,
+    "relationship": 1.0,
+    "life": 1.0,
+    "place": 0.6,
+    "period": 0.6,
+    "project": 0.5,
+    "lifes_work": 0.6,
+    "self": 0.6,
+    "object": 0.3,
+    "theme": 0.3
+  },
   "kinds": {
     "_about": "How an entity's kind is read. age_frame_pattern: a period page slug matching this regex is an age frame.",
     "age_frame_pattern": "^(childhood|early-childhood|my-teens|teen-years|my-[0-9]+s)$"
   },
   "calibration": {
-    "_about": "Puts table weights on the credit scale, per type: scale = the `quantile` of credit / (weight x tier) over the type's credited members (1.0 = the best-told member sits exactly at its target). A type with fewer than min_peers credited members borrows the median scale of the other types. exclude_kinds are never calibrated on (the owner's own person page duplicates the hub).",
+    "_about": "Puts table weights on the credit scale. mode shared (v380, default): ONE scale for the whole portrait, anchored on people - the anchor scale is the anchor `quantile` of credit / (weight x tier x type_scale) over the credited anchor members (type anchor.type, kind in anchor.kinds; 1.0 = the best-told parent/spouse/partner sits exactly on its target), and every type's scale is type_scale[type] x that anchor scale. With no credited anchor member the anchor falls back to the same quantile over every credited entity. mode per_type (v378): each type calibrates on itself - scale = the `quantile` of credit / (weight x tier) over the type's credited members; a type with fewer than min_peers credited members borrows the median scale of the other types. exclude_kinds are never calibrated on in either mode (the owner's own person page duplicates the hub).",
+    "mode": "shared",
+    "anchor": {
+      "type": "person",
+      "kinds": ["parent", "spouse", "partner"],
+      "quantile": 1.0
+    },
     "quantile": 1.0,
     "min_peers": 2,
     "exclude_kinds": ["owner"]
@@ -94,14 +113,31 @@
     "min_person_mentions": 1
   },
   "drawing": {
-    "_about": "Pixels. Fill and ring share one scale: radius = radius_min + radius_span * sqrt(value / largest value on the canvas), so area is proportional to credit. A node with no credit draws at radius_min. Relationship edges: width = edge_min + edge_span * min(1, told/target).",
+    "_about": "Pixels. Fill and ring share one scale: radius = radius_min + radius_span * sqrt(value / largest target on the canvas), so area is proportional to credit and the ring sits at the target. The fill is capped at the ring; a node told past its target (over = told/target - 1 > 0) gets a second, thinner ring over_ring_offset pixels outside it. A node with no credit draws at radius_min. Relationship edges: width = edge_min + edge_span * min(1, told/target).",
     "radius_min": 6,
     "radius_span": 30,
     "edge_min": 1.25,
-    "edge_span": 6.5
+    "edge_span": 6.5,
+    "over_ring_offset": 3,
+    "focus_halo": {
+      "_about": "A_FOCUS_WEARS_GOLD (owner 2026-09-30: 'a golden orb around the intended size'). A static gold halo (no animation, graph-vis D11/D12) drawn `gap` pixels outside the target ring (outside the over-told ring when there is one) on every entity that is a roadmap Focus whose phase is in `phases`, resolved through the same focus_pages join the ring uses. Colour #rrggbb; width in pixels.",
+      "color": "#d4a72c",
+      "width": 3,
+      "gap": 3,
+      "opacity": 0.9,
+      "phases": ["active"]
+    },
+    "project_halo": {
+      "_about": "The project mark: a solid (never dashed, D18) halo of a second colour, `gap` pixels outside everything else drawn around a project node (outside the gold halo when the project is also a Focus).",
+      "color": "#2f6f9f",
+      "width": 2,
+      "gap": 3,
+      "opacity": 0.85
+    }
   },
   "doctor": {
-    "_about": "How many of the largest gaps doctor lists per type.",
-    "gap_rows_per_type": 10
+    "_about": "How many rows doctor lists per type: the largest gaps, and the most over-told (told past target - the honest sign that a tag is applied to almost everything).",
+    "gap_rows_per_type": 10,
+    "over_rows_per_type": 10
   }
 }

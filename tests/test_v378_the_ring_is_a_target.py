@@ -155,8 +155,9 @@ class TargetModelTests(unittest.TestCase):
     def test_style_is_one_scale_from_the_config(self):
         style = self.after["style"]
         self.assertEqual(style["radius_min"], portrait_targets.RADIUS_MIN)
+        # v380: radius comes from the target; the fill is capped at the ring.
         self.assertEqual(style["value_max"],
-                         round(max(max(n["told"], n["target"]) for n in self.after["nodes"]), 3))
+                         round(max(n["target"] for n in self.after["nodes"]), 3))
         body = serve_wiki.view_graph()[1]
         self.assertIn("function radius(v)", body)
         self.assertIn("n.ringR = radius(n.target)", body)
@@ -200,7 +201,10 @@ class OverrideTests(unittest.TestCase):
 
 class CalibrationTests(unittest.TestCase):
     def cfg(self):
-        return portrait_targets.load(None)
+        # v380: per-type calibration is `calibration.mode: per_type` (shared is the default).
+        cfg = portrait_targets.load(None)
+        cfg.values["calibration"]["mode"] = "per_type"
+        return cfg
 
     def test_a_thin_type_borrows_the_median_scale(self):
         rows = [

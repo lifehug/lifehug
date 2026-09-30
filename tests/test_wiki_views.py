@@ -822,7 +822,8 @@ class WikiViewsTests(unittest.TestCase):
         self.assertEqual(g["edges"][0]["weight"], 2)  # shared answers/A1.md -> 1 + 1
         mylife = next(n for n in g["nodes"] if n["id"].endswith("my-life.md"))
         self.assertEqual(mylife["sources"], 3)
-        self.assertEqual(mylife["focus"], "My Life")
+        self.assertEqual(mylife["focus_label"], "My Life")  # v380: focus is the flag
+        self.assertIs(mylife["focus"], True)
         self.assertEqual(mylife["tier"], "extreme")
         self.assertGreater(mylife["target"], 0)
 
@@ -941,8 +942,10 @@ class WikiViewsTests(unittest.TestCase):
         for n in (ann, ben, cal, town):
             self.assertGreater(n["target"], 0)
             self.assertNotIn("percentile", n)
-        self.assertEqual(ann["focus"], "Ann")
-        self.assertNotIn("focus", ben)
+        self.assertEqual(ann["focus_label"], "Ann")  # v380: focus is the flag
+        self.assertIs(ann["focus"], True)
+        self.assertIs(ben["focus"], False)
+        self.assertNotIn("focus_label", ben)
         self.assertEqual(by_id["wiki/life/my-life.md"]["kind"], "hub")
 
         rels = [e for e in g["edges"] if e.get("kind") == "relationship"]

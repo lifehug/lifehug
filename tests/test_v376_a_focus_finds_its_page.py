@@ -223,10 +223,13 @@ class RealShapedVaultTests(unittest.TestCase):
 
     def test_focus_pages_carry_their_focus(self):
         # v378: every entity has a target ring; a Focus page also names its Focus.
+        # v380 (A_FOCUS_WEARS_GOLD): ``focus`` is the active-Focus flag, the name
+        # moved to ``focus_label``.
         by_id = {n["id"]: n for n in self.graph["nodes"]}
-        self.assertEqual(by_id["wiki/life/david-james-taylor.md"]["focus"], "David James Taylor")
+        self.assertEqual(by_id["wiki/life/david-james-taylor.md"]["focus_label"], "David James Taylor")
+        self.assertIs(by_id["wiki/life/david-james-taylor.md"]["focus"], True)
         for page in ("wiki/projects/the-problem.md", "wiki/projects/the-insight.md"):
-            self.assertEqual(by_id[page]["focus"], "Etherfuse")
+            self.assertEqual(by_id[page]["focus_label"], "Etherfuse")
             self.assertGreater(by_id[page]["target"], 0)
 
     def test_zero_credit_draws_at_the_minimum(self):

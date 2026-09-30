@@ -551,6 +551,7 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .source-body {{ overflow-wrap: anywhere; }}
     #graph {{ width: 100%; max-width: 100%; height: calc(100vh - 190px); height: calc(100dvh - 190px);
       border: 1px solid #e5dfd5; border-radius: 10px; background: #fffdf9; touch-action: none; user-select: none; display: block; }}
+    .halo-swatch {{ display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid #d4a72c; vertical-align: -1px; }}
     .graph-legend {{ display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: #6b5d49; margin: 6px 0 10px; }}
     .graph-toolbar {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }}
     .graph-toolbar button, .graph-toolbar a {{ font: inherit; font-size: 13px; font-weight: 600; color: var(--link);
@@ -2423,8 +2424,12 @@ def graph_data() -> dict:
     A_SOURCE_TELLS_ONLY_ITS_SUBJECTS).
     target = the owner table's weight for the entity's type and kind x its
     Focus tier multiplier x the type's calibration scale, on the credit scale.
-    gap = max(0, 1 - told/target). The fill and the ring are drawn on one
-    radius scale. A relationship page is an edge between the owner (the life
+    By default (v380, ONE_SCALE_FOR_THE_WHOLE_PORTRAIT) that scale is
+    ``type_scale[type]`` x one anchor scale set by the best-told
+    parent/spouse/partner, so every type is sized against the people;
+    ``calibration.mode: per_type`` restores v378's per-type calibration.
+    gap = max(0, 1 - told/target); over = max(0, told/target - 1). The fill
+    and the ring are drawn on one radius scale, the fill capped at the ring. A relationship page is an edge between the owner (the life
     hub) and the person it names, with told/target/gap by the same
     definition. Every number comes from ``portrait_targets`` (framework file
     + vault override). Problems are listed in ``warnings``.
@@ -2630,6 +2635,7 @@ def graph_data() -> dict:
         tier = (focus or {}).get("tier") or "none"
         return weight, pt.tier_multiplier(cfg, tier), tier
 
+    halo_phases = set(cfg.get("drawing.focus_halo.phases"))
     rows: list[dict] = []
     row_by_id: dict[str, dict] = {}
     for p in entities:
@@ -2639,7 +2645,8 @@ def graph_data() -> dict:
         weight, mult, tier = base_of(p["id"], etype, kind, focus)
         row = {"id": p["id"], "type": etype, "kind": kind, "credit": credit[p["id"]],
                "weight": weight, "tier": tier, "base": weight * mult,
-               "focus": (focus or {}).get("label") or ""}
+               "focus": (focus or {}).get("label") or "",
+               "focus_active": bool(focus) and (focus.get("phase") or "active") in halo_phases}
         rows.append(row)
         row_by_id[p["id"]] = row
 
@@ -2668,6 +2675,8 @@ def graph_data() -> dict:
                          "base": weight * mult, "ends": ends})
 
     calibration = pt.apply_targets(rows + rel_rows, cfg)
+    mode = cfg.get("calibration.mode")
+    anchor = pt.calibration_anchor(rows + rel_rows, cfg) if mode != "per_type" else None
 
     nodes = []
     for p in entities:
@@ -2682,11 +2691,16 @@ def graph_data() -> dict:
             "told": round(row["credit"], 3),
             "target": round(row["target"], 3),
             "gap": round(row["gap"], 3),
+            "over": round(row["over"], 3),
             "weight": row["weight"],
             "tier": row["tier"],
+            # A_FOCUS_WEARS_GOLD: an active Focus (phase in drawing.focus_halo.phases)
+            # and a project are flagged so every surface draws them distinct.
+            "focus": row["focus_active"],
+            "project": p["type"] == "projects",
         }
         if row["focus"]:
-            node["focus"] = row["focus"]
+            node["focus_label"] = row["focus"]
         nodes.append(node)
 
     rel_edges: dict[tuple[str, str], dict] = {}
@@ -2696,7 +2710,7 @@ def graph_data() -> dict:
             "source": row["ends"][0], "target": row["ends"][1], "weight": 1,
             "kind": "relationship", "page": row["id"], "relation": row["kind"],
             "told": round(row["credit"], 3), "goal": round(row["target"], 3),
-            "gap": round(row["gap"], 3),
+            "gap": round(row["gap"], 3), "over": round(row["over"], 3),
         }
         prev = rel_edges.get(key)
         if prev is None or edge["told"] > prev["told"]:
@@ -2718,22 +2732,38 @@ def graph_data() -> dict:
             edges.append({
                 "source": p["id"], "target": tgt, "weight": 1 + shared, "kind": "related",
             })
-    value_max = max([max(n["told"], n["target"]) for n in nodes] + [0.0])
+    # Radius comes from the target (v380): the fill is capped at the ring, so
+    # the largest target sets the canvas scale and an over-told tag cannot
+    # shrink everything else.
+    value_max = max([n["target"] for n in nodes] + [0.0])
     style = {k: cfg.get(f"drawing.{k}") for k in
-             ("radius_min", "radius_span", "edge_min", "edge_span")}
+             ("radius_min", "radius_span", "edge_min", "edge_span", "over_ring_offset",
+              "focus_halo", "project_halo")}
     style["value_max"] = round(value_max, 3)
-    return {
+    out = {
         "nodes": nodes, "edges": edges, "style": style, "warnings": warnings,
         "calibration": {t: {"scale": round(v["scale"], 4), "source": v["source"]}
                         for t, v in sorted(calibration.items())},
+        "calibration_mode": mode,
     }
+    if anchor is not None:
+        labels = {p["id"]: p["label"] for p in entities}
+        out["anchor"] = {
+            "scale": round(anchor["scale"], 4), "source": anchor["source"],
+            "id": anchor["id"], "label": labels.get(anchor["id"] or "", anchor["id"]),
+            "kind": anchor["kind"],
+        }
+    return out
 
 
 _GRAPH_HTML = """<h1>Graph</h1>
 <div class="graph-legend">
   <span>Filled circle = what has been told about this entity (its share of the telling)</span>
-  <span>Ring = its target: what a well-told life holds for this kind of entity, from the owner table</span>
+  <span>Ring = its target: what a well-told life holds for this entity, on one scale for the whole portrait (a parent's ring is the largest; a theme's is a fraction of it)</span>
   <span>Ring colour = the gap still untold (red large, green small); no credit draws smallest</span>
+  <span>A second, thinner ring = told past its target (the fill stops at the ring)</span>
+  <span class="legend-focus"><i class="halo-swatch" id="swatch-focus"></i> Gold halo = an active Focus: something picked to be told</span>
+  <span class="legend-project"><i class="halo-swatch" id="swatch-project"></i> Project halo = a project</span>
   <span>Brown edges are relationships, thicker as more of that bond's target is told</span>
   <span>First tap highlights. Second tap opens the page.</span>
 </div>
@@ -2773,6 +2803,10 @@ _GRAPH_HTML = """<h1>Graph</h1>
     var byId = {};
     // Every portrait number comes from system/portrait_targets.json (+ vault override).
     var ST = data.style || {};
+    [['swatch-focus', ST.focus_halo], ['swatch-project', ST.project_halo]].forEach(function (pair) {
+      var sw = document.getElementById(pair[0]);
+      if (sw && pair[1]) sw.style.borderColor = pair[1].color;
+    });
     if (data.warnings && data.warnings.length) {
       var warn = document.createElement('details');
       warn.className = 'graph-warnings';
@@ -2788,10 +2822,18 @@ _GRAPH_HTML = """<h1>Graph</h1>
       return ST.radius_min + ST.radius_span * Math.sqrt(v / ST.value_max);
     }
     nodes.forEach(function (n, i) {
-      n.r = radius(n.told);
       n.ringR = radius(n.target);
       n.ring = n.target > 0;
-      n.outer = Math.max(n.r, n.ringR);
+      // The fill is capped at the ring; telling past the target is marked, not drawn larger.
+      n.r = n.ring ? Math.min(radius(n.told), n.ringR) : radius(n.told);
+      n.overR = (n.ring && n.over > 0) ? n.ringR + (ST.over_ring_offset || 3) : 0;
+      n.outer = Math.max(n.r, n.ringR, n.overR);
+      // A_FOCUS_WEARS_GOLD: static halos outside everything else (no animation).
+      var FH = ST.focus_halo || {}, PH = ST.project_halo || {};
+      n.focusR = n.focus ? n.outer + (FH.gap || 0) + (FH.width || 0) / 2 : 0;
+      if (n.focusR) n.outer = n.focusR + (FH.width || 0) / 2;
+      n.projectR = n.project ? n.outer + (PH.gap || 0) + (PH.width || 0) / 2 : 0;
+      if (n.projectR) n.outer = n.projectR + (PH.width || 0) / 2;
       n.x = W / 2 + Math.cos(i) * 180 + (i % 7) * 12;
       n.y = H / 2 + Math.sin(i) * 180 + (i % 5) * 12;
       n.vx = 0; n.vy = 0;
@@ -2863,6 +2905,27 @@ _GRAPH_HTML = """<h1>Graph</h1>
         g.appendChild(el('circle', {
           cx: 0, cy: 0, r: n.ringR, fill: 'none', stroke: n.ringColor, 'stroke-width': 1.5,
           'stroke-opacity': 0.8
+        }));
+      }
+      if (n.overR) {
+        // Over-told: a second, thinner ring just outside the target.
+        g.appendChild(el('circle', {
+          cx: 0, cy: 0, r: n.overR, fill: 'none', stroke: '#3f3428', 'stroke-width': 0.75,
+          'stroke-opacity': 0.7
+        }));
+      }
+      if (n.focusR) {
+        g.appendChild(el('circle', {
+          cx: 0, cy: 0, r: n.focusR, fill: 'none', 'class': 'focus-halo',
+          stroke: ST.focus_halo.color, 'stroke-width': ST.focus_halo.width,
+          'stroke-opacity': ST.focus_halo.opacity
+        }));
+      }
+      if (n.projectR) {
+        g.appendChild(el('circle', {
+          cx: 0, cy: 0, r: n.projectR, fill: 'none', 'class': 'project-halo',
+          stroke: ST.project_halo.color, 'stroke-width': ST.project_halo.width,
+          'stroke-opacity': ST.project_halo.opacity
         }));
       }
       var t = el('text', { x: 0, y: -(n.outer + 4), 'text-anchor': 'middle', 'font-size': 11, fill: '#3f3428' });

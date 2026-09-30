@@ -3552,18 +3552,35 @@ def graph_portrait_checks() -> None:
     print("graph portrait config (effective value <- origin):")
     for key, value, origin in portrait_targets.effective_rows(cfg):
         print(f"  {key} = {json.dumps(value)} <- {origin}")
-    for line in graph_gap_lines(int(cfg.get("doctor.gap_rows_per_type"))):
+    for line in graph_gap_lines(int(cfg.get("doctor.gap_rows_per_type")),
+                                int(cfg.get("doctor.over_rows_per_type"))):
         print(line)
 
 
-def graph_gap_lines(per_type: int) -> list[str]:
-    """The largest portrait gaps (1 - told/target), per entity type — names only."""
+def graph_gap_lines(per_type: int, over_per_type: int | None = None) -> list[str]:
+    """The portrait's calibration, then per entity type the largest gaps
+    (1 - told/target) and the most over-told (told/target - 1) — names only.
+
+    The over-told list (v380) is the honest signal that a tag (a theme such
+    as "Family") is applied to almost everything.
+    """
     try:
         import serve_wiki  # noqa: PLC0415
 
         graph = serve_wiki.graph_data()
     except Exception as exc:  # noqa: BLE001 — doctor reports, never crashes
         return [f"warn: graph portrait gaps - graph unreadable: {exc!r}"]
+    over_per_type = per_type if over_per_type is None else over_per_type
+    anchor = graph.get("anchor")
+    if anchor:
+        who = f"{anchor['label']} ({anchor['kind']})" if anchor.get("id") else "no credited entity"
+        cal = [f"graph portrait calibration: {graph.get('calibration_mode')} - one scale "
+               f"{anchor['scale']:.4g} set by {who} [{anchor['source']}]; "
+               "target = weight x tier x type_scale x that scale"]
+    else:
+        cal = [f"graph portrait calibration: {graph.get('calibration_mode')} - each type on itself"]
+    for etype, row in sorted((graph.get("calibration") or {}).items()):
+        cal.append(f"  {etype}: scale {row['scale']:.4g} ({row['source']})")
     by_type: dict[str, list[dict]] = {}
     for node in graph.get("nodes", []):
         if node.get("gap", 0) > 0:
@@ -3579,7 +3596,20 @@ def graph_gap_lines(per_type: int) -> list[str]:
         lines.append("  relationships:")
         for edge in sorted(edges, key=lambda e: -e["gap"])[:per_type]:
             lines.append(f"    {edge['gap']:.2f}  {Path(edge['page']).stem} ({edge['relation']})")
-    return lines
+    over_by_type: dict[str, list[dict]] = {}
+    for node in graph.get("nodes", []):
+        if node.get("over", 0) > 0:
+            over_by_type.setdefault(node["type"], []).append(node)
+    lines.append(f"graph portrait over-told (most {over_per_type} per type; over = told/target - 1; "
+                 "a tag on almost everything shows here):")
+    if not over_by_type:
+        lines.append("  (none)")
+    for etype in sorted(over_by_type):
+        rows = sorted(over_by_type[etype], key=lambda n: (-n["over"], n["label"]))
+        lines.append(f"  {etype}:")
+        for node in rows[:over_per_type]:
+            lines.append(f"    {node['over']:.2f}  {node['label']} ({node['kind']})")
+    return cal + lines
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:

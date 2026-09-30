@@ -129,7 +129,10 @@ refreshes it from the rule. Graph numbers live in `system/portrait_targets.json`
 **The ring is a target (v378, ADR 0040):** every entity has
 `told` (credit, 1/n; a non-answer source counts only for entities its current
 classification tags — `A_SOURCE_TELLS_ONLY_ITS_SUBJECTS`), `target` (owner
-table weight × tier × per-type calibration) and `gap`. When the owner wants a
+table weight × tier × `type_scale` × ONE anchor scale set by the best-told
+parent/spouse/partner — v380 `ONE_SCALE_FOR_THE_WHOLE_PORTRAIT`;
+`calibration.mode: per_type` is v378), `gap` and `over`. An active Focus
+wears a gold halo (`A_FOCUS_WEARS_GOLD`); nodes carry `focus`/`project`. When the owner wants a
 different weight, change it in `state/portrait_targets.json` or set
 `portrait_weight` on the Focus/roster entry — never in code.
 
