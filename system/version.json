@@ -1,7 +1,7 @@
 {
-  "version": 374,
+  "version": 375,
   "released": "2026-09-29",
-  "changelog": "v374: a smaller timeline prompt. The fixed instructions come first (classify_story.timeline_instruction_block(), identical for every source, 11,246 characters, ending at TIMELINE_DATA_MARKER '## Source File') so a host can cache them; the one source's data follows as compact JSON. The context carries only the events that need judgment (v373's split) and only the candidates they name; the prompt copy drops freshness-only fields (PROMPT_OMITTED_CANDIDATE_FIELDS: grounding_identity, canonical_roster_terms, episode_id; event-context input_fingerprint; an old resolution's candidate list and hashes), which stay in the snapshot and digest. The model no longer echoes candidate_ids: timeline_resolution is {status, reason} and the validator fills the event-local list before the unchanged quote, eligibility and coverage checks, so the stored classification shape is identical and neither PROMPT_VERSION nor EXTRACTOR_VERSION moves (an echoing response still files). Measured: the synthetic fixture prompt goes 191,750 -> 32,139 characters (-83%); on the owner's vault the 165 prompts that still need a model go from a mean of 168,392 to 55,764 characters (median ratio 0.38), and the refresh backlog sends 9.2M characters instead of v372's 58.4M. WHAT HE WILL NOTICE: nothing on the page; the background refresh costs a fraction of what it did.",
+  "changelog": "v375: a re-key is not a change to a life (owner ruling 2026-09-29: \"A software re-key is not a change to my life; carry links over\"; ADR 0039). Classifier freshness now names each candidate by its identity in the id space the story was filed in: a candidate whose node id the stored reading filed keeps it; a re-keyed candidate stands for the vanished filed id when the projection's node_aliases walks to it, or, when no other candidate of the event shares its kind and entities, when the old id recomputes from its identity (v373's proof); otherwise it keeps its own id. Every other digested field is unchanged, CONTEXT_SCHEMA_VERSION stays 1, and a source with no vanished filed id has its v374 digest byte for byte. The fold follows node_aliases for an anchor naming a re-keyed node (timeline-rules:26, temporal_timeline.A_LINK_FOLLOWS_ITS_NODE_THROUGH_A_RE_KEY). A stored link the drawing neither draws nor redirects is a new pending reason, link_orphaned (timeline-mode refresh, ranked after classifier_changed and before relationship_changed/context_changed; settled by rule when v373's remap proves one target). v373's rule remap now refuses a recomputed proof when two candidates share kind and entities (a discriminator re-order must not swap two stays). New snapshot keys orphaned_links and refiled_context_digest are outside the four snapshot keys and never in a prompt. WHAT HE WILL NOTICE: a rule move that only re-mints node ids no longer re-reads his stories, and a story linked to a re-keyed stay keeps its place on the timeline instead of turning into a question.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -637,6 +637,8 @@
     "tests/test_v360_daily_sweep_cleanups.py",
     "tests/test_v361_a_guess_never_replaces_a_guess.py",
     "tests/test_v364_binder_condition_seven_counted_once.py",
-    "tests/test_v367_his_words_place_the_card.py"
+    "tests/test_v367_his_words_place_the_card.py",
+    "docs/adr/0039-a-re-key-is-not-a-change-to-a-life.md",
+    "tests/test_v375_a_re_key_is_not_a_change_to_a_life.py"
   ]
 }

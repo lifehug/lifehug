@@ -803,6 +803,13 @@ build time, never at read time; everything unlabeled defaults to `private`.**
   carries compact JSON with only the judged events and their candidates, and
   asks for each resolution's `status` and `reason` only; the framework fills
   `candidate_ids`.
+  A re-key is not a change to a life (v375, ADR 0039): the context digest
+  names a re-keyed candidate by the id its story filed when the move is
+  provable (the projection's `node_aliases`, or v373's identity proof for a
+  candidate with no same-kind, same-entity sibling), so a rule move that only
+  re-mints node ids queues nothing. The fold follows `node_aliases` for a
+  link's anchor (`timeline-rules:26`); a stored link the drawing neither draws
+  nor redirects is the pending reason `link_orphaned` (timeline-mode refresh).
   Published calculated nodes carry `usable_placement: bool`, derived by the
   same predicate as work items and counts; clients consume it directly rather
   than interpreting `temporal_state`, width, or possible-value presence.

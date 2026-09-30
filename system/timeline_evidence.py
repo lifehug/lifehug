@@ -316,6 +316,60 @@ def _candidate_semantics(candidate: dict) -> dict:
     return semantics
 
 
+def _context_fingerprint(
+    rows: list[dict],
+    *,
+    reference_keys: list[str],
+    unmatched_reference_keys: list[str],
+    complete: bool,
+    remaining_candidate_count: int,
+    names: dict | None = None,
+) -> str:
+    """One event context's semantic fingerprint.
+
+    ``names`` (v375, ``classifier_context.A_RE_KEY_IS_NOT_A_CHANGE_TO_A_LIFE``)
+    renames a candidate to the id its classification FILED for the same
+    identity. Every other semantic field is kept exactly. With no names the
+    payload is byte-for-byte the v374 payload.
+    """
+    names = names or {}
+    semantics = []
+    for row in rows:
+        entry = _candidate_semantics(row)
+        current = collapsed_text(entry.get("candidate_id"))
+        if current in names:
+            entry["candidate_id"] = names[current]
+        semantics.append(entry)
+    if names:
+        semantics.sort(key=lambda entry: collapsed_text(entry.get("candidate_id")))
+    return digest({
+        "candidate_semantics": semantics,
+        "reference_keys": reference_keys,
+        "unmatched_reference_keys": unmatched_reference_keys,
+        "complete": complete,
+        "remaining_candidate_count": remaining_candidate_count,
+    })
+
+
+def identity_keyed_fingerprint(context: dict, candidates_by_id: dict, names: dict) -> str:
+    """:func:`build_event_context`'s fingerprint with candidates keyed by
+    identity (v375). Equal to ``context["input_fingerprint"]`` when ``names``
+    is empty, because it is the same function over the same rows."""
+    rows = [
+        candidates_by_id[candidate_id]
+        for candidate_id in context.get("candidate_ids") or ()
+        if candidate_id in candidates_by_id
+    ]
+    return _context_fingerprint(
+        rows,
+        reference_keys=list(context.get("reference_keys") or ()),
+        unmatched_reference_keys=list(context.get("unmatched_reference_keys") or ()),
+        complete=bool(context.get("complete")),
+        remaining_candidate_count=int(context.get("remaining_candidate_count") or 0),
+        names=names,
+    )
+
+
 def build_event_context(
     event: dict,
     candidates: list[dict],
@@ -418,16 +472,13 @@ def build_event_context(
 
     explicit_keys = set(event_reference_keys(event))
     unmatched = sorted(term for term in explicit_keys if term not in matched_keys)
-    fingerprint_candidates = []
-    for row in selected:
-        fingerprint_candidates.append(_candidate_semantics(row))
-    fingerprint = digest({
-        "candidate_semantics": fingerprint_candidates,
-        "reference_keys": sorted(matched_keys),
-        "unmatched_reference_keys": unmatched,
-        "complete": complete,
-        "remaining_candidate_count": len(relevant) - len(selected),
-    })
+    fingerprint = _context_fingerprint(
+        selected,
+        reference_keys=sorted(matched_keys),
+        unmatched_reference_keys=unmatched,
+        complete=complete,
+        remaining_candidate_count=len(relevant) - len(selected),
+    )
     return {
         "event_key": key,
         "candidate_ids": selected_ids,

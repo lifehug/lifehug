@@ -329,7 +329,7 @@ class AMarriageIsASpanTests(unittest.TestCase):
                           if node.get("event_kind") == tt.MARRIAGE_SPAN_EVENT_KIND])
 
     def test_the_rule_version_moved(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:26")
 
 
 # --------------------------------------------------------------------------

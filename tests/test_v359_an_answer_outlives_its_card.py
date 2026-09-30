@@ -572,7 +572,7 @@ class TheReleaseTests(unittest.TestCase):
     def test_the_fold_rule_version_does_not_move(self):
         """This release files CLAIMS an answer was owed; it changes no
         derivation, so a vault with no closed-card answer draws what it drew."""
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:26")
         self.assertEqual(
             tt.derive_calculated_timeline(
                 index_of([]), now=NOW).calculation_rule_version,

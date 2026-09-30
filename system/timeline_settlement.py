@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Timeline refresh outcomes the framework settles without a model (v373).
 
-A context refresh (``refresh_reason`` ``context_changed`` or
-``relationship_changed``) re-reads only an existing classification's three
+A context refresh (``refresh_reason`` ``context_changed``,
+``relationship_changed`` or, since v375, ``link_orphaned``) re-reads only an existing classification's three
 link fields. Two kinds of event need no judgment to do that, and this module
 is the one definition of both:
 
@@ -27,6 +27,10 @@ is the one definition of both:
     candidate is — the link moves to it unchanged (same relation, same quote)
     with a ``remapped_from`` note, and it is validated exactly as a model's
     link would be. No unique proof, no remap: the event goes to the model.
+    v375: a recomputed proof is refused when another candidate of the event
+    shares the target's kind and entities, because then only a discriminator
+    separates them and a re-key that re-orders discriminators would prove the
+    wrong stay (``classifier_context.A_RE_KEY_IS_NOT_A_CHANGE_TO_A_LIFE``).
 
 Every other event needs judgment and is the only thing a prompt carries. The
 rule's deltas are the same four-key link deltas a model returns and pass
@@ -40,7 +44,6 @@ import copy
 import json
 
 import classifier_context as classifier_ctx
-import temporal_projection
 import timeline_evidence
 from temporal_claims import collapsed_text
 
@@ -58,7 +61,9 @@ RULE_SETTLEMENTS_FIELD = "rule_settlements"
 SETTLE_FIELD = "settle"
 SETTLE_RULE = "rule"
 SETTLE_MODEL = "model"
-TIMELINE_REFRESH_REASONS = ("context_changed", "relationship_changed")
+#: v375 adds ``link_orphaned``: the same three link fields, re-read because a
+#: stored link names a node the drawing neither draws nor redirects.
+TIMELINE_REFRESH_REASONS = ("context_changed", "relationship_changed", "link_orphaned")
 
 _REASONS = {
     "incomplete": (
@@ -134,10 +139,11 @@ def _remap_target(
     candidate_ids = [str(value) for value in context.get("candidate_ids") or ()]
     identities = snapshot.get(classifier_ctx.CANDIDATE_IDENTITY_FIELD) or {}
     subject_terms = remap.get("subject_terms") if isinstance(remap.get("subject_terms"), dict) else {}
-    matches: set[str] = set()
     alias = collapsed_text(remap.get("alias"))
     if alias and alias in candidate_ids:
-        matches.add(alias)
+        # The projection's own redirect is the strongest proof there is.
+        return alias
+    matches: set[str] = set()
     for candidate_id in candidate_ids:
         identity = identities.get(candidate_id)
         if not isinstance(identity, dict):
@@ -145,22 +151,21 @@ def _remap_target(
         shared = set(subject_terms).intersection(identity.get("identity_refs") or ())
         if not shared:
             continue
-        discriminators = [None, *(identity.get("discriminators") or ())]
         for ref in sorted(shared):
-            terms = [ref, *(subject_terms.get(ref) or ())]
-            if any(
-                temporal_projection.derive_node_id(
-                    node_kind=identity.get("node_kind"),
-                    event_kind=identity.get("event_kind"),
-                    subject_refs=[term],
-                    discriminator=discriminator,
-                ) == old
-                for term in terms
-                for discriminator in discriminators
+            if classifier_ctx.identity_recomputes(
+                old, identity, [ref, *(subject_terms.get(ref) or ())]
             ):
                 matches.add(candidate_id)
                 break
-    return next(iter(matches)) if len(matches) == 1 else None
+    if len(matches) != 1:
+        return None
+    target = next(iter(matches))
+    # v375: two candidates of one kind about the same entities differ only by
+    # their discriminator, and a re-key that re-orders discriminators would make
+    # this proof point at the other stay. Only a person or the model decides.
+    if classifier_ctx.has_identity_sibling(target, candidate_ids, identities):
+        return None
+    return target
 
 
 def _remapped_delta(

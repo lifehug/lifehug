@@ -386,8 +386,13 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:25 -->
-`timeline-rules:25` — his records read as he gave them (v360, owner
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:26 -->
+`timeline-rules:26` — a link follows its node through a re-key (v375, owner
+2026-09-29, *"a software re-key is not a change to my life; carry links
+over"*): an anchor naming a node id the drawing no longer publishes follows
+the generation's own `node_aliases` redirect
+(`temporal_timeline.A_LINK_FOLLOWS_ITS_NODE_THROUGH_A_RE_KEY`, ADR 0039).
+Before it, `timeline-rules:25` — his records read as he gave them (v360, owner
 2026-09-25): a school tenure the ladder inferred from a stay ends at the
 graduation he stated (`landmark_projection.A_STATED_GRADUATION_ENDS_THE_SCHOOL`
 — Mountain View's 11th and 12th grade end June 1999, not when he left the

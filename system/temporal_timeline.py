@@ -362,7 +362,12 @@ from temporal_claims import (  # noqa: E402
 #: running to the present is ongoing
 #: (`landmark_projection.HIS_WORD_PRESENT_IS_ONGOING`). The same claims
 #: calculate to different bounds.
-CALCULATION_RULE_VERSION = "timeline-rules:25"
+#: timeline-rules:26 (v375, owner 2026-09-29, "a software re-key is not a
+#: change to my life; carry links over"): an anchor naming a re-keyed node id
+#: follows this generation's own ``node_aliases`` redirect
+#: (:data:`A_LINK_FOLLOWS_ITS_NODE_THROUGH_A_RE_KEY`). The same claims
+#: calculate to different edges, bounds and ``anchor_unresolved`` findings.
+CALCULATION_RULE_VERSION = "timeline-rules:26"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -4468,9 +4473,40 @@ def _only_near(claim: object, label: object) -> bool:
         len(anywhere.findall(text)) == len(near.findall(text)) for text in said)
 
 
+#: v375 (timeline-rules:26, owner 2026-09-29: "A software re-key is not a
+#: change to my life; carry links over"). A relative claim whose anchor is a
+#: node id the drawing no longer publishes, but which this same generation's
+#: ``node_aliases`` redirects, anchors to the node the redirect reaches. The
+#: redirect table is the one the projection already publishes and every other
+#: reader already follows (`answer_placement`, v342 AN ALIAS IS FOLLOWED); a
+#: classifier's stored link was the one reader that did not, so a link to a
+#: re-keyed node stood as ``anchor_unresolved`` and a "when?" card. A cycle, or
+#: a redirect to nothing drawn, resolves nothing, as every anchor rule here.
+#: See `classifier_context.A_RE_KEY_IS_NOT_A_CHANGE_TO_A_LIFE`.
+A_LINK_FOLLOWS_ITS_NODE_THROUGH_A_RE_KEY = (
+    "an anchor naming a node id the drawing no longer publishes follows this "
+    "generation's own node_aliases redirect to the node it reaches, so a "
+    "stored link to a re-keyed node keeps its placement instead of standing "
+    "unresolved"
+)
+
+
+def _follow_node_alias(anchor: object, aliases: object, groups: dict) -> str:
+    """:data:`A_LINK_FOLLOWS_ITS_NODE_THROUGH_A_RE_KEY` for one anchor."""
+    table = aliases if isinstance(aliases, dict) else {}
+    current = collapsed_text(anchor)
+    seen: set[str] = set()
+    while current and current not in groups:
+        if current in seen:
+            return ""
+        seen.add(current)
+        current = collapsed_text(table.get(current))
+    return current if current in groups and current != collapsed_text(anchor) else ""
+
+
 def _build_edges(groups: dict, calculated: dict, constraints: object, index: dict,
                  place_anchor=None, cornerstone_anchor=None, stem_index=None,
-                 labels=None):
+                 labels=None, aliases=None):
     """Ordering claims and drag constraints → resolved edges + what did not resolve.
 
     A relative claim whose anchor names nothing the substrate knows is **kept**:
@@ -4492,6 +4528,8 @@ def _build_edges(groups: dict, calculated: dict, constraints: object, index: dic
             nearby: list[str] = []
             for anchor in relation.get("anchors") or ():
                 resolved = _resolve_anchor(anchor, index)
+                if not resolved and aliases:
+                    resolved = _follow_node_alias(anchor, aliases, groups)
                 if not resolved and cornerstone_anchor is not None:
                     resolved = cornerstone_anchor(anchor)
                 if not resolved and stem_index is not None:
@@ -6777,7 +6815,11 @@ def derive_calculated_timeline(
     edges, unresolved_anchors = _build_edges(
         groups, calculated, constraints, anchor_index, place_anchor=place_anchor,
         cornerstone_anchor=_cornerstone_anchor_resolver(cornerstone_of_group, relations),
-        stem_index=_stem_anchor_index(groups, displays), labels=labels)
+        stem_index=_stem_anchor_index(groups, displays), labels=labels,
+        # v375 (timeline-rules:26): the SAME redirect table this generation
+        # publishes as `node_aliases` below, in the same precedence.
+        aliases={**rekey_aliases, **landmark_aliases,
+                 **participation.node_aliases, **identity.node_aliases()})
     across = []
     for node_id in sorted(ambiguity):
         row = ambiguity[node_id]

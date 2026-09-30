@@ -857,6 +857,12 @@ whose node was only re-keyed; the prompt carries only the rest, and a story with
 nothing left needs no model call (`settle: rule` in `--refresh-targets`, v373).
 The timeline prompt opens with fixed, cacheable instructions and sends only
 compact data for the events that need judgment (v374).
+A software re-key is not a change to a life (v375, ADR 0039): freshness names
+each candidate by the id its story was filed against when a re-keyed id is
+provably the same node, so a rule move that only re-mints node ids queues no
+refresh; every meaning-bearing field still does. A stored link follows its node
+through the projection's `node_aliases`, and a link the drawing neither draws
+nor redirects is pending as `link_orphaned`, never silently unresolved.
 
 ```bash
 python3 system/lifehug.py classify-story --classify answers/A14.md

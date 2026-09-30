@@ -40,6 +40,44 @@ MAX_REFRESH_TARGETS = 50
 #: and never in ``context_digest``.
 LINK_REMAP_FIELD = "link_remap"
 CANDIDATE_IDENTITY_FIELD = "candidate_identity"
+#: v375 snapshot key, read only by :func:`refresh_reason`; never in a prompt
+#: and never in ``context_digest``: the stored links this source holds that the
+#: drawing neither draws nor redirects.
+LINK_ORPHANED_FIELD = "orphaned_links"
+LINK_ORPHANED = "link_orphaned"
+#: v375 snapshot key read only when a timeline refresh stamps its result
+#: (:func:`snapshot_metadata_after_timeline_refile`).
+REFILED_DIGEST_FIELD = "refiled_context_digest"
+
+#: v375, the owner's ruling of 2026-09-29, in his words: "A software re-key is
+#: not a change to my life; carry links over."
+#:
+#: `docs/pr-specs/classifier-independent-context.md` already binds that
+#: "machine manifest rekeys ... cannot alter freshness"; a node id is a
+#: machine key too (a hash of kind, subject WORDS and discriminator,
+#: `temporal_projection.derive_node_id`), and until v375 the digest named every
+#: candidate by it, so a rule move that re-minted ids re-read stories nothing
+#: had changed. The digest now names a candidate by its IDENTITY, written in
+#: the id space its classification was filed in: a candidate whose node id the
+#: stored reading filed keeps that id; a candidate whose id is new stands for a
+#: filed id that vanished when that id is provably the same thing (the
+#: projection's own ``node_aliases`` walks to it, or, when no other candidate of
+#: the event shares its kind and entities, the vanished id recomputes from its
+#: kind, event kind, a word its entities are known by and a discriminator it
+#: carries); anything else keeps its own id and is an honest change. Every
+#: semantic field (roster terms, bounds, basis, conflict state, completeness,
+#: ambiguities, human decisions, grounding identity) stays in the digest
+#: exactly as before: the ruling narrows the machine-key dependency only.
+#: A stored link whose node id the drawing neither draws nor redirects is
+#: ``link_orphaned``, never silently ``anchor_unresolved``.
+A_RE_KEY_IS_NOT_A_CHANGE_TO_A_LIFE = (
+    "a software re-key is not a change to a life: freshness names each "
+    "candidate by the id its classification filed for the same identity, so "
+    "a node id that moved while nothing it means moved changes no context "
+    "digest; a stored link follows its node through the projection's own "
+    "redirect, and a link the drawing neither draws nor redirects is pending "
+    "as link_orphaned"
+)
 SNAPSHOT_KEYS = (
     "source_revision",
     "context_digest",
@@ -953,6 +991,12 @@ def _load_context_catalog(vault_root: Path) -> dict:
         "baseline_candidates": baseline_candidates,
         # v373: re-key remapping inputs. Neither reaches a prompt or a digest.
         "candidate_identity": candidate_identity,
+        # v375: what the independent drawing publishes, so a stored link the
+        # fold can neither draw nor redirect is named `link_orphaned`.
+        "drawn_node_ids": frozenset(
+            str(node.get("node_id") or "") for node in projection.nodes
+            if isinstance(node, dict) and node.get("node_id")
+        ),
         "node_aliases": {
             str(key): str(value)
             for key, value in dict(getattr(projection, "node_aliases", None) or {}).items()
@@ -1037,16 +1081,33 @@ def _build_context_snapshot_from_catalog(
     stored_events = [
         dict(row) for row in existing.get("events") or () if isinstance(row, dict)
     ]
+    candidates_by_id = {
+        str(row.get("candidate_id") or ""): row for row in candidates
+    }
     event_contexts: dict[str, dict] = {}
+    # v375 A_RE_KEY_IS_NOT_A_CHANGE_TO_A_LIFE: per event, {current id: the id
+    # the stored reading filed for the same identity}, and the digest's own
+    # fingerprint keyed that way. Both are empty/equal to the prompt's own
+    # fingerprint whenever no filed id vanished, so such digests are the v374
+    # digests byte for byte.
+    event_names: dict[str, dict] = {}
+    digest_fingerprints: dict[str, str] = {}
     if existing and isinstance(existing.get("events"), list):
         for event in stored_events:
             context = timeline_evidence.build_event_context(
-                event,
+                _carried_link_event(event, candidates_by_id, catalog),
                 candidates,
                 forced_candidate_ids=forced_ids,
                 max_candidates=max_candidates,
             )
-            event_contexts[context["event_key"]] = context
+            key = context["event_key"]
+            event_contexts[key] = context
+            names = _filed_identity_names(event, context, candidates_by_id, catalog)
+            event_names[key] = names
+            digest_fingerprints[key] = (
+                timeline_evidence.identity_keyed_fingerprint(context, candidates_by_id, names)
+                if names else context["input_fingerprint"]
+            )
     else:
         # A full extraction has no stable event keys yet. Search the source as
         # one provisional context; event-local contexts replace it after filing.
@@ -1064,6 +1125,7 @@ def _build_context_snapshot_from_catalog(
             max_candidates=max_candidates,
         )
         event_contexts[context["event_key"]] = context
+        digest_fingerprints[context["event_key"]] = context["input_fingerprint"]
 
     selected_ids = {
         candidate_id
@@ -1096,6 +1158,11 @@ def _build_context_snapshot_from_catalog(
                     "prior": context["input_fingerprint"],
                     "total_prompt_omitted": omitted,
                 })
+                names = event_names.get(context["event_key"]) or {}
+                digest_fingerprints[context["event_key"]] = timeline_evidence.digest({
+                    "prior": digest_fingerprints[context["event_key"]],
+                    "total_prompt_omitted": [names.get(value, value) for value in omitted],
+                })
     truncated = any(not row.get("complete") for row in event_contexts.values())
     human_decisions_all = _applicable_human_identity_records(
         catalog["human_identity_records"],
@@ -1106,12 +1173,17 @@ def _build_context_snapshot_from_catalog(
     decision_truncated = False
     context_truncated = truncated
     for context in event_contexts.values():
-        context["input_fingerprint"] = timeline_evidence.digest({
-            "event_context": context["input_fingerprint"],
+        authority = {
             "human_identity_decisions": human_decisions,
             "source_roster_authority": _source_roster_authority(
                 selected, context.get("candidate_ids"), roster_evidence
             ),
+        }
+        context["input_fingerprint"] = timeline_evidence.digest({
+            "event_context": context["input_fingerprint"], **authority,
+        })
+        digest_fingerprints[context["event_key"]] = timeline_evidence.digest({
+            "event_context": digest_fingerprints[context["event_key"]], **authority,
         })
     for row in selected:
         memberships = [
@@ -1124,21 +1196,30 @@ def _build_context_snapshot_from_catalog(
         row["relevant_event_keys"] = sorted(
             context["event_key"] for context in memberships
         )
-    digest_input = {
-        "schema_version": CONTEXT_SCHEMA_VERSION,
-        "event_contexts": {
-            key: {
-                "candidate_ids": value.get("candidate_ids"),
-                "reference_keys": value.get("reference_keys"),
-                "unmatched_reference_keys": value.get("unmatched_reference_keys"),
-                "complete": value.get("complete"),
-                "remaining_candidate_count": value.get("remaining_candidate_count"),
-                "input_fingerprint": value.get("input_fingerprint"),
-            }
-            for key, value in sorted(event_contexts.items())
-        },
-        "human_identity_decisions": human_decisions,
-    }
+    def _digest_input(named: bool) -> dict:
+        return {
+            "schema_version": CONTEXT_SCHEMA_VERSION,
+            "event_contexts": {
+                key: {
+                    "candidate_ids": (
+                        _identity_named_ids(value.get("candidate_ids"), event_names.get(key))
+                        if named else value.get("candidate_ids")
+                    ),
+                    "reference_keys": value.get("reference_keys"),
+                    "unmatched_reference_keys": value.get("unmatched_reference_keys"),
+                    "complete": value.get("complete"),
+                    "remaining_candidate_count": value.get("remaining_candidate_count"),
+                    "input_fingerprint": (
+                        digest_fingerprints.get(key, value.get("input_fingerprint"))
+                        if named else value.get("input_fingerprint")
+                    ),
+                }
+                for key, value in sorted(event_contexts.items())
+            },
+            "human_identity_decisions": human_decisions,
+        }
+
+    digest_input = _digest_input(True)
     active_corrections = source_integrity.active_correction_leaves(
         source_integrity.corrections_targeting(
             source, repo_dir=root, records=catalog["correction_records"]
@@ -1185,6 +1266,14 @@ def _build_context_snapshot_from_catalog(
     # id no longer exists. Excluded from context_digest and from every prompt:
     # it is how the framework avoids a model call, not what the model reads.
     snapshot[LINK_REMAP_FIELD] = _link_remap_inputs(stored_events, candidates, catalog)
+    snapshot[LINK_ORPHANED_FIELD] = _orphaned_links(stored_events, candidates_by_id, catalog)
+    # v375: the digest this source will have once a timeline refresh re-files
+    # every event against today's ids (no filed id left to name). Equal to
+    # ``context_digest`` whenever nothing was renamed.
+    snapshot[REFILED_DIGEST_FIELD] = (
+        _digest(_digest_input(False)) if any(event_names.values())
+        else snapshot["context_digest"]
+    )
     snapshot[CANDIDATE_IDENTITY_FIELD] = {
         str(row.get("candidate_id") or ""): catalog.get("candidate_identity", {}).get(
             str(row.get("candidate_id") or "")
@@ -1209,7 +1298,8 @@ def _link_remap_inputs(stored_events: list[dict], candidates: list[dict], catalo
         if not old or old in present:
             continue
         terms = remap.setdefault(old, {
-            "alias": str(node_aliases.get(old) or "") or None,
+            # v375: walked, so a chain of re-keys still reaches today's id.
+            "alias": walk_node_alias(old, node_aliases, present) or None,
             "subject_terms": {},
         })["subject_terms"]
         for ref in relation.get("entity_refs") or ():
@@ -1217,6 +1307,192 @@ def _link_remap_inputs(stored_events: list[dict], candidates: list[dict], catalo
             if ref and not timeline_evidence.is_generic_owner_reference(ref):
                 terms[ref] = sorted(set(roster_aliases.get(ref, ())))
     return remap
+
+
+def walk_node_alias(node_id: object, aliases: object, present: object) -> str:
+    """``node_id`` followed through ``node_aliases`` to an id in ``present``.
+
+    The id itself when it is present; ``""`` on a cycle or when the redirects
+    reach nothing present. The one walk v373's remap and v375's freshness share
+    with the fold's own :func:`temporal_timeline._follow_node_alias`.
+    """
+    table = aliases if isinstance(aliases, dict) else {}
+    current = timeline_evidence.collapsed_text(node_id)
+    seen: set[str] = set()
+    while current and current not in present:
+        if current in seen:
+            return ""
+        seen.add(current)
+        current = timeline_evidence.collapsed_text(table.get(current))
+    return current if current in present else ""
+
+
+def _identity_shape(identity: object) -> tuple:
+    row = identity if isinstance(identity, dict) else {}
+    return (
+        str(row.get("node_kind") or ""),
+        str(row.get("event_kind") or ""),
+        tuple(sorted(str(ref) for ref in row.get("identity_refs") or ())),
+    )
+
+
+def has_identity_sibling(candidate_id: str, candidate_ids: object, identities: dict) -> bool:
+    """Does another candidate share this one's kind, event kind and entities?
+
+    Then only a discriminator tells the two apart (two stays at one house, two
+    stints at one employer), and a re-key that re-orders discriminators would
+    silently swap them. v375: such a candidate is never matched to a vanished
+    id by recomputation, only by the projection's own redirect.
+    """
+    shape = _identity_shape(identities.get(candidate_id))
+    return any(
+        other != candidate_id and _identity_shape(identities.get(other)) == shape
+        for other in (str(value) for value in candidate_ids or ())
+    )
+
+
+def identity_recomputes(old_id: str, identity: object, subject_terms: object) -> bool:
+    """v373's proof: ``old_id`` is this identity minted on one of these words.
+
+    ``derive_node_id(node_kind, event_kind, [word], discriminator)`` for a word
+    in ``subject_terms`` and a discriminator the candidate carries (or none).
+    """
+    row = identity if isinstance(identity, dict) else {}
+    discriminators = [None, *(row.get("discriminators") or ())]
+    return any(
+        temporal_projection.derive_node_id(
+            node_kind=row.get("node_kind"),
+            event_kind=row.get("event_kind"),
+            subject_refs=[term],
+            discriminator=discriminator,
+        ) == old_id
+        for term in subject_terms or ()
+        for discriminator in discriminators
+    )
+
+
+def _own_subject_terms(identity: object, roster_aliases: dict) -> list[str]:
+    """The words a candidate's own entities are known by (refs and aliases)."""
+    row = identity if isinstance(identity, dict) else {}
+    terms: list[str] = []
+    for ref in row.get("identity_refs") or ():
+        ref = str(ref or "")
+        if ref and not timeline_evidence.is_generic_owner_reference(ref):
+            terms.extend([ref, *roster_aliases.get(ref, ())])
+    return terms
+
+
+def _proven_successor(
+    old_id: str, pool: list[str], catalog: dict, *, siblings_among: object = None,
+) -> str:
+    """The one candidate in ``pool`` provably the vanished ``old_id`` (v375).
+
+    The projection's own redirect first; otherwise v373's recomputation, which
+    must match exactly one candidate that has no identity sibling among
+    ``siblings_among`` (default: the pool).
+    """
+    target = walk_node_alias(old_id, catalog.get("node_aliases") or {}, set(pool))
+    if target:
+        return target
+    identities = catalog.get("candidate_identity") or {}
+    roster_aliases = catalog.get("roster_aliases") or {}
+    matches = [
+        candidate_id for candidate_id in pool
+        if identity_recomputes(
+            old_id,
+            identities.get(candidate_id),
+            _own_subject_terms(identities.get(candidate_id), roster_aliases),
+        )
+    ]
+    siblings = pool if siblings_among is None else siblings_among
+    if len(matches) != 1 or has_identity_sibling(matches[0], siblings, identities):
+        return ""
+    return matches[0]
+
+
+def _filed_ids(event: dict) -> set[str]:
+    resolution = event.get("timeline_resolution")
+    relation = event.get("timeline_relation")
+    filed = {
+        str(value) for value in (
+            (resolution.get("candidate_ids") or ()) if isinstance(resolution, dict) else ()
+        ) if value
+    }
+    if isinstance(relation, dict) and relation.get("candidate_id"):
+        filed.add(str(relation["candidate_id"]))
+    return filed
+
+
+def _carried_link_event(event: dict, candidates_by_id: dict, catalog: dict) -> dict:
+    """The stored event as context retrieval should read it (v375).
+
+    A stored link forces its node into the event's candidate set. When that
+    node's id was re-keyed, the node it provably became is forced instead, so
+    a re-key cannot shrink the context it was filed against.
+    """
+    relation = event.get("timeline_relation")
+    old = str(relation.get("candidate_id") or "") if isinstance(relation, dict) else ""
+    if not old or old in candidates_by_id:
+        return event
+    target = _proven_successor(old, sorted(candidates_by_id), catalog)
+    if not target:
+        return event
+    carried = dict(event)
+    carried["timeline_relation"] = {**relation, "candidate_id": target}
+    return carried
+
+
+def _filed_identity_names(
+    event: dict, context: dict, candidates_by_id: dict, catalog: dict,
+) -> dict[str, str]:
+    """``{current candidate id: filed id}`` for :data:`A_RE_KEY_IS_NOT_A_CHANGE_TO_A_LIFE`.
+
+    Only a filed id that vanished from the catalog is ever a name, and only
+    for a current candidate the stored reading did not file; the pairing must
+    be one-to-one or nothing is renamed.
+    """
+    filed = _filed_ids(event)
+    vanished = sorted(value for value in filed if value not in candidates_by_id)
+    if not vanished:
+        return {}
+    context_ids = [str(value) for value in context.get("candidate_ids") or ()]
+    unfiled = [value for value in context_ids if value not in filed]
+    if not unfiled:
+        return {}
+    claimed: dict[str, list[str]] = {}
+    for old in vanished:
+        target = _proven_successor(old, unfiled, catalog, siblings_among=context_ids)
+        if target:
+            claimed.setdefault(target, []).append(old)
+    return {target: olds[0] for target, olds in claimed.items() if len(olds) == 1}
+
+
+def _identity_named_ids(candidate_ids: object, names: object) -> object:
+    """The digest's ``candidate_ids``: unchanged unless a name applies."""
+    if not names:
+        return candidate_ids
+    return sorted(names.get(str(value), str(value)) for value in candidate_ids or ())
+
+
+def _orphaned_links(stored_events: list[dict], candidates_by_id: dict, catalog: dict) -> list[dict]:
+    """Stored links the drawing neither draws nor redirects (``link_orphaned``)."""
+    drawn = catalog.get("drawn_node_ids")
+    drawn = set(drawn) if drawn is not None else set(candidates_by_id)
+    drawn.update(candidates_by_id)
+    aliases = catalog.get("node_aliases") or {}
+    orphaned: list[dict] = []
+    for event in stored_events:
+        relation = event.get("timeline_relation")
+        if not isinstance(relation, dict):
+            continue
+        old = str(relation.get("candidate_id") or "")
+        if not old or old in drawn or walk_node_alias(old, aliases, drawn):
+            continue
+        orphaned.append({
+            "event_key": timeline_evidence.event_key(event),
+            "candidate_id": old,
+        })
+    return sorted(orphaned, key=lambda row: (row["event_key"], row["candidate_id"]))
 
 
 def build_context_snapshot(
@@ -1293,6 +1569,21 @@ def _event_context(snapshot: dict, event: dict) -> dict:
         ),
     })
     return context
+
+
+def snapshot_metadata_after_timeline_refile(snapshot: dict) -> dict:
+    """Four-key identity a timeline refresh stamps on the reading it files.
+
+    v375: a timeline refresh re-files every stored event against today's
+    candidate ids, so the filed ids that named re-keyed candidates in this
+    snapshot's ``context_digest`` are gone from the new reading. Its stamp is
+    the digest that reading will be judged by.
+    """
+    accepted = dict(snapshot)
+    refiled = snapshot.get(REFILED_DIGEST_FIELD)
+    if refiled:
+        accepted["context_digest"] = refiled
+    return snapshot_metadata(accepted)
 
 
 def snapshot_metadata_for_events(snapshot: dict, events: object) -> dict:
@@ -1734,6 +2025,10 @@ def refresh_reason(snapshot: dict, classification: object) -> str | None:
         return "source_changed"
     if recorded["extractor_version"] != current["extractor_version"]:
         return "classifier_changed"
+    if snapshot.get(LINK_ORPHANED_FIELD):
+        # v375: a stored link naming a node the drawing neither draws nor
+        # redirects. Visible and refreshable, never a silent unresolved anchor.
+        return LINK_ORPHANED
     if recorded["prompt_version"] != current["prompt_version"]:
         return "relationship_changed"
     if recorded["context_digest"] != current["context_digest"]:
@@ -1745,16 +2040,20 @@ def refresh_reason(snapshot: dict, classification: object) -> str | None:
 #: told or corrected first, the classifier's own upgrades next, the ambient
 #: context last. `stale` is a filed correction; `unclassified` and
 #: `source_changed` are new words; `legacy_snapshot` / `classifier_changed`
-#: are our own rule moves; `relationship_changed` / `context_changed` are
-#: the spine moving under an unchanged story.
+#: are our own rule moves; `link_orphaned` (v375) is a stored link whose node
+#: the drawing neither draws nor redirects; `relationship_changed` /
+#: `context_changed` are the spine moving under an unchanged story.
 REFRESH_REASON_PRIORITY: dict[str, int] = {
     "stale": 0,
     "unclassified": 1,
     "source_changed": 1,
     "legacy_snapshot": 2,
     "classifier_changed": 3,
-    "relationship_changed": 4,
-    "context_changed": 5,
+    # v375: a link to a node nothing draws or redirects is a known defect in a
+    # stored reading, ahead of the ambient context moving.
+    LINK_ORPHANED: 4,
+    "relationship_changed": 5,
+    "context_changed": 6,
 }
 
 
@@ -1884,6 +2183,9 @@ __all__ = [
     "ContextFailureCode",
     "CONTEXT_SCHEMA_VERSION",
     "EXTRACTOR_VERSION",
+    "A_RE_KEY_IS_NOT_A_CHANGE_TO_A_LIFE",
+    "LINK_ORPHANED",
+    "LINK_ORPHANED_FIELD",
     "MAX_CONTEXT_CANDIDATES",
     "MAX_CONTEXT_DECISIONS",
     "MAX_REFRESH_TARGETS",

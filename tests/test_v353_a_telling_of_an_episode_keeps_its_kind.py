@@ -611,7 +611,7 @@ class TheDrawingRuleDoesNotMoveTests(unittest.TestCase):
     moves."""
 
     def test_the_calculation_rule_version_is_unchanged(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:25")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:26")
 
     def test_a_vault_nobody_answered_draws_exactly_what_it_drew(self):
         vault = EpisodeVault(self)
