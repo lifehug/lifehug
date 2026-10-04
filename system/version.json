@@ -1,7 +1,7 @@
 {
-  "version": 384,
+  "version": 385,
   "released": "2026-10-04",
-  "changelog": "v384: a unique first name is an alias (ADR 0041, D4). Answers say \"Katie\", never \"Katie Taylor\", so the founder's wife counted 0 unique answers. `entity-roster --ensure-introduced` now adds a person row's first token as an alias through the one alias writer when no other row answers to it by name, alias or first token; a shared first name (the Jameses) is reported in first_name_collisions and never guessed; role words are skipped; idempotent, no model call; the recount follows on the same run.",
+  "changelog": "v385: a question passes or it is not a question (ADR 0042, lifehug-platform#984). The daily question read \"update\" and the next card \"gist\" — one-word follow-ups the follow-up planner filed in July, plus `When was wedding?` keystone templates and probes that narrated the vault (\"appears in your records only as a name\") or the system (\"your answer places 8 timeline moments\"). The quality score never saw them, and where it ran it could not fail anything. Now `question_craft.evaluate` gives every question a verdict — pass / review / fail with reasons — and `question_bank.append_questions` is the one door into the bank: follow-ups, keystone probes and candidate promotion all file through it, a fail is refused (never written) and a review is filed with a `craft: review` comment. Keystone probes are said in the domain's own words (\"When did you get married?\") or not minted. The weekly queue skips a fail already in the bank (`skipped_craft_fail`), auto-promotion requires a pass, and two new verbs clean up: `question-bank-lint` lists every entry's verdict (read-only) and `question-retire <id>` retires one as `- [-] ID: text *(retired DATE: reason)*` — kept, never deleted, never asked, its id never reused.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -651,6 +651,11 @@
     "tests/test_v376_a_focus_finds_its_page.py",
     "tests/test_v378_the_ring_is_a_target.py",
     "tests/test_v380_one_scale_for_the_whole_portrait.py",
-    "tests/goldens/portrait_targets_v378_per_type.json"
+    "tests/goldens/portrait_targets_v378_per_type.json",
+    "system/question_craft.py",
+    "system/question_bank.py",
+    "tests/test_question_craft.py",
+    "tests/test_question_bank.py",
+    "docs/adr/0042-a-question-passes-or-it-is-not-a-question.md"
   ]
 }

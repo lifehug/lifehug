@@ -29,6 +29,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import question_bank
 from lifehug_core import (
     ANSWERS_DIR,
     CONFIG_FILE,
@@ -83,13 +84,11 @@ def parse_questions(md_text):
 
 
 def get_next_id_for_category(md_text, category):
-    """Find the next available question ID for a category (e.g. A11, B8)."""
-    pattern = re.compile(rf'^- \[[ xX]\] ({re.escape(category)}\d+):', re.MULTILINE)
-    existing = [m.group(1) for m in pattern.finditer(md_text)]
-    if not existing:
-        return f"{category}1"
-    max_num = max(int(re.search(r'\d+', qid).group()) for qid in existing)
-    return f"{category}{max_num + 1}"
+    """Find the next available question ID for a category (e.g. A11, B8).
+
+    Delegates to the bank's one allocator, so a retired row's id is never
+    reused (ADR 0042)."""
+    return question_bank.next_bank_id(md_text, category)
 
 
 def read_answer_files():
@@ -304,6 +303,7 @@ def cmd_append(args):
 
     # Build additions per category
     additions = []  # list of (cat, new_id, text, source_id)
+    refused = []
     current_md = md_text
     for cat in sorted(by_cat.keys()):
         for q in by_cat[cat]:
@@ -312,10 +312,19 @@ def cmd_append(args):
             source_id = q.get("source_id", "")
             if not text:
                 continue
-            additions.append((cat, new_id, text, source_id))
-            # Update current_md so next ID is correct
-            # Fake-add the ID so get_next_id_for_category increments
-            current_md += f"\n- [ ] {new_id}: {text}"
+            # Through the bank's one door (ADR 0042): a fail is refused here,
+            # in the preview as well as the write, and its id is not consumed.
+            current_md, filed, rejected = question_bank.append_questions(current_md, [{
+                "id": new_id, "text": text, "category": cat,
+                "new_section": f"\n\n## {cat}: (generated)\n",
+            }])
+            refused.extend(rejected)
+            if filed:
+                additions.append((cat, new_id, text, source_id))
+
+    for row in refused:
+        print(f"Refused (ADR 0042) {row['text']!r}: {', '.join(row['reasons'])}",
+              file=sys.stderr)
 
     if not additions:
         print("No valid questions to add.", file=sys.stderr)
@@ -331,25 +340,11 @@ def cmd_append(args):
 
     # Re-read question bank fresh before appending
     md_text = QUESTIONS_FILE.read_text()
-
-    # Append new questions to each category section
-    for cat, new_id, text, source_id in additions:
-        new_line = f"- [ ] {new_id}: {text}"
-
-        # Find the category section and append before the next section or EOF
-        cat_pattern = re.compile(
-            rf'^(## {re.escape(cat)}:.+?(?=\n## |\Z))',
-            re.MULTILINE | re.DOTALL,
-        )
-        match = cat_pattern.search(md_text)
-        if match:
-            section = match.group(1)
-            # Append to end of section (before the trailing newlines)
-            new_section = section.rstrip() + "\n" + new_line + "\n"
-            md_text = md_text[:match.start()] + new_section + md_text[match.end():]
-        else:
-            # Category not found — append to end of file
-            md_text = md_text.rstrip() + f"\n\n## {cat}: (generated)\n{new_line}\n"
+    md_text, _filed, _refused = question_bank.append_questions(md_text, [
+        {"id": new_id, "text": text, "category": cat,
+         "new_section": f"\n\n## {cat}: (generated)\n"}
+        for cat, new_id, text, _source_id in additions
+    ])
 
     write_text(QUESTIONS_FILE, md_text)
 

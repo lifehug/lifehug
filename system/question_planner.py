@@ -802,6 +802,25 @@ def _week_seed(generated_at: str) -> int:
     return iso[0] * 100 + iso[1]
 
 
+def drop_craft_fails(pending: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split pending bank questions into (askable, skipped) — ADR 0042.
+
+    Only a ``fail`` is skipped; a ``review`` is still askable (it was filed on
+    purpose). ``skipped`` is ``[{id, reasons}]`` for the plan's report.
+    """
+    import question_craft  # noqa: PLC0415
+
+    kept: list[dict] = []
+    skipped: list[dict] = []
+    for question in pending:
+        verdict = question_craft.evaluate(str(question.get("text") or ""), with_score=False)
+        if verdict["verdict"] == question_craft.FAIL:
+            skipped.append({"id": str(question.get("id") or ""), "reasons": verdict["reasons"]})
+            continue
+        kept.append(question)
+    return kept, skipped
+
+
 def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: dict | None = None,
                 seed: int | None = None, timeline_probes: object = None,
                 previous_queue: object = None) -> dict:
@@ -831,6 +850,9 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
 
     pending = enriched_pending_questions(
         questions, categories, coverage, planner_state.get("active_objectives", []), findex)
+    # ADR 0042: every bank question is re-evaluated as the queue is built; a
+    # craft FAIL is never queued, whatever its focus or coverage weight.
+    pending, skipped_craft_fail = drop_craft_fails(pending)
     recently_asked = previous_queue_focuses(previous_queue)
 
     # v196: a MINTED keystone question is an ordinary pending bank question
@@ -1051,6 +1073,7 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
     return {
         "version": 3,
         "generated_at": generated_at,
+        "skipped_craft_fail": skipped_craft_fail,
         "expires_at": future_timestamp(expires_days),
         "policy": {
             "limit": limit,
@@ -1470,7 +1493,9 @@ def resolve_work_item_id(ref: object, *, aliases: object = None) -> str:
 #: match, the host), and gains one field.
 WORK_ITEM_BANK_MARKER = "work_item"
 
-_WORK_ITEM_BANK_ROW_RE = re.compile(r"^- \[( |x)\] (?P<qid>[A-Z]\d+[a-z]*): (?P<text>.+)$")
+#: ADR 0042: ``[-]`` (retired) rows are read too — a retired work item must
+#: never be minted again, so it stays "already asked" for the dedupe.
+_WORK_ITEM_BANK_ROW_RE = re.compile(r"^- \[( |x|-)\] (?P<qid>[A-Z]\d+[a-z]*): (?P<text>.+)$")
 _WORK_ITEM_TAG_RE = re.compile(
     r"^\s*<!--\s*timeline_probe:\s*(?P<keystone_id>\S+);\s*anchor:\s*(?P<anchor>[^;]+);"
     r"\s*leverage:\s*(?P<leverage>\d+)"
@@ -1911,6 +1936,7 @@ def bank_work_item_rows(question_bank_text: object, *, aliases: object = None) -
             "leverage": int(tag.group("leverage")),
             "text": bank_row.group("text").strip(),
             "answered": bank_row.group(1) == "x",
+            "retired": bank_row.group(1) == "-",
             "provenance": lane.group("provenance") if lane else "",
         })
     return rows
@@ -1948,7 +1974,8 @@ def work_item_states_from_bank(question_bank_text: object, *,
     answered once" is expressed in — no second ledger, no second truth.
     """
     return {
-        work_item_id: ("answered" if row["answered"] else "offered")
+        work_item_id: ("answered" if row["answered"]
+                       else "dismissed" if row.get("retired") else "offered")
         for work_item_id, row in bank_work_items(
             question_bank_text, aliases=aliases
         ).items()
@@ -2156,9 +2183,14 @@ def mint_queue_questions(*, work_items: object = None, dry_run: bool = False,
                 next_question_id=lambda category: next_question_id(text, category))
             if not row:
                 continue
+            filed = timeline_interaction.insert_keystone_question(text, row)
+            if filed == text:
+                # ADR 0042: the bank's one door refused the question (a craft
+                # FAIL). Nothing was minted; the cap is not spent on it.
+                continue
+            text = filed
             if is_landmark:
                 landmarks += 1
-            text = timeline_interaction.insert_keystone_question(text, row)
             seen.add(resolve_work_item_id(candidate.get("work_item_id"), aliases=table))
             minted.append(row)
         if minted and not dry_run and question_bank_text is None:
@@ -2555,6 +2587,11 @@ def main() -> int:
             print(f"✓ Retired {len(retired)} timeline question(s) the resolver "
                   f"already placed: {', '.join(retired)}")
         print(f"✓ Wrote planned queue: {len(data['queue'])} item(s), expires {data['expires_at']}")
+        skipped = data.get("skipped_craft_fail") or []
+        if skipped:
+            print(f"✗ Skipped {len(skipped)} bank question(s) that fail the craft "
+                  f"evaluation (ADR 0042; see `question-bank-lint`): "
+                  f"{', '.join(row['id'] for row in skipped)}")
         return 0
 
     return report(args.limit)
