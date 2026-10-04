@@ -62,7 +62,7 @@ from recommend_focuses import (
     FOCUS_READY_SCORE_FLOOR,
     focus_start_gate,
 )
-from roadmap import focus_fill, load_roadmap, rebuild_roadmap
+from roadmap import COMPLETE_PHASE, focus_fill, is_complete, load_roadmap, rebuild_roadmap
 from vault_paths import open_vault_fd, read_vault_bytes
 
 VIEWER_LOG = logging.getLogger("lifehug.viewer")
@@ -860,7 +860,11 @@ def view_foundation():
             lbl = f'<a href="/page/{quote(str(node))}">{lbl}</a>'
         badges = _badge(focus.get("tier", "?"))
         phase = focus.get("phase", "active")
-        if phase != "active":
+        if is_complete(focus, fill):
+            # v392 (ADR 0044): a quiet mark, not a banner. A complete Focus
+            # whose category gained a question reads as developing again.
+            badges += ' <span class="muted fnd-complete" title="every question answered">\u2713 complete</span>'
+        elif phase not in ("active", COMPLETE_PHASE):
             badges += " " + _badge(phase)
         badges += " " + _badge(tag, tag.lower())
         meta = (html.escape(str(focus.get("objective", ""))) + " → "

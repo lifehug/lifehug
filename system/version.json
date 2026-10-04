@@ -1,7 +1,7 @@
 {
-  "version": 393,
+  "version": 394,
   "released": "2026-10-04",
-  "changelog": "v393: the viewer adopts the design palette — one palette for OSS and platform (lifehug#461, twin of lifehug-platform#996). `system/design/palette.yaml` mirrors the platform's `architecture/design/palette.yaml` byte for byte (sha256 `da772bb6fa9a29fe85c910fa7c688c726547c83aedec97d43d405f4ea2b4227e`, pinned on both sides); `system/design/palette.py` reads it with the standard library and emits the CSS custom properties (light under `:root`, dark under `prefers-color-scheme: dark`) and `type_color()` (an unknown type draws the neutral fallback and logs a warning). The graph's hard-coded `TYPE_COLORS` are gone: nodes, edges and the new type legend wear the tokens in the palette's FIXED categorical order; selection is a ring (2 px at radius+4 in the node's type colour, neighbours 1 px, keyboard focus the same ring, no rectangular outline); Fit / Reset / Full screen take the platform's paper control spec in the canvas's top-right corner at 44 px; the graph canvas and list follow dark mode.",
+  "changelog": "v394: a Focus at 100% is a milestone, not an end (ADR 0044, OSS half of lifehug-platform#995). Before, finishing a Focus changed nothing: it kept its slot in the autopilot's keep-3-developing count and no surface said it was done. Now the weekly `focus-complete-sweep` (after `quality`/`judgment`, before `promote`; `lifehug.py focus-complete-sweep [--dry-run]`) sets `phase = \"complete\"` automatically on a Focus whose category has zero open questions and at least one answered, whatever its tier, and records `completion` (completed_at, answered/total, the Mirror row's state). A complete Focus is never queued, leaves the autopilot's developing count so a new Focus can be promoted, keeps its page and category, and returns to `developing` as soon as a new question for its category is approved into the bank (`roadmap.is_complete` reads the live fill; `roadmap.reopen_completed` persists it on the next rebuild). On the transition only, for that Focus's person, the Timeline gaps the weekly run already computed (landmark opportunities, keystones, open date gaps) are filed as Review candidates with `source: focus_complete:<slug>`, through `question_craft.evaluate`, parked at `needs_review` (the auto-promoter never takes them), capped at three, no model call. One Mirror row kind `focus_complete` (\"<Focus> is complete \\u2014 N of N answered\", id `fc:<slug>:<completed_at>`, minted once per completion) carries three Plays a host binds: `keep_going` (the candidates get Review attention), `rest` (closes the row, nothing else), `make` (records a `studio_card` hint for the platform's later Studio card): `focus-complete-play <focus> keep_going|rest|make`, `mirror.load_focus_complete_rows`. `focus-finish` is unchanged and stays the manual accelerator. Foundation shows a quiet \\u2713 complete mark.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -667,6 +667,9 @@
     "system/design/palette.py",
     "system/design/palette.yaml",
     "docs/design/palette.md",
-    "tests/test_v393_design_palette.py"
+    "tests/test_v393_design_palette.py",
+    "system/focus_complete.py",
+    "tests/test_v394_focus_complete.py",
+    "docs/adr/0044-a-focus-at-100-is-a-milestone.md"
   ]
 }

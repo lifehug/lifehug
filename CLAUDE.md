@@ -332,7 +332,10 @@ python3 system/lifehug.py focus-add "Etherfuse" --type project --tier extreme \
 python3 system/lifehug.py focus-set mom --tier standard --target 18
 python3 system/lifehug.py focus-finish etherfuse  # push a deliverable to done (lifts its variety cap to 50%)
 python3 system/lifehug.py progress                # are we graduating toward deliverables?
+python3 system/lifehug.py focus-complete-sweep    # weekly: a Focus at 100% of its category becomes `complete` (ADR 0044)
 ```
+
+**A Focus at 100% is a milestone, not an end** (v392, ADR 0044). When a Focus's category has no open question left and at least one answered, the weekly `focus-complete-sweep` marks it `complete` automatically (coverage of the category is the rule, whatever the tier). A complete Focus is never queued, leaves the autopilot's keep-3-developing count, and keeps its page; it returns to `developing` the moment a new question for its category is approved. Its person's Timeline gaps are filed once as Review candidates (`source: focus_complete:<slug>`, parked at `needs_review`, never into the bank), and one Mirror row (`focus_complete`) says so with three Plays: `keep_going`, `rest`, `make`. `focus-finish` is unchanged: the manual accelerator, it marks nothing complete.
 
 The weekly planner builds the queue by **dynamic Focus-weighted allocation**: `weight = base(tier) × fill_factor × room`. Under-target Focuses get full weight; once a Focus passes its target it decays to a small maintenance weight (it never vanishes — re-promote it when a deliverable needs it). No Focus may take more than its cap (30% of a week, 50% when `finishing`), so nothing dominates daily life. A self-knowledge slot is reserved (~1/week), and research-expansion stays dormant until Focuses fill up and the system needs new domains. **Don't reimplement this — run the scripts.**
 

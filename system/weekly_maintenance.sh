@@ -162,6 +162,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   run_step python3 "$SCRIPT_DIR/lifehug.py" judgment-update --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" timeline-retire --dry-run
   echo "==> (real run) lifehug.py mirror-compile — synthesizes wiki/self/mirror.md (skipped in dry run: costs an AI call)"
+  run_step python3 "$SCRIPT_DIR/lifehug.py" focus-complete-sweep --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" candidates-auto-promote --dry-run
   run_step python3 "$SCRIPT_DIR/lifehug.py" planner-report --limit "$QUEUE_LIMIT"
   run_step python3 "$SCRIPT_DIR/lifehug.py" arc-plan --dry-run --limit "$QUEUE_LIMIT" --gap-max "${LIFEHUG_WEEKLY_ARC_GAP_MAX:-3}"
@@ -310,6 +311,20 @@ else
   MIRROR_OUT="$LAST_STEP_OUT"
 fi
 
+# A Focus at 100% is a milestone, not an end (v392, ADR 0044). Every Focus whose
+# category has no open question left and at least one answered takes
+# phase=complete, files its second pass (the gap-finders this run already
+# computed, for that Focus's person only) as Review candidates parked at
+# needs_review, and mints its one Mirror row. It runs after quality/judgment and
+# BEFORE promotion so a completed Focus is already out of the way when
+# promotion and the planner read the roadmap; the candidates it files are
+# structurally parked, so auto_promote below can never carry one into the bank.
+# Deterministic: no model call.
+run_learning_step "focus_complete_sweep" python3 "$SCRIPT_DIR/lifehug.py" focus-complete-sweep
+# Read indirectly by the report section table below.
+# shellcheck disable=SC2034
+FOCUS_COMPLETE_OUT="$LAST_STEP_OUT"
+
 run_learning_step "auto_promote" python3 "$SCRIPT_DIR/lifehug.py" candidates-auto-promote
 # Read indirectly by the report section table below.
 # shellcheck disable=SC2034
@@ -431,6 +446,7 @@ mkdir -p "$REPORT_DIR"
   for section in \
     "Classification:CLASSIFY_OUT" \
     "Mirror:MIRROR_OUT" \
+    "Focus completion:FOCUS_COMPLETE_OUT" \
     "Candidate promotion:PROMOTE_OUT" \
     "Planner queue:QUEUE_OUT" \
     "Arc cards:ARCS_OUT" \

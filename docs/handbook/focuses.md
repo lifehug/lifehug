@@ -304,6 +304,18 @@ heuristic derives from how many questions the category already carries,
 `tier_for_size()`), and starter questions are generated and promoted
 straight into the bank, ready for next week's planner.
 
+### A Focus at 100% is a milestone
+
+When a Focus's category has no open question left and at least one answered,
+the weekly `focus-complete-sweep` sets its phase to `complete` (ADR 0044;
+coverage of the category is the rule, whatever the tier). It stops being
+queued, leaves the autopilot's developing count so a new Focus can be started,
+and returns to `developing` when a new question for its category is approved.
+Its person's remaining Timeline gaps are proposed once as Review candidates,
+never straight into the bank, and one Mirror row says so with three choices:
+keep going, rest, make something. `focus-finish` is the manual accelerator and
+marks nothing complete.
+
 ## 5. In the loop
 
 **What feeds it:** every answer, manual source, and weekly classification
