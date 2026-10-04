@@ -159,6 +159,24 @@ def load_source_text(source_path: Path) -> tuple[dict, str]:
     return fm, body
 
 
+NO_CANDIDATE_SOURCE_TYPES = frozenset({"landmark_entry"})
+
+
+def source_mints_no_candidates(source_path: Path) -> bool:
+    """True for a source whose record classifies but never mints questions.
+
+    A promoted landmark entry (``type: landmark_entry``) is a one-line
+    structured record such as ``{"domain":"partnerships","label":"Katie..."}``.
+    It still classifies (claims and ``people[]`` must be produced), but a
+    question minted from a bare name narrates the vault's own records back to
+    the person (roster-identity §2/§4.4, lifehug#448)."""
+    try:
+        fm, _body = load_source_text(source_path)
+    except (OSError, UnicodeDecodeError):
+        return False
+    return str((fm or {}).get("type") or "").strip() in NO_CANDIDATE_SOURCE_TYPES
+
+
 # Longest suffix appended to a stem is ".response.json" (14 chars); capping at
 # 180 keeps every derived filename comfortably under the 255-byte filesystem
 # limit. Stems at or under the cap are byte-identical to their historical
@@ -1711,6 +1729,7 @@ def prepare_classification(
     if mode not in CLASSIFICATION_MODES:
         raise ClassificationPreparationError("unsupported mode", code="mode_invalid")
     fm, story_text = load_source_text(source_path)
+    skip_candidates = skip_candidates or source_mints_no_candidates(source_path)
     if not story_text.strip():
         raise ClassificationPreparationError("source has no story text", code="source_empty")
     if not isinstance(result, dict):
@@ -1890,6 +1909,7 @@ def classify_file(
         return 1
 
     fm, story_text = load_source_text(source_path)
+    skip_candidates = skip_candidates or source_mints_no_candidates(source_path)
 
     if not story_text.strip():
         print(f"Warning: no story text found: {_relative_path(source_path)}", file=sys.stderr)
@@ -2199,6 +2219,7 @@ def build_batch_plan(
         reason = classifier_ctx.refresh_reason(snapshot, existing)
         candidate_generation_needed = (
             require_candidates
+            and not source_mints_no_candidates(source)
             and isinstance(existing, dict)
             and existing.get(CLASSIFICATION_SKIP_CANDIDATES_FIELD) is True
         )
@@ -2257,7 +2278,9 @@ def build_batch_plan(
                 story_text,
                 context_snapshot=row["context_snapshot"],
                 mode=row["mode"] or "full",
-                include_candidates=not skip_candidates,
+                include_candidates=not (
+                    skip_candidates or source_mints_no_candidates(row["source"])
+                ),
             ),
         })
     return {
@@ -2626,7 +2649,10 @@ def file_batch_response(payload: object, *, model: str = "external-agent", salva
             needed = classification_mode(
                 snapshot,
                 existing,
-                require_candidates=(row["mode"] == "full" and not skip_candidates),
+                require_candidates=(
+                    row["mode"] == "full" and not skip_candidates
+                    and not source_mints_no_candidates(row["source"])
+                ),
             )
             if needed is None:
                 first_pass.append({**row, "status": "already_current", "snapshot": snapshot})
@@ -2685,7 +2711,10 @@ def file_batch_response(payload: object, *, model: str = "external-agent", salva
             needed = classification_mode(
                 snapshot,
                 existing,
-                require_candidates=(row["mode"] == "full" and not skip_candidates),
+                require_candidates=(
+                    row["mode"] == "full" and not skip_candidates
+                    and not source_mints_no_candidates(row["source"])
+                ),
             )
             if row["status"] == "already_current":
                 if needed is not None:

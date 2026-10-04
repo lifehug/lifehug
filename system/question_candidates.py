@@ -65,6 +65,10 @@ NEEDS_REVIEW_THRESHOLD = 0.70
 # Candidates older than this that were never promoted expire (kept for audit).
 # Deferred candidates are exempt — a human explicitly said "wait".
 CANDIDATE_MAX_AGE_DAYS = 45
+# A candidate older than this is never auto-promoted: its premise (what the
+# vault could see when it was minted) may be stale. It is parked needs_review
+# with reason `stale_premise` for the owner to decide (roster-identity §4.4).
+CANDIDATE_STALE_PREMISE_DAYS = 21
 
 # Two questions whose normalized token sets overlap at/above this Jaccard
 # ratio are treated as the same question (semantic dedup, no AI needed).
@@ -135,6 +139,27 @@ SCENE_MARKERS = [
     "what were you wearing", "what did they say",
 ]
 
+# A question that narrates the vault's own records ("appears in your records
+# only as a name") is the system talking about itself, not asking the person
+# anything. Whole-phrase, case-insensitive (roster-identity §4.4, P6).
+NARRATES_RECORDS_PHRASES = (
+    "in your records",
+    "your records only",
+    "your archive",
+    "appears only as",
+    "no story behind",
+    "no story yet",
+    "nothing written about",
+    "nothing recorded about",
+    "your vault",
+    "your wiki",
+    "your files",
+)
+NARRATES_RECORDS_PATTERN = re.compile(
+    "|".join(r"\b" + re.escape(p) + r"\b" for p in NARRATES_RECORDS_PHRASES),
+    re.IGNORECASE,
+)
+
 EMOTION_MARKERS = [
     "scared", "proud", "angry", "sad", "happy", "afraid",
     "excited", "ashamed", "grateful", "hurt", "loved",
@@ -166,6 +191,11 @@ def check_quality(text: str, *, source_path: str | None = None, existing_questio
     # feelings confabulate and brood; they should be rewritten as what/when.
     if SELF_WHY_PATTERN.search(text):
         penalties.append({"flag": "self_directed_why", "penalty": 0.20})
+
+    # Narrates the vault's own records: the weight of a duplicate, so it can
+    # never clear the auto-promote line and lands in needs_review.
+    if NARRATES_RECORDS_PATTERN.search(text):
+        penalties.append({"flag": "narrates_records", "penalty": 0.50})
 
     # Check too broad/generic
     for pattern in TOO_BROAD_PATTERNS:
@@ -1101,6 +1131,13 @@ def auto_promote_candidates(
                      f"score {score:.2f} below threshold {AUTO_PROMOTE_THRESHOLD}{flag_note}")
             else:
                 skipped.append((cid, f"score {score:.2f} too low"))
+            continue
+
+        # Stale-premise gate: an old candidate's premise is not re-checked
+        # here, so a human decides. Score untouched; expiry unchanged.
+        age_days = _candidate_age_days(candidate)
+        if age_days is not None and age_days > CANDIDATE_STALE_PREMISE_DAYS:
+            park(candidate, score, "stale_premise")
             continue
 
         # Weekly cap

@@ -244,6 +244,32 @@ class AutoPromoteLadderTests(unittest.TestCase):
         self.assertEqual(stored["quality"]["score"], 0.9)
         self.assertEqual(stored["quality"]["components"]["craft_penalties"], [])
 
+    def test_stale_premise_gate(self):
+        # roster-identity P7: a 22-day-old 0.95 candidate is never
+        # auto-promoted; a 20-day-old one still is. Frozen clock: NOW.
+        self._write_store([
+            {"id": "cand-stale", "status": "candidate", "priority": 0.95,
+             "text": CLEAN_TEXT, "target_category": "A", "source_path": "answers/B1.md",
+             "created_at": "2026-07-23T00:00:00Z"},
+            {"id": "cand-fresh", "status": "candidate", "priority": 0.95,
+             "text": "Who taught you to whistle, and where were you standing then?",
+             "target_category": "A", "source_path": "answers/B2.md",
+             "created_at": "2026-07-25T00:00:00Z"},
+        ])
+        result = qc.auto_promote_candidates(dry_run=False)
+        self.assertEqual([p[0] for p in result["promoted"]], ["cand-fresh"])
+        self.assertEqual(
+            [(r[0], r[2]) for r in result["needs_review"]],
+            [("cand-stale", "stale_premise")])
+        stored = self._reload_by_id()["cand-stale"]
+        self.assertEqual(stored["status"], "needs_review")
+        self.assertEqual(stored["needs_review_reason"], "stale_premise")
+        self.assertEqual(stored["quality"]["score"], 0.95)  # score untouched
+        # Parked for a human: the weekly run does not resurface it.
+        again = qc.auto_promote_candidates(dry_run=False)
+        self.assertNotIn("cand-stale", [p[0] for p in again["promoted"]])
+        self.assertEqual(self._reload_by_id()["cand-stale"]["status"], "needs_review")
+
     def test_heavy_flag_candidate_falls_below_review_band_and_stays_candidate(self):
         self._write_store([{
             "id": "cand-heavy", "status": "candidate", "priority": 0.95,
@@ -429,6 +455,46 @@ class AutoPromoteFixtureClockTests(unittest.TestCase):
                 result = qc.expire_stale_candidates({"candidates": [candidate]})
                 self.assertEqual(bool(result), expired)
                 self.assertEqual(candidate["status"], "expired" if expired else "candidate")
+
+
+class NarratesRecordsLintTests(unittest.TestCase):
+    """roster-identity P6: a question that narrates the vault's own records."""
+
+    BASE = "What do you remember about the day you first met her"
+
+    def _score(self, text):
+        return qc.check_quality(text, source_path="answers/B1.md")
+
+    def test_narrates_records_lint(self):
+        clean = self._score(self.BASE + "?")
+        self.assertNotIn("narrates_records", clean["flags"])
+        for phrase in qc.NARRATES_RECORDS_PHRASES:
+            for variant in (phrase, phrase.upper()):
+                with self.subTest(phrase=variant):
+                    flagged = self._score(f"{self.BASE}, since she is {variant} here?")
+                    self.assertIn("narrates_records", flagged["flags"])
+                    self.assertEqual(round(clean["score"] - flagged["score"], 2), 0.50)
+        self.assertEqual(len(qc.NARRATES_RECORDS_PHRASES), 11)
+
+    def test_narrates_records_ignores_ordinary_record_words(self):
+        for text in (
+            "What did you learn from your track record at the firm that first year?",
+            "Where did you keep a record player when you lived on Maple Street?",
+            "What was it like when the town was recorded in 1998 as a city?",
+        ):
+            with self.subTest(text=text):
+                self.assertNotIn("narrates_records", self._score(text)["flags"])
+
+    def test_the_founders_l23_text_cannot_auto_promote(self):
+        text = ("Katie Ann Merrill appears in your records only as a name under "
+                "partnerships, with no story behind it yet \u2014 what do you "
+                "remember about the day you first met her?")
+        candidate = {"id": "L23", "text": text, "priority": 0.9554,
+                     "source_path": "sources/landmarks/entry-x.md"}
+        unified = qc.unified_quality_score(candidate, None, [])
+        flags = [p["flag"] for p in unified["components"]["craft_penalties"]]
+        self.assertIn("narrates_records", flags)
+        self.assertLess(unified["score"], qc.AUTO_PROMOTE_THRESHOLD)
 
 
 if __name__ == "__main__":
