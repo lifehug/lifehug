@@ -3553,8 +3553,10 @@ def graph_portrait_checks() -> None:
         bank = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
         author, author_full = focus_pages.author_names(load_config())
         focuses = (read_json(ROADMAP_FILE, default={}) or {}).get("focuses", [])
+        from entity_roster import load_roster  # noqa: PLC0415
         joins = focus_pages.resolve_roadmap(
-            focuses, parse_categories(bank), author, author_full, WIKI_DIR.parent)
+            focuses, parse_categories(bank), author, author_full, WIKI_DIR.parent,
+            load_roster("person"))
     except Exception as exc:  # noqa: BLE001 — doctor reports, never crashes
         warn("graph focus pages", f"roadmap unreadable, no focus can draw a ring: {exc!r}")
         joins = []

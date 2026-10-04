@@ -367,7 +367,8 @@ def _build_entity_verdict(payload: dict) -> tuple[Invocation, ...]:
     _expect_payload(
         payload,
         required={"type", "slug", "verdict"},
-        optional={"aliases", "relationship", "living", "maps_to"},
+        optional={"aliases", "relationship", "living", "maps_to",
+                  "fold_into", "focus", "retract_aliases", "located_in", "handle"},
     )
     entity_type = _text(payload, "type", maximum=16)
     if entity_type not in ENTITY_TYPES:
@@ -398,6 +399,25 @@ def _build_entity_verdict(payload: dict) -> tuple[Invocation, ...]:
         args.append("--living" if living else "--not-living")
     if payload.get("maps_to") is not None:
         args += ["--maps-to", _token(payload, "maps_to")]
+    # v389 (ADR 0043): the join vocabulary the viewer's alias / "this is that
+    # record" actions speak. Every one is a flag entity_verdict.py (v386)
+    # already owns and refuses semantically; this only shapes a safe argv.
+    if payload.get("fold_into") is not None:
+        args += ["--fold-into", _token(payload, "fold_into")]
+    if payload.get("focus") is not None:
+        args += ["--focus", _token(payload, "focus")]
+    if payload.get("located_in") is not None:
+        args += ["--located-in", _token(payload, "located_in")]
+    if payload.get("handle") is not None:
+        args.append("--handle=" + _text(payload, "handle", maximum=40).strip())
+    retracted = payload.get("retract_aliases")
+    if retracted is not None:
+        if not isinstance(retracted, list) or len(retracted) > 16:
+            raise ValueError("invalid retract_aliases")
+        for alias in retracted:
+            if not isinstance(alias, str) or not alias.strip() or len(alias) > 80:
+                raise ValueError("invalid retracted alias")
+            args.append("--retract-alias=" + alias.strip())
     return (_cli(*args),)
 
 

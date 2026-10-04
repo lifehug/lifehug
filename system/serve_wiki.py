@@ -50,7 +50,8 @@ from lifehug_core import (
     slugify,
     split_frontmatter,
 )
-from entity_roster import ENTITY_TYPES, THRESHOLDS, load_roster
+from entity_roster import ENTITY_TYPES, THRESHOLDS, load_identity_roster, load_roster
+import focus_pages
 import identity_resolution as _ir
 from question_candidates import AUTO_PROMOTE_THRESHOLD, unified_quality_score, _infer_category
 from progress import verdict
@@ -74,10 +75,22 @@ def _record_view_failure(operation: str, exc: Exception) -> None:
     )
 
 
-def wiki_pages():
+def _is_redirect_page(path: Path) -> bool:
+    """A v389 redirect stub: a Focus page's old path, one line pointing at the
+    person record's page. It is a pointer, never a page to list, link or graph."""
+    try:
+        if path.stat().st_size > 2048:
+            return False
+        return focus_pages.is_redirect_stub(read_text(path, errors="replace"))
+    except OSError:
+        return False
+
+
+def wiki_pages(include_redirects: bool = False):
     if not WIKI_DIR.exists():
         return []
-    return sorted(p for p in WIKI_DIR.rglob("*.md") if p.is_file())
+    return sorted(p for p in WIKI_DIR.rglob("*.md")
+                  if p.is_file() and (include_redirects or not _is_redirect_page(p)))
 
 
 # Slug-collision priority when two page types share a stem (e.g. a person and a
@@ -201,6 +214,14 @@ def nav_html(active_rel: str | None = None) -> str:
         if gtype == "people" and hub:
             rows = link(hub, "sidebar-item", f"{full_name} →") + rows
             count += 1
+        if gtype == "people":
+            # v389 (D2): records with no page are listed, muted, never faked.
+            quiet = known_without_page("person")
+            if quiet:
+                everyone = _identity_records("person")
+                rows += '<div class="sidebar-subgroup">Known, no page yet</div>' + "".join(
+                    f'<span class="sidebar-item sub muted">'
+                    f'{html.escape(_record_display(r, "person", everyone))}</span>' for r in quiet)
         parts.append(group_block(gtype, _GROUP_LABELS.get(gtype, gtype.replace("_", " ").title()),
                                   rows, count))
 
@@ -429,6 +450,13 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     code {{ background: #eee7dc; padding: 1px 4px; border-radius: 4px; }}
     a {{ color: #7c4f1d; }}
     .muted {{ color: #8a7a63; font-size: 14px; }}
+    .idheader {{ border: 1px solid #e3d9c6; border-radius: 8px; padding: 10px 14px; margin: 8px 0 18px; }}
+    .idname strong {{ font-size: 18px; }}
+    .idchip {{ display: inline-block; border: 1px solid #d9ccb3; border-radius: 12px; padding: 1px 8px; margin: 2px 4px 2px 0; font-size: 13px; }}
+    .idchip form, .idrow form {{ display: inline; }}
+    .idchip .btn {{ padding: 0 4px; border: 0; background: none; }}
+    .idrow {{ margin-top: 6px; }}
+    .knownlist {{ list-style: none; padding-left: 0; }}
     .empty {{ color: #9a8c75; font-style: italic; padding: 8px 0; }}
     .view-desc {{ color: #6b5d49; font-size: 15px; line-height: 1.5; margin: -8px 0 24px; max-width: 680px; }}
     /* Dashboard primitives */
@@ -1021,6 +1049,214 @@ def _entity_sort_key(entity: dict, min_score: float) -> tuple:
     return (1, -score, 0.0)
 
 
+# --- v389 (ADR 0043): pages are views of records ---------------------------
+
+def _identity_records(entity_type: str = "person") -> list[dict]:
+    """Live identity records of a type (fold pointers are not records), as the
+    one reader resolves them — `entity_roster.load_identity_roster`."""
+    try:
+        roster = load_identity_roster(entity_type)
+    except Exception:  # noqa: BLE001 — a missing roster is simply no records
+        return []
+    return [e for e in roster.get("entities", []) or []
+            if isinstance(e, dict) and not _ir.is_alias_row(e)]
+
+
+def _record_slug(record: dict) -> str:
+    return str(record.get("slug") or slugify(str(record.get("name", ""))))
+
+
+def _record_display(record: dict, entity_type: str, records: list[dict]) -> str:
+    if entity_type == "person":
+        return _ir.display_name(record, {"type": entity_type, "entities": records}) or "?"
+    return str(record.get("name") or _record_slug(record))
+
+
+def _verdict_keeping(record: dict) -> str:
+    """The verdict an identity edit rides on: the record's own settled owner
+    verdict when it has one (so adding an alias never clears a graduate/never),
+    else `clear`."""
+    verdict = str(record.get("owner_verdict") or "")
+    return verdict if verdict in ("graduate", "never") else "clear"
+
+
+def _identity_form(entity_type: str, slug: str, verdict: str, fields: list[tuple[str, str]],
+                   control: str, button: str, *, quiet: bool = True, extra_class: str = "") -> str:
+    """One POST to `/actions/entity-verdict` carrying an identity field."""
+    hidden = "".join(
+        f'<input type="hidden" name="{html.escape(k)}" value="{html.escape(v)}">' for k, v in fields)
+    cls = "btn quiet" if quiet else "btn"
+    return (
+        f'<form class="actform act-inline {extra_class}" method="post" action="/actions/entity-verdict">'
+        f'{_token_input()}'
+        f'<input type="hidden" name="type" value="{html.escape(entity_type)}">'
+        f'<input type="hidden" name="slug" value="{html.escape(slug)}">'
+        f'<input type="hidden" name="verdict" value="{html.escape(verdict)}">'
+        f'{hidden}{control}<button class="{cls}" type="submit">{html.escape(button)}</button></form>')
+
+
+def _alias_add_form(entity_type: str, record: dict) -> str:
+    slug = _record_slug(record)
+    if not slug:
+        return ""
+    box = ('<input type="text" name="alias" maxlength="80" placeholder="another name" '
+           'aria-label="another name for this record" required> ')
+    return _identity_form(entity_type, slug, _verdict_keeping(record), [], box, "Add name")
+
+
+def _fold_form(entity_type: str, loser: dict, survivors: list[dict], records: list[dict],
+               *, label: str = "same as", button: str = "This is that record") -> str:
+    """"This is that record": the loser becomes a pointer to the chosen
+    survivor (`--fold-into`). Never offered a place its own children."""
+    slug = _record_slug(loser)
+    options = "".join(
+        f'<option value="{html.escape(_record_slug(r))}">'
+        f'{html.escape(_record_display(r, entity_type, records))}</option>'
+        for r in survivors if _record_slug(r) and _record_slug(r) != slug)
+    if not slug or not options:
+        return ""
+    select = (f'<label>{html.escape(label)} <select name="fold_into" required>'
+              f'<option value="" selected disabled>choose…</option>{options}</select></label> ')
+    return _identity_form(entity_type, slug, _verdict_keeping(loser), [], select, button)
+
+
+def _alias_chips(entity_type: str, record: dict) -> str:
+    slug = _record_slug(record)
+    chips = []
+    for alias in record.get("aliases", []) or []:
+        meta = _ir.alias_meta_of(record, alias)
+        if meta.get("handle"):
+            continue  # shown as the @handle, not as a name
+        shared = (' <span class="muted" title="shared with someone who has no record">shared</span>'
+                  if meta.get("shared_with") or meta.get("exclusive") is False else "")
+        drop = _identity_form(entity_type, slug, _verdict_keeping(record),
+                              [("retract_alias", str(alias))], "", "×") if slug else ""
+        chips.append(f'<span class="idchip">{html.escape(str(alias))}{shared} {drop}</span>')
+    return "".join(chips)
+
+
+def _focus_label(slug: str) -> str:
+    return str(slug).replace("-", " ").title()
+
+
+def _record_for_page(text: str) -> tuple[str, dict | None, list[dict]]:
+    """``(entity_type, record, records)`` for a page whose frontmatter names
+    its record (`person_ref` / `record_ref`), else ``("", None, [])``."""
+    fm = _frontmatter_block(text)
+    ref = _fm_scalar(fm, "person_ref") or _fm_scalar(fm, "record_ref")
+    entity_type, _, slug = ref.partition("/")
+    if not slug or entity_type not in ENTITY_TYPES:
+        return "", None, []
+    records = _identity_records(entity_type)
+    for record in records:
+        if _record_slug(record) == slug:
+            return entity_type, record, records
+    return "", None, []
+
+
+def identity_header_html(text: str) -> str:
+    """The identity header of a page (§4.1.8): display name, @handle, name
+    chips, relationship, born/died, answers and Focus — all read from the
+    RECORD the page names, never from the page's prose. Empty for a page that
+    names no record. No percentage anywhere."""
+    entity_type, record, records = _record_for_page(text)
+    if record is None:
+        return ""
+    shown = _record_display(record, entity_type, records)
+    handle = _ir.record_view(record, {"entities": records}, entity_type=entity_type)
+    facts = []
+    if entity_type == "person":
+        label = _ir.relation_label(record)
+        if label:
+            facts.append(html.escape(label))
+        import chronology as chrono  # noqa: PLC0415
+        for key, word in (("born", "born"), ("died", "died")):
+            rec = chrono.from_dict(record.get(key))
+            if rec is not None:
+                facts.append(f"{word} {html.escape(chrono.display_date(rec, with_basis=False))}")
+    answers = int(record.get("unique_answers", 0) or 0)
+    facts.append(f"{answers} answer{'s' if answers != 1 else ''}")
+    focus = _ir.focus_of(record)
+    if focus:
+        facts.append(f"Focus: {html.escape(_focus_label(focus))}")
+    handles = html.escape(handle["handle"])
+    if handle.get("short_handle"):
+        handles += " " + html.escape(handle["short_handle"])
+    others = [r for r in records if _record_slug(r) != _record_slug(record)]
+    # Folding ANOTHER record into this page's record: the duplicate is the loser.
+    dup_options = "".join(
+        f'<option value="{html.escape(_record_slug(r))}">'
+        f'{html.escape(_record_display(r, entity_type, records))}</option>' for r in others
+        if _record_slug(r))
+    dup = ""
+    if dup_options:
+        select = ('<label>another record is the same: <select name="slug" required>'
+                  '<option value="" selected disabled>choose…</option>' + dup_options + '</select></label> ')
+        dup = (f'<form class="actform act-inline" method="post" action="/actions/entity-verdict">'
+               f'{_token_input()}<input type="hidden" name="type" value="{html.escape(entity_type)}">'
+               f'<input type="hidden" name="verdict" value="clear">'
+               f'<input type="hidden" name="fold_into" value="{html.escape(_record_slug(record))}">'
+               f'{select}<button class="btn quiet" type="submit">Fold it into this one</button></form>')
+    return (
+        '<div class="idheader" data-record="' + html.escape(handle["ref"]) + '">'
+        f'<div class="idname"><strong>{html.escape(shown)}</strong> '
+        f'<span class="muted idhandle">{handles}</span></div>'
+        f'<div class="idfacts muted">{" · ".join(facts)}</div>'
+        f'<div class="idaliases">{_alias_chips(entity_type, record)} '
+        f'{_alias_add_form(entity_type, record)}</div>'
+        f'<div class="idfold">{dup}</div></div>')
+
+
+def known_without_page(entity_type: str = "person") -> list[dict]:
+    """Identity records with no wiki page yet (D2) — listed, never fabricated
+    into pages. A record has a page when one is written at its slug, or at its
+    Focus's slug (a redirect stub counts: the page exists, one step along)."""
+    records = _identity_records(entity_type)
+    directory = WIKI_DIR / {"person": "people", "place": "places", "object": "objects",
+                            "theme": "themes", "period": "periods"}.get(entity_type, entity_type)
+    have = {p.stem for p in directory.glob("*.md")} if directory.exists() else set()
+    out = []
+    for record in records:
+        slug = _record_slug(record)
+        focus = focus_pages.slugify(focus_pages.clean_focus_name(_ir.focus_of(record))) \
+            if _ir.focus_of(record) else ""
+        if slug and slug not in have and (not focus or focus not in have):
+            out.append(record)
+    return out
+
+
+def _index_with_known_people(body: str) -> str:
+    """Insert the "Known, no page yet" group under the index's People section
+    (D2), or open that section when no person has a page."""
+    block = known_without_page_html("person", heading="h3")
+    if not block:
+        return body
+    match = re.search(r"<h2>People</h2>\s*<ul>.*?</ul>", body, flags=re.DOTALL)
+    if match:
+        return body[:match.end()] + block + body[match.end():]
+    return body + "<h2>People</h2>" + block
+
+
+def known_without_page_html(entity_type: str = "person", *, heading: str = "h3") -> str:
+    rows = known_without_page(entity_type)
+    if not rows:
+        return ""
+    records = _identity_records(entity_type)
+    items = []
+    for record in rows:
+        shown = _record_display(record, entity_type, records)
+        names = ", ".join(str(a) for a in record.get("aliases", []) or []
+                          if not _ir.alias_meta_of(record, a).get("handle"))
+        answers = int(record.get("unique_answers", 0) or 0)
+        bits = [f"@{html.escape(_record_slug(record))}"]
+        if names:
+            bits.append(html.escape(names))
+        bits.append(f"{answers} answer{'s' if answers != 1 else ''}")
+        items.append(f'<li class="muted"><span>{html.escape(shown)}</span> — {" · ".join(bits)}</li>')
+    return (f'<{heading}>Known, no page yet</{heading}>'
+            f'<ul class="knownlist">{"".join(items)}</ul>')
+
+
 def _entity_verdict_form(entity_type: str, slug: str, verdict: str, label: str, *, quiet: bool = False) -> str:
     cls = "btn quiet" if quiet else "btn"
     return (
@@ -1040,6 +1276,33 @@ def _entity_candidate_actions(entity_type: str, slug: str) -> str:
         return "—"
     return (_entity_verdict_form(entity_type, slug, "graduate", "Graduate now")
             + " " + _entity_verdict_form(entity_type, slug, "never", "Not a page", quiet=True))
+
+
+def _is_lane_row(entity: dict) -> bool:
+    """A ROW of the Review entity lane: pending graduation, no Focus or page,
+    not folded, not vetoed."""
+    return (isinstance(entity, dict) and not entity.get("page_eligible")
+            and not _ir.has_home(entity) and entity.get("owner_verdict") != "never")
+
+
+def _is_fold_target(entity: dict) -> bool:
+    """A record a row may be folded INTO: every live record of the type — one
+    that already has a page or a Focus included (the owner's primary case) —
+    except a vetoed (`never`) record and a `folded_into` pointer."""
+    return (isinstance(entity, dict) and not _ir.is_alias_row(entity)
+            and entity.get("owner_verdict") != "never")
+
+
+def _entity_identity_actions(entity_type: str, record: dict, entities: list[dict]) -> str:
+    """v389 (§4.1.8): the two association doors on a Review row — add another
+    name ("--alias"), and "this is that record" (`--fold-into`). A place is
+    offered only true-duplicate folds by the verb itself (it refuses the rest);
+    the survivors listed are every OTHER live record of the type."""
+    if not _record_slug(record):
+        return ""
+    live = [r for r in entities if _is_fold_target(r)]
+    fold = _fold_form(entity_type, record, live, live)
+    return f'<div class="idrow">{_alias_add_form(entity_type, record)}{fold}</div>'
 
 
 _VERDICT_LABEL = {"graduate": "graduate", "never": "not a page"}
@@ -1069,11 +1332,7 @@ def _entities_section_html() -> str:
         # so it's visible in the wiki itself and shouldn't be repeated here.
         # A `never` owner verdict is likewise excluded — it is settled, not
         # pending (Scope 3), and disappears from the lane entirely.
-        cands = [
-            e for e in entities
-            if not e.get("page_eligible") and not _ir.has_home(e)
-            and e.get("owner_verdict") != "never"
-        ]
+        cands = [e for e in entities if _is_lane_row(e)]
         decided = [e for e in entities if e.get("owner_verdict") == "graduate"]
         parts.append(f"<h3>{html.escape(etype.title())} ({len(cands)})</h3>")
         if not cands:
@@ -1093,7 +1352,8 @@ def _entities_section_html() -> str:
                     format(e.get("score", 0) or 0, ".1f"),
                     str(e.get("unique_answers", 0) or 0),
                     ("yes" if e.get("qualifies") else "no"),
-                    _entity_candidate_actions(etype, slug),
+                    _entity_candidate_actions(etype, slug)
+                    + _entity_identity_actions(etype, e, entities),
                 ])
             parts.append(_table(["Name", "Aliases", "Score", "Answers", "Qualifies", "Actions"], rows))
         if decided:
@@ -2018,6 +2278,26 @@ def _recommendations_section_html() -> str:
     if pending:
         gate = focus_start_gate()
 
+        people = _identity_records("person")
+
+        def fold_into_person(r: dict) -> str:
+            """"Fold into a person" (§4.1.8): this idea IS an existing person —
+            its words become that record's alias and the idea is dismissed."""
+            options = "".join(
+                f'<option value="{html.escape(_record_slug(p))}">'
+                f'{html.escape(_record_display(p, "person", people))}</option>'
+                for p in people if _record_slug(p))
+            if not options:
+                return ""
+            rid = html.escape(str(r.get("id", "")))
+            return (
+                f'<form class="actform act-inline" method="post" action="/actions/focus-rec">'
+                f'{_token_input()}<input type="hidden" name="id" value="{rid}">'
+                f'<input type="hidden" name="op" value="fold">'
+                f'<label>is <select name="person" required><option value="" selected disabled>'
+                f'choose…</option>{options}</select></label> '
+                f'<button class="btn quiet" type="submit">Fold into a person</button></form>')
+
         def rec_actions(r: dict) -> str:
             rid = html.escape(str(r.get("id", "")))
             return (
@@ -2028,13 +2308,19 @@ def _recommendations_section_html() -> str:
                 f'<form class="actform act-inline" method="post" action="/actions/focus-rec">'
                 f'{_token_input()}<input type="hidden" name="id" value="{rid}">'
                 f'<input type="hidden" name="op" value="dismiss">'
-                f'<button class="btn quiet" type="submit">Dismiss</button></form>')
+                f'<button class="btn quiet" type="submit">Dismiss</button></form> '
+                + fold_into_person(r))
 
         def _is_ready(r: dict) -> bool:
             return gate["open"] and (r.get("score", 0) or 0) >= FOCUS_READY_SCORE_FLOOR
 
+        def entity_cell(r: dict) -> str:
+            raw = html.escape(str(r.get("entity", "?")))
+            resolved = str(r.get("resolved_name") or "")
+            return f"{raw} → {html.escape(resolved)}" if resolved else raw
+
         rows = [[
-            html.escape(str(r.get("entity", "?"))),
+            entity_cell(r),
             html.escape(str(r.get("type", "?"))),
             format(r.get("score", 0) or 0, ".1f"),
             html.escape(str(r.get("evidence_strength", "—"))),
@@ -2350,7 +2636,8 @@ def graph_focus_joins(wiki_root: Path | None = None) -> dict:
         categories = parse_categories(bank)
         author, author_full = focus_pages.author_names(load_config())
         focuses = list(load_roadmap().get("focuses", []))
-        joins = focus_pages.resolve_roadmap(focuses, categories, author, author_full, root)
+        joins = focus_pages.resolve_roadmap(focuses, categories, author, author_full, root,
+                                            load_roster("person"))
     except Exception as exc:  # noqa: BLE001 — reported, never swallowed
         GRAPH_LOG.warning("graph: the roadmap could not be read, so no focus draws a ring: %r", exc)
         return {"joins": [], "focuses": [], "error": f"roadmap unreadable: {exc!r}"}
@@ -4119,6 +4406,27 @@ def act_focus_rec(form):
             "reason": _f(form, "reason") or "dismissed from viewer",
         })
         return ("/views/review", f"queued dismissal of {rid}", job["id"])
+    if op == "fold":
+        person = _f(form, "person")
+        if not person or not _SLUG_RE.match(person):
+            return ("/views/review", "✗ pick which person this idea is", None)
+        data = read_json(FOCUS_RECS_FILE, default={}) or {}
+        rec = next((r for r in data.get("recommendations", [])
+                    if str(r.get("id")) == rid and r.get("status") == "pending"), None)
+        entity = " ".join(str((rec or {}).get("entity", "")).split())
+        if not entity or len(entity) > 80:
+            return ("/views/review", "✗ that idea is no longer pending", None)
+        record = next((p for p in _identity_records("person") if _record_slug(p) == person), None)
+        if record is None:
+            return ("/views/review", "✗ unknown person record", None)
+        # The name is read from the stored recommendation, never the request.
+        _start_job("entity-verdict", {"type": "person", "slug": person,
+                                      "verdict": _verdict_keeping(record), "aliases": [entity]})
+        job = _start_job("focus-dismiss", {
+            "recommendation_id": rid, "reason": f"this is {person}, a person already known"})
+        return ("/views/review",
+                f"queued: “{entity}” becomes another name for {person}, and the idea is set aside",
+                job["id"])
     return ("/views/review", "✗ unknown recommendation action", None)
 
 
@@ -4170,10 +4478,28 @@ def act_entity_verdict(form):
         return ("/views/review", "✗ bad entity slug", None)
     if verdict not in _ENTITY_VERDICT_LABELS:
         return ("/views/review", "✗ unknown verdict", None)
-    job = _start_job("entity-verdict", {"type": entity_type, "slug": slug, "verdict": verdict})
-    return ("/views/review",
-            f"queued {_ENTITY_VERDICT_LABELS[verdict]} for {entity_type}/{slug}",
-            job["id"])
+    payload = {"type": entity_type, "slug": slug, "verdict": verdict}
+    note = _ENTITY_VERDICT_LABELS[verdict]
+    # v389: the identity half. Each field is one flag entity_verdict.py owns;
+    # the verb does the collision rule and every semantic refusal.
+    alias = _f(form, "alias")
+    if alias:
+        if len(alias) > 80:
+            return ("/views/review", "✗ that name is too long", None)
+        payload["aliases"] = [alias]
+        note = f"adding the name “{alias}” to"
+    retract = _f(form, "retract_alias")
+    if retract:
+        payload["retract_aliases"] = [retract]
+        note = f"removing the name “{retract}” from"
+    fold_into = _f(form, "fold_into")
+    if fold_into:
+        if not _SLUG_RE.match(fold_into) or fold_into == slug:
+            return ("/views/review", "✗ pick a different record to fold into", None)
+        payload["fold_into"] = fold_into
+        note = f"folding into {fold_into}:"
+    job = _start_job("entity-verdict", payload)
+    return ("/views/review", f"queued {note} {entity_type}/{slug}", job["id"])
 
 
 def act_second_voice(form):
@@ -4763,8 +5089,26 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_html("Not found", "<h1>Not found</h1>", status=404)
                 return
             active_rel = str(page.relative_to(WIKI_DIR.parent))
-            self.send_html(page_title(page), render_markdown(page.read_text(encoding="utf-8", errors="replace")),
-                           active_rel=active_rel)
+            text = page.read_text(encoding="utf-8", errors="replace")
+            target = focus_pages.redirect_stub_fields(text)[focus_pages.REDIRECT_KEY]
+            if target:
+                # v389: a Focus page's old path — follow it to the record's page.
+                dest = Path(target.lstrip("/")).with_suffix(".md")
+                if ".." not in dest.parts and (WIKI_DIR / dest).is_file():
+                    self.send_response(302)
+                    self.send_header("Location", f"/page/wiki/{quote(str(dest))}")
+                    self.send_header("Content-Length", "0")
+                    self.send_owner_headers()
+                    self.end_headers()
+                    return
+            body = render_markdown(text)
+            header = identity_header_html(text)
+            if header:
+                body = re.sub(r"(<h1>.*?</h1>)", lambda m: m.group(1) + header, body, count=1, flags=re.DOTALL) \
+                    if "<h1>" in body else header + body
+            if active_rel == "wiki/index.md":
+                body = _index_with_known_people(body)
+            self.send_html(page_title(page), body, active_rel=active_rel)
             return
 
         if parsed.path == "/search":

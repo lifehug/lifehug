@@ -94,7 +94,12 @@ def _wiki_node_by_rule(focus: dict, categories: dict) -> str | None:
     import focus_pages  # noqa: PLC0415 — keeps roadmap import-light
 
     author, author_full = focus_pages.author_names(load_config())
-    hit = focus_pages.focus_pages(focus, categories, author, author_full)
+    try:
+        from entity_roster import load_roster  # noqa: PLC0415 — lazy: entity_roster reads the roadmap
+        person_roster = load_roster("person")
+    except Exception:  # noqa: BLE001 — a missing/unreadable roster is the Focus's own slug
+        person_roster = None
+    hit = focus_pages.focus_pages(focus, categories, author, author_full, person_roster)
     if hit["rule"] in ("wiki_node", "none"):
         return None
     return (hit["pages"] or hit["relationships"] or [None])[0]

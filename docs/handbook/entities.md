@@ -120,6 +120,18 @@ Pell (son)" — on the viewer's Review rows and in the focus curator's roster
 context. `resolve_place` resolves a place by name or alias, or "Yucaipa,
 California" through containment, and never upward: a city is never its state.
 
+**Pages are views of records (v389).** A person page is addressed by its RECORD's
+slug: a Focus whose record has another slug ("Mara" on `mara-quill`) is written
+at `wiki/people/mara-quill.md`, and its old path `wiki/people/mara.md` keeps a
+one-line redirect stub (`origin: redirect`, `redirect_to: people/mara-quill`) for
+one version. The record's aliases reach the page's mention scan, and the page's
+frontmatter names the record — `person_ref` (`record_ref` for a place, object or
+theme), `handle`, `aliases`, `relationship`, `answers` — so the viewer and the
+platform read identity off the page. The viewer's person page opens with an
+identity header read from the record, Review rows gain "add a name" and "this is
+that record", and the People index lists records with no page under "Known, no
+page yet": a record is never fabricated into a page.
+
 **Candidate research** is a separate immutable source about one still-pending
 roster entry (ADR 0020), never a roster verdict. Exact raw user-turn spans must
 cover the entity usefulness rubric and include concrete material; the author

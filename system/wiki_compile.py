@@ -57,10 +57,13 @@ from research_expand import DEFAULT_MODEL, parse_ai_json
 from roadmap import load_roadmap
 # The ONE category→page rule, shared with the roadmap and the graph (v376).
 from focus_pages import (  # noqa: E402
+    REDIRECT_ORIGIN,
     clean_focus_name,
     focus_category_slug,
     hub_slug,
+    is_redirect_stub,
     project_category_slug,
+    record_for_focus,
     relationship_slug,
 )
 
@@ -384,11 +387,71 @@ def _is_retracted(item: dict, slug: str) -> bool:
     return False
 
 
+def identity_frontmatter_lines(identity: dict | None) -> list[str]:
+    """The record-derived frontmatter (v389, ADR 0043 "pages are views"):
+    ``person_ref`` (``record_ref`` for any other type), ``handle``, ``aliases``,
+    ``relationship``, ``answers`` — written so a viewer (this one, the
+    platform's) reads the record's identity off the page without opening the
+    roster. Values are JSON-quoted, which is valid YAML and what the repo's
+    own frontmatter reader parses."""
+    if not identity:
+        return []
+    lines = [f"{identity['ref_key']}: {json.dumps(identity['ref'])}"]
+    if identity.get("ref_only"):
+        return lines
+    lines.append(f"handle: {json.dumps(identity['handle'])}")
+    if identity.get("short_handle"):
+        lines.append(f"short_handle: {json.dumps(identity['short_handle'])}")
+    lines.append("aliases:")
+    for alias in identity.get("aliases", []):
+        lines.append(f"  - {json.dumps(alias, ensure_ascii=False)}")
+    if identity.get("relationship"):
+        lines.append(f"relationship: {json.dumps(identity['relationship'])}")
+    lines.append(f"answers: {int(identity.get('answers', 0))}")
+    return lines
+
+
+def _person_ref_only(entity: dict) -> dict:
+    """A relationship page names its person record and nothing else of it."""
+    full = record_identity("person", entity)
+    return {"ref_key": "person_ref", "ref": full["ref"], "ref_only": True}
+
+
+def record_identity(entity_type: str, entity: dict) -> dict:
+    """The identity block a page of ``entity_type`` carries for its ``entity``
+    record — pure, from the record alone (`identity_resolution.record_view`
+    supplies the ref and handles, so every surface spells them one way)."""
+    import identity_resolution as ir  # noqa: PLC0415
+
+    view = ir.record_view(entity, {}, entity_type=entity_type)
+    aliases, seen = [], set()
+    for raw in entity.get("aliases", []) or []:
+        text = " ".join(str(raw).split())
+        if text and text.lower() not in seen:
+            seen.add(text.lower())
+            aliases.append(text)
+    try:
+        answers = int(entity.get("unique_answers", 0) or 0)
+    except (TypeError, ValueError):
+        answers = 0
+    relationship = " ".join(str(entity.get("relationship") or "").split())
+    return {
+        "ref_key": "person_ref" if entity_type == "person" else "record_ref",
+        "ref": view["ref"],
+        "handle": view["handle"],
+        "short_handle": view.get("short_handle", ""),
+        "aliases": aliases,
+        "relationship": relationship if entity_type == "person" else "",
+        "answers": answers,
+    }
+
+
 def frontmatter(title: str, page_type: str, sources: list[str], related: list[str] | None = None,
                 synthesized: bool = True, origin: str = "focus", section: str = "",
                 chrono: int | None = None, sensitivity: str = "private",
                 date_edtf: str = "", born_edtf: str = "",
-                died_edtf: str = "") -> str:
+                died_edtf: str = "", identity: dict | None = None,
+                redirect_to: str = "") -> str:
     today = date.today().isoformat()
     related = related or []
     lines = [
@@ -420,6 +483,11 @@ def frontmatter(title: str, page_type: str, sources: list[str], related: list[st
         lines.append(f"born: {born_edtf}")
     if died_edtf:
         lines.append(f"died: {died_edtf}")
+    if redirect_to:
+        # v389: a redirect stub — the old path of a Focus page whose page now
+        # lives at its person record's slug. Wiki-relative, no extension.
+        lines.append(f"redirect_to: {redirect_to}")
+    lines += identity_frontmatter_lines(identity)
     if section:
         lines.append(f'section: "{section}"')
     lines += [
@@ -558,10 +626,17 @@ def write_page(path: Path, text: str, dry_run: bool) -> bool:
 def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
                 summary, open_questions, open_questions_header="Open Questions",
                 seed_related=None, origin="focus", section="", chrono=None,
-                date_edtf="", born_edtf="", died_edtf="", contains=None):
+                date_edtf="", born_edtf="", died_edtf="", contains=None,
+                identity=None, legacy_slug=""):
     if _RETRACTIONS:
-        cited_items = [i for i in cited_items if not _is_retracted(i, slug)]
-        supporting_items = [i for i in supporting_items if not _is_retracted(i, slug)]
+        def retracted(item):
+            # A retraction scoped to a page's OLD slug (a Focus page's path
+            # before it moved to its record's slug) still applies to it.
+            return _is_retracted(item, slug) or (
+                bool(legacy_slug) and _is_retracted(item, legacy_slug))
+
+        cited_items = [i for i in cited_items if not retracted(i)]
+        supporting_items = [i for i in supporting_items if not retracted(i)]
         kept = {i["source"] for i in cited_items + supporting_items}
         sources = [s for s in sources if s in kept]
     return {
@@ -583,6 +658,10 @@ def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
         "origin": origin,
         "section": section,
         "contains": list(contains or []),
+        # v389: the record this page is a view of, and the slug it used to be
+        # written at (a Focus page whose record's slug differs).
+        "identity": identity,
+        "legacy_slug": legacy_slug if legacy_slug and legacy_slug != slug else "",
     }
 
 
@@ -809,6 +888,27 @@ def _has_home(entity):
     return ir.has_home(entity)
 
 
+def _focus_record_page(focus_slug, person_roster, all_focus_slugs=()):
+    """``(page slug, record)`` for a Focus: the record's slug and the record
+    when a live person record carries the Focus, else the Focus's own slug and
+    ``None``. A record whose slug is ANOTHER Focus's page keeps this Focus on
+    its own slug (never two pages at one path)."""
+    record = record_for_focus(focus_slug, person_roster)
+    if record is None:
+        return focus_slug, None
+    record_slug = record.get("slug") or slugify(record.get("name", ""))
+    if not record_slug or record_slug in (set(all_focus_slugs) - {focus_slug}):
+        return focus_slug, None
+    return record_slug, record
+
+
+def _retracted_here(item, slug, legacy_slug=""):
+    """Retracted on this page, or on the page's pre-v389 slug (a Focus page
+    moved to its record's slug keeps every retraction scoped to the old one)."""
+    return _is_retracted(item, slug) or (
+        bool(legacy_slug) and legacy_slug != slug and _is_retracted(item, legacy_slug))
+
+
 def _focus_slugs(categories):
     return {
         slugify(clean_focus_name(info["name"]))
@@ -844,18 +944,23 @@ def plan_focuses(categories, questions, answers, manual_sources, person_roster=N
                  known_people=()):
     descs = []
     alias_map = _focus_alias_map(person_roster, _focus_slugs(categories))
+    all_focus_slugs = _focus_slugs(categories)
     for cat_id, info in sorted(categories.items()):
         if info.get("group") != "focus":
             continue
         title = clean_focus_name(info["name"])
-        slug = focus_category_slug(info["name"])
+        focus_slug = focus_category_slug(info["name"])
+        # v389 (ADR 0043, "pages are views of records"): when a person record
+        # carries this Focus the page is written at the RECORD's slug; the
+        # Focus's own path keeps a redirect stub for one version.
+        slug, record = _focus_record_page(focus_slug, person_roster, all_focus_slugs)
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
 
         # Mention enrichment: pull answers/sources that mention this person by
         # name or any roster alias, even when filed under other categories. This
         # is what fills, e.g., an empty Dad Focus from his many cross-category
         # mentions. Focus *behavior* is unchanged — only the page's sources widen.
-        names = [title] + sorted(n for n in alias_map.get(slug, set()) if n)
+        names = [title] + sorted(n for n in alias_map.get(focus_slug, set()) if n)
         first_alias = _first_name_alias(title, known_people)
         if first_alias and first_alias not in names:
             names.append(first_alias)
@@ -868,7 +973,7 @@ def plan_focuses(categories, questions, answers, manual_sources, person_roster=N
             names=names,
         )
         research_items = [
-            item for item in research_items if not _is_retracted(item, slug)
+            item for item in research_items if not _retracted_here(item, slug, focus_slug)
         ]
         research_sources = {item["source"] for item in research_items}
         source_items = [
@@ -879,17 +984,17 @@ def plan_focuses(categories, questions, answers, manual_sources, person_roster=N
         a_hits, m_hits = scan_mentions(names, answers, manual_sources)
         # Retraction filter runs BEFORE the summary counts (v88) — the page
         # banner must not claim prompts the compiler refuses to assert.
-        answer_items = [i for i in answer_items if not _is_retracted(i, slug)]
+        answer_items = [i for i in answer_items if not _retracted_here(i, slug, focus_slug)]
         cited_srcs = {a["source"] for a in answer_items}
         extra_answers = [it for it in a_hits if it["source"] not in cited_srcs
-                         and not _is_retracted(it, slug)]
+                         and not _retracted_here(it, slug, focus_slug)]
         cited_items = answer_items + extra_answers + research_items
         src_srcs = {s["source"] for s in source_items}
         supporting_items = source_items + [it for it in m_hits if it["source"] not in src_srcs]
         for wit in _witness_items(manual_sources, names):
             if wit["source"] not in {s["source"] for s in supporting_items}:
                 supporting_items.append(wit)
-        supporting_items = [i for i in supporting_items if not _is_retracted(i, slug)]
+        supporting_items = [i for i in supporting_items if not _retracted_here(i, slug, focus_slug)]
         sources = [x["source"] for x in cited_items] + [x["source"] for x in supporting_items]
 
         if answer_items and extra_answers and not research_items:
@@ -916,6 +1021,8 @@ def plan_focuses(categories, questions, answers, manual_sources, person_roster=N
             "person", title, slug, sources, cited_items, supporting_items,
             summary=summary,
             open_questions=unanswered_questions(questions, cat_id),
+            identity=record_identity("person", record) if record is not None else None,
+            legacy_slug=focus_slug if record is not None else "",
         ))
     return descs
 
@@ -1006,6 +1113,7 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs,
             born_edtf=(_person_date_edtf(ent, "born") if entity_type == "person" else ""),
             died_edtf=(_person_date_edtf(ent, "died") if entity_type == "person" else ""),
             contains=contains,
+            identity=record_identity(entity_type, ent),
         ))
     return descs
 
@@ -1125,7 +1233,8 @@ def theme_keyword_map(theme_roster=None):
             keywords = [name.lower()]
         merged[slug] = {"title": name.title() if name.islower() else name,
                         "keywords": keywords,
-                        "origin": "focus" if slug in THEME_KEYWORDS else "mention"}
+                        "origin": "focus" if slug in THEME_KEYWORDS else "mention",
+                        "entity": ent}
     return merged
 
 
@@ -1184,6 +1293,7 @@ def plan_themes(answers, manual_sources, theme_roster=None, author_slug=None):
             # author hub so it's reachable from Self (reciprocal backlink).
             seed_related=[author_slug] if author_slug else None,
             origin=spec["origin"],
+            identity=(record_identity("theme", spec["entity"]) if spec.get("entity") else None),
         ))
     return descs
 
@@ -1193,11 +1303,16 @@ def plan_relationships(categories, questions, answers, manual_sources, author, p
     descs = []
     author = author or "Me"
     alias_map = _focus_alias_map(person_roster, _focus_slugs(categories))
+    all_focus_slugs = _focus_slugs(categories)
     for cat_id, info in sorted(categories.items()):
         if info.get("group") != "focus":
             continue
         person = clean_focus_name(info["name"])
         person_slug = slugify(person)
+        # v389: the edge keeps its path (this version) but is keyed on the
+        # person record — its frontmatter names it and it links to the record's
+        # page, wherever that page is written.
+        page_slug, record = _focus_record_page(person_slug, person_roster, all_focus_slugs)
         answer_items = [answers[q["id"]] for q in questions if q["category"] == cat_id and q["id"] in answers]
 
         # Relationships are dyadic edges, not generic node pages. They should
@@ -1245,7 +1360,8 @@ def plan_relationships(categories, questions, answers, manual_sources, author, p
                 f"- What has gone unsaid between {author} and {person}?",
             ],
             open_questions_header="Open Questions (dyadic)",
-            seed_related=[person_slug],
+            seed_related=[page_slug],
+            identity=(_person_ref_only(record) if record is not None else None),
         ))
     return descs
 
@@ -1490,6 +1606,10 @@ def synthesize(desc, roster, model, cache, mission, use_ai, dry_run):
     # Keyless desktop path: prose written by the agent (via the /compile skill).
     # Takes precedence over call_ai so a desktop agent can synthesize keylessly.
     agent_file = SYNTH_DIR / f"{desc['slug']}.md"
+    legacy = desc.get("legacy_slug")
+    if not agent_file.exists() and legacy:
+        # v389: a draft written for the page's pre-record slug is still its draft.
+        agent_file = SYNTH_DIR / f"{legacy}.md"
     if agent_file.exists():
         raw = agent_file.read_text(encoding="utf-8", errors="replace").strip()
         if raw:
@@ -1521,8 +1641,36 @@ def synthesize(desc, roster, model, cache, mission, use_ai, dry_run):
 # ---------------------------------------------------------------------------
 
 
-def compute_crosslinks(descs, synths):
+def fold_repoints(rosters, planned_slugs) -> dict[str, str]:
+    """``{folded record slug: survivor's page slug}`` (v389).
+
+    A fold is a pointer, never a deletion: the folded record's own mention page
+    leaves by the orphan rule, and every link that named it follows the pointer
+    chain to the survivor — when the survivor has a page this compile."""
+    import identity_resolution as ir  # noqa: PLC0415
+
+    out: dict[str, str] = {}
+    for roster in rosters:
+        rows = [e for e in (roster or {}).get("entities", []) or [] if isinstance(e, dict)]
+        by_slug = {(e.get("slug") or slugify(e.get("name", ""))): e for e in rows}
+        for slug, row in by_slug.items():
+            target, hops = ir.folded_into_of(row), 0
+            while target and hops < 8:
+                survivor = by_slug.get(target)
+                if survivor is None or not ir.folded_into_of(survivor):
+                    break
+                target, hops = ir.folded_into_of(survivor), hops + 1
+            if target and target != slug and target in planned_slugs and slug:
+                out[slug] = target
+    return out
+
+
+def compute_crosslinks(descs, synths, repoint=None):
     existing = {d["slug"] for d in descs}
+    # v389: a link to a page's OLD slug (a Focus page moved to its record's
+    # slug) or to a folded record's page lands on the page that replaced it.
+    moved = {d["legacy_slug"]: d["slug"] for d in descs if d.get("legacy_slug")}
+    moved.update(repoint or {})
 
     # Shared-source edges: pages citing the same answer/source file are related.
     source_to_slugs = defaultdict(set)
@@ -1542,6 +1690,7 @@ def compute_crosslinks(descs, synths):
         related: list[str] = []
         # 1) LLM-chosen + explicit seed edges (kept in order, deduped, must exist).
         for cand in synths[slug]["related"] + d["seed_related"]:
+            cand = moved.get(cand, cand)
             if cand in existing and cand != slug and cand not in related:
                 related.append(cand)
         # 2) shared-source edges, strongest first; ties broken by slug so the
@@ -1585,7 +1734,8 @@ def render_page(desc, synth, related, backlinks, slug_title):
                     section=desc.get("section", ""), chrono=desc.get("chrono"),
                     sensitivity=floor, date_edtf=desc.get("date_edtf", ""),
                     born_edtf=desc.get("born_edtf", ""),
-                    died_edtf=desc.get("died_edtf", "")),
+                    died_edtf=desc.get("died_edtf", ""),
+                    identity=desc.get("identity")),
         "",
         f"# {desc['title']}",
         "",
@@ -1619,6 +1769,33 @@ def render_page(desc, synth, related, backlinks, slug_title):
     body.extend(["", f"## {desc['open_questions_header']}"])
     body.extend(desc["open_questions"] or ["No open questions currently tracked."])
     return "\n".join(body)
+
+
+def _legacy_focus_path(desc: dict):
+    """The old path of a person page that moved to its record's slug, or None."""
+    if desc.get("type") != "person" or not desc.get("legacy_slug"):
+        return None
+    return TYPE_DIRS["person"] / f"{desc['legacy_slug']}.md"
+
+
+def redirect_stub_text(desc: dict) -> str:
+    """The one-line page left at a Focus page's old path for one version
+    (v389): ``redirect_to`` names the record's page, the body says so."""
+    identity = desc.get("identity") or {}
+    ref_only = {"ref_key": "person_ref", "ref": identity.get("ref", ""), "ref_only": True} \
+        if identity.get("ref") else None
+    head = frontmatter(
+        desc["title"], "person", [], [], synthesized=False, origin=REDIRECT_ORIGIN,
+        redirect_to=f"people/{desc['slug']}", identity=ref_only)
+    return f"{head}\n\nThis page moved to [[{desc['slug']}]].\n"
+
+
+def _page_is_redirect(page: Path) -> bool:
+    """A redirect stub (v389) is a pointer, never an index entry."""
+    try:
+        return is_redirect_stub(page.read_text(encoding="utf-8", errors="replace")[:1024])
+    except OSError:
+        return False
 
 
 def update_index(written_pages: list[Path], dry_run=False):
@@ -1657,7 +1834,8 @@ def update_index(written_pages: list[Path], dry_run=False):
     for page_type, directory in TYPE_DIRS.items():
         if page_type == "life":
             continue  # already featured above
-        page_glob = [p for p in directory.glob("*.md") if p.name != ".gitkeep"]
+        page_glob = [p for p in directory.glob("*.md")
+                     if p.name != ".gitkeep" and not _page_is_redirect(p)]
         if not page_glob:
             continue  # skip entity types with no pages — no orphan headers
         # Periods read chronologically (earliest life stage on top); everything
@@ -1794,7 +1972,8 @@ def compile_timeline(dry_run: bool = False) -> bool:
 _MENTION_CLEANUP_TYPES = ("person", "place", "period", "object", "theme")
 
 
-def cleanup_orphan_entity_pages(planned_slugs: set[str], dry_run: bool = False) -> list[Path]:
+def cleanup_orphan_entity_pages(planned_slugs: set[str], dry_run: bool = False,
+                                stub_slugs: set[str] | None = None) -> list[Path]:
     """Remove mention-origin entity pages whose entity left the roster.
 
     When the monthly roster refresh drops, merges, or remaps an entity, its old
@@ -1817,18 +1996,31 @@ def cleanup_orphan_entity_pages(planned_slugs: set[str], dry_run: bool = False) 
             continue  # no roster signal → never delete
         keep_slugs = set(planned_slugs)
         for ent in roster_entities:
+            slug = ent.get("slug") or slugify(ent.get("name", ""))
+            if not slug:
+                continue
             if ent.get("page_eligible") and not _has_home(ent):
-                slug = ent.get("slug") or slugify(ent.get("name", ""))
-                if slug:
-                    keep_slugs.add(slug)
+                keep_slugs.add(slug)
         directory = TYPE_DIRS[entity_type]
         if not directory.exists():
             continue
         for page in sorted(directory.glob("*.md")):
-            if page.name == ".gitkeep" or page.stem in keep_slugs:
+            if page.name == ".gitkeep" or page.stem in keep_slugs or (
+                    stub_slugs is not None and page.stem in stub_slugs):
                 continue
             text = page.read_text(encoding="utf-8", errors="replace")
-            if frontmatter_value(text, "origin") != "mention":
+            origin = frontmatter_value(text, "origin")
+            if origin == REDIRECT_ORIGIN and stub_slugs is not None and is_redirect_stub(text):
+                # A stub whose Focus no longer moved (record unfocused, slugs
+                # now equal) points nowhere: the stub goes, never a real page.
+                if dry_run:
+                    print(f"  ✗ would remove stale redirect {rel(page)}")
+                else:
+                    page.unlink()
+                    print(f"  ✗ removed stale redirect {rel(page)}")
+                removed.append(page)
+                continue
+            if origin != "mention":
                 continue  # never touch focus/hand-authored pages
             if dry_run:
                 print(f"  ✗ would remove orphan {rel(page)} — no longer in the {entity_type} roster")
@@ -1922,7 +2114,8 @@ def main():
         SYNTH_DIR.mkdir(parents=True, exist_ok=True)
         tasks = []
         for d in descs:
-            if cache_key(d) in cache or (SYNTH_DIR / f"{d['slug']}.md").exists():
+            if (cache_key(d) in cache or (SYNTH_DIR / f"{d['slug']}.md").exists()
+                    or (d.get("legacy_slug") and (SYNTH_DIR / f"{d['legacy_slug']}.md").exists())):
                 continue
             others = [r for r in roster if r["slug"] != d["slug"]]
             tasks.append({
@@ -1954,26 +2147,51 @@ def main():
         synths[d["slug"]] = synthesize(d, others, model, cache, mission, use_ai, args.dry_run)
 
     # 3. cross-link
-    final_related, backlinks = compute_crosslinks(descs, synths)
+    planned_slugs = {d["slug"] for d in descs}
+    repoint = fold_repoints(
+        [person_roster] + [load_roster(t) for t in ("place", "period", "object", "theme")],
+        planned_slugs)
+    final_related, backlinks = compute_crosslinks(descs, synths, repoint)
 
     # 4. write
     written = []
     preserved = 0
+    stub_slugs: set[str] = set()
     for d in descs:
         # Non-destructive guard: never downgrade an already-synthesized page to a
         # raw excerpt fallback (e.g. on a keyless machine with no cache/draft).
         # Keep the last good prose; the page refreshes when a real synthesis is
         # available (compile machine, or the /compile skill writes a draft).
-        if d["path"].exists() and should_preserve_existing(
-                d["path"].read_text(encoding="utf-8", errors="replace"),
-                synths[d["slug"]]["synthesized"]):
+        existing_text = (d["path"].read_text(encoding="utf-8", errors="replace")
+                         if d["path"].exists() else "")
+        legacy_path = _legacy_focus_path(d)
+        legacy_text = ""
+        if not existing_text and legacy_path is not None and legacy_path.exists():
+            # v389: the page just moved to its record's slug. Its last good
+            # prose lives at the OLD path (about to become a redirect stub).
+            candidate = legacy_path.read_text(encoding="utf-8", errors="replace")
+            if not is_redirect_stub(candidate) and frontmatter_value(candidate, "origin") == "focus":
+                legacy_text = candidate
+        probe = existing_text or legacy_text
+        if probe and should_preserve_existing(probe, synths[d["slug"]]["synthesized"]):
+            if legacy_text and not args.dry_run:
+                write_text(d["path"], legacy_text)  # carry the prose across the move
             preserved += 1
             print(f"  ↻ preserved {d['slug']} (no key/draft to refresh)")
-            continue
-        text = render_page(d, synths[d["slug"]], final_related[d["slug"]], backlinks[d["slug"]], slug_title)
-        if write_page(d["path"], text, args.dry_run):
-            written.append(d["path"])
-    removed = cleanup_orphan_entity_pages(taken_slugs, args.dry_run)
+        else:
+            text = render_page(d, synths[d["slug"]], final_related[d["slug"]], backlinks[d["slug"]], slug_title)
+            if write_page(d["path"], text, args.dry_run):
+                written.append(d["path"])
+        if legacy_path is not None:
+            stub = redirect_stub_text(d)
+            current = legacy_path.read_text(encoding="utf-8", errors="replace") if legacy_path.exists() else ""
+            if current and not is_redirect_stub(current) and frontmatter_value(current, "origin") != "focus":
+                print(f"  ⚠ kept {rel(legacy_path)} — hand-authored page, no redirect stub written")
+            else:
+                stub_slugs.add(legacy_path.stem)
+                if write_page(legacy_path, stub, args.dry_run):
+                    written.append(legacy_path)
+    removed = cleanup_orphan_entity_pages(taken_slugs, args.dry_run, stub_slugs)
     compile_timeline(args.dry_run)
     update_index(written, args.dry_run)
 
