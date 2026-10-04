@@ -1,4 +1,4 @@
-"""v390 (ADR 0043 "Pages are views") — compile by record, and the viewer's
+"""v389 (ADR 0043 "Pages are views") — compile by record, and the viewer's
 identity header.
 
 lifehug-platform `docs/design/identity.md` §4.1.7–8 / P6 (compile half). Every
@@ -50,7 +50,7 @@ class Vault:
     """A throwaway vault plus a way to run the compiler and the viewer in it."""
 
     def __init__(self, case: unittest.TestCase, rosters: dict, answers: dict):
-        self.root = root_parent_tmp(case, ROOT, prefix="lifehug-v390-")
+        self.root = root_parent_tmp(case, ROOT, prefix="lifehug-v389-")
         (self.root / "state" / "entity_rosters").mkdir(parents=True)
         (self.root / "answers").mkdir()
         (self.root / "question-bank.md").write_text(BANK, encoding="utf-8")

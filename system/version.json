@@ -1,7 +1,7 @@
 {
-  "version": 390,
+  "version": 389,
   "released": "2026-10-04",
-  "changelog": "v390: pages are views of records (ADR 0043, lifehug-platform#987, stacked on v388). A person page is written at its RECORD's slug, so a Focus whose record has another slug (`katie` on `katie-taylor`) compiles to `wiki/people/katie-taylor.md` and its old path keeps a one-line redirect stub (`origin: redirect`, `redirect_to`) for one version; the record's aliases reach the page's mention scan; page frontmatter gains `person_ref`/`record_ref`, `handle`, `aliases`, `relationship`, `answers`; a relationship page keeps its path and names the record; a folded record's page leaves by the orphan rule and links to it follow the pointer. The viewer's person page opens with an identity header read from the record, Review rows gain \"add a name\" and \"this is that record\", the Focus-idea lane gains \"fold into a person\", and the People index lists records with no page under \"Known, no page yet\". The entity-verdict job accepts fold_into, focus, retract_aliases, located_in and handle.",
+  "changelog": "v389: pages are views of records (ADR 0043, lifehug-platform#987, after v388). A person page is written at its RECORD's slug, so a Focus whose record has another slug (`katie` on `katie-taylor`) compiles to `wiki/people/katie-taylor.md` and its old path keeps a one-line redirect stub (`origin: redirect`, `redirect_to`) for one version; the record's aliases reach the page's mention scan; page frontmatter gains `person_ref`/`record_ref`, `handle`, `aliases`, `relationship`, `answers`; a relationship page keeps its path and names the record; a folded record's page leaves by the orphan rule and links to it follow the pointer. The viewer's person page opens with an identity header read from the record, Review rows gain \"add a name\" and \"this is that record\", the Focus-idea lane gains \"fold into a person\", and the People index lists records with no page under \"Known, no page yet\". The entity-verdict job accepts fold_into, focus, retract_aliases, located_in and handle.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -660,6 +660,6 @@
     "docs/adr/0042-a-question-passes-or-it-is-not-a-question.md",
     "docs/adr/0043-one-person-one-record.md",
     "tests/test_v386_one_record.py",
-    "tests/test_v390_compile_by_record.py"
+    "tests/test_v389_compile_by_record.py"
   ]
 }

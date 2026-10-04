@@ -115,7 +115,7 @@ owner's rule: a mention alone never makes a person, D3).
   reading (`split_legacy_pointers`, the `--maps-to` rewrite, `focus_of`'s
   fallback) is deleted in the following release.
 
-## Pages are views (v390)
+## Pages are views (v389)
 
 The compiled page is the record's view, addressed by the record's slug. A Focus
 whose person record has a different slug ("katie" on `katie-taylor`) is written
@@ -127,4 +127,4 @@ names the record (`person_ref` / `record_ref`, `handle`, `aliases`,
 `relationship`, `answers`); the viewer's identity header, alias add/remove and
 "this is that record" read and write that record through the one verdict verb,
 never the page. Records with no page are listed as "Known, no page yet", not
-given pages (D2). Delete-when: the stubs go one version after v390.
+given pages (D2). Delete-when: the stubs go one version after v389.

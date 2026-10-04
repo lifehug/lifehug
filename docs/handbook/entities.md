@@ -120,7 +120,7 @@ Pell (son)" — on the viewer's Review rows and in the focus curator's roster
 context. `resolve_place` resolves a place by name or alias, or "Yucaipa,
 California" through containment, and never upward: a city is never its state.
 
-**Pages are views of records (v390).** A person page is addressed by its RECORD's
+**Pages are views of records (v389).** A person page is addressed by its RECORD's
 slug: a Focus whose record has another slug ("Mara" on `mara-quill`) is written
 at `wiki/people/mara-quill.md`, and its old path `wiki/people/mara.md` keeps a
 one-line redirect stub (`origin: redirect`, `redirect_to: people/mara-quill`) for

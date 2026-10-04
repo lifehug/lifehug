@@ -77,7 +77,7 @@ related:
 ---
 ```
 
-### Pages are views of records (v390, ADR 0043)
+### Pages are views of records (v389, ADR 0043)
 
 A page that is the compiled view of an identity record also carries that
 record's identity, so a viewer reads it without opening the roster:
