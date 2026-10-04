@@ -51,6 +51,27 @@ PRIMARY_CAP = 0.40        # the author's own life story (primary focus) may take
 FINISHING_CAP = 0.50      # raised cap while a Focus is being pushed to done
 MAINTENANCE_FACTOR = 0.1  # weight multiplier once a Focus is saturated
 
+#: v394 (ADR 0044): the `phase` a Focus takes when every question in its
+#: categories is answered. Set by `focus_complete.sweep`, never by hand; the
+#: other phases (`active` / `finishing` / `maintenance`) are unchanged.
+COMPLETE_PHASE = "complete"
+
+
+def is_complete(focus: dict, fill: dict | None = None) -> bool:
+    """Is this Focus complete RIGHT NOW? One definition (ADR 0044).
+
+    Stored `phase == "complete"` AND no open question has been approved into
+    its categories since. Given a `fill` (from :func:`focus_fill`) a complete
+    Focus whose category has gained an open question reads as NOT complete
+    immediately: the reopen is derived, so the planner and the autopilot are
+    right on the very next read even before the sweep persists it.
+    """
+    if focus.get("phase") != COMPLETE_PHASE:
+        return False
+    if fill is not None and fill.get("pending", 0) > 0:
+        return False
+    return True
+
 # Map a Focus type to its wiki directory (for the Focus ↔ wiki node link).
 TYPE_TO_WIKI_DIR = {
     "person": "people",
@@ -384,7 +405,11 @@ _USER_FIELDS = ("label", "tier", "objective", "deliverable", "target_depth",
                 # the label heuristic.
                 "living", "relationship",
                 # v386 (ADR 0043): the person record this Focus attends to.
-                "person_ref")
+                "person_ref",
+                # v394 (ADR 0044): the completion record (completed_at, the
+                # coverage snapshot, the one Mirror row's state) is the
+                # person's history, not derived: it survives a re-derive.
+                "completion")
 
 
 def derive_roadmap(md_text: str, existing: dict | None = None) -> dict:
@@ -430,7 +455,31 @@ def derive_roadmap(md_text: str, existing: dict | None = None) -> dict:
         if node:
             focus["wiki_node"] = node
 
+    reopen_completed(merged, md_text)
     return {"version": 1, "generated_at": now_utc(), "focuses": merged}
+
+
+def reopen_completed(focuses: list[dict], md_text: str, *, when: str | None = None) -> list[str]:
+    """A complete Focus whose category has gained an open question is
+    `active` again (ADR 0044). Mutates `focuses`; returns the ids reopened.
+
+    Called from :func:`derive_roadmap`, so ANY roadmap rebuild after a new
+    question is approved persists the reopen. There is no second door.
+    """
+    questions = parse_questions(md_text)
+    reopened: list[str] = []
+    for focus in focuses:
+        if focus.get("phase") != COMPLETE_PHASE:
+            continue
+        fill = focus_fill(focus, questions)
+        if fill["pending"] <= 0:
+            continue
+        focus["phase"] = "active"
+        completion = dict(focus.get("completion") or {})
+        completion["reopened_at"] = when or now_utc()
+        focus["completion"] = completion
+        reopened.append(str(focus.get("id")))
+    return reopened
 
 
 def load_roadmap() -> dict:
@@ -714,7 +763,9 @@ def cli(argv: list[str] | None = None) -> int:
     living.add_argument("--not-living", dest="living", action="store_false", default=None)
     p.add_argument("--category", action="append", default=[], help="Replace categories (repeatable)")
 
-    p = sub.add_parser("finish", help="Flag a Focus as finishing (lifts its variety cap)")
+    p = sub.add_parser("finish", help="Flag a Focus as finishing (lifts its variety cap). The manual "
+                                      "accelerator: it marks nothing complete; completion at 100%% of "
+                                      "the category is automatic (focus-complete-sweep, ADR 0044)")
     p.add_argument("focus_id")
 
     p = sub.add_parser("new", help="Create a Focus end-to-end: scaffold category, register, seed questions")

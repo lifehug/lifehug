@@ -453,6 +453,23 @@ def abandon_actionable_item(item: object, reason: str = "") -> MirrorResolution:
     return mirror_work.abandon_mirror_item(item, reason=reason)
 
 
+def load_focus_complete_rows(*, include_resolved: bool = False) -> list[dict]:
+    """The `focus_complete` rows for THIS vault (v394, ADR 0044): one per
+    completed Focus whose milestone has not been played. Derived from the
+    roadmap record; each row names its three Plays (`keep_going` / `rest` /
+    `make`) and carries its Play target. Writes nothing."""
+    import focus_complete  # noqa: PLC0415
+
+    return focus_complete.rows(include_resolved=include_resolved)
+
+
+def play_focus_complete(focus_id: str, which: str) -> dict:
+    """Play one of a `focus_complete` row's three Plays against THIS vault."""
+    import focus_complete  # noqa: PLC0415
+
+    return focus_complete.play(focus_id, which)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Compile the Mirror page")
     parser.add_argument("--model", help="AI model override")

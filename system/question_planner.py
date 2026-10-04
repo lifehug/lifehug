@@ -50,6 +50,7 @@ from roadmap import (
     TIER_TARGETS,
     derive_roadmap,
     focus_fill,
+    is_complete,
     load_roadmap,
 )
 
@@ -462,6 +463,10 @@ def focus_weight(focus: dict, fill: dict) -> float:
     """weight = base(tier) × fill_factor × room. Saturated focuses decay to
     maintenance weight (never zero); empty-of-questions focuses go to zero."""
     if not fill["room"]:
+        return 0.0
+    if is_complete(focus, fill):
+        # v394 (ADR 0044): a complete Focus is never queued. `room` already
+        # reads False at 100%; this keeps the rule true by NAME too.
         return 0.0
     base = PRIMARY_BASE if focus.get("primary") else TIER_BASE.get(focus.get("tier", "standard"), 1.0)
     sat = fill["saturation"]

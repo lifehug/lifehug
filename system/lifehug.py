@@ -177,6 +177,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # never write) — same family as judgment-update.
     "focus-curate",
     "focus-dismiss", "focus-finish",
+    # v394 (ADR 0044): the weekly completion sweep rewrites state/roadmap.json
+    # and files second-pass candidates; the Play records its row's outcome.
+    # Classified BY NAME like focus-autopilot (--dry-run writes nothing).
+    "focus-complete-sweep", "focus-complete-play",
     # entity-identity-context (v190): the entity -> focus hand-off appends one
     # row to state/focus_recommendations.json — same single-file writer-lock
     # family as focus-dismiss/recommend-focuses. It creates no Focus.
@@ -1889,6 +1893,17 @@ def cmd_focus_set(args: argparse.Namespace) -> int:
     for c in args.category or []:
         flags.extend(["--category", c])
     return run_python("roadmap.py", flags)
+
+
+def cmd_focus_complete_sweep(args: argparse.Namespace) -> int:
+    flags = ["sweep"]
+    if args.dry_run:
+        flags.append("--dry-run")
+    return run_python("focus_complete.py", flags)
+
+
+def cmd_focus_complete_play(args: argparse.Namespace) -> int:
+    return run_python("focus_complete.py", ["play", args.focus_id, args.which])
 
 
 def cmd_focus_finish(args: argparse.Namespace) -> int:
@@ -4614,9 +4629,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--category", action="append", default=[])
     p.set_defaults(func=cmd_focus_set)
 
-    p = sub.add_parser("focus-finish", help="Flag a Focus as finishing (lifts its variety cap)")
+    p = sub.add_parser("focus-finish",
+                       help="Flag a Focus as finishing (lifts its variety cap). The manual accelerator: "
+                            "it marks nothing complete. A Focus whose category reaches 100%% is marked "
+                            "complete automatically by focus-complete-sweep (ADR 0044)")
     p.add_argument("focus_id")
     p.set_defaults(func=cmd_focus_finish)
+
+    p = sub.add_parser("focus-complete-sweep",
+                       help="Mark every Focus at 100%% of its category complete, file its second pass "
+                            "as Review candidates, reopen one that gained a question (ADR 0044)")
+    p.add_argument("--dry-run", action="store_true", help="Preview; write nothing")
+    p.set_defaults(func=cmd_focus_complete_sweep)
+
+    p = sub.add_parser("focus-complete-play",
+                       help="Play a completed Focus's Mirror row: keep_going | rest | make")
+    p.add_argument("focus_id")
+    p.add_argument("which", choices=["keep_going", "rest", "make"])
+    p.set_defaults(func=cmd_focus_complete_play)
 
     p = sub.add_parser("serve", help="Serve the local owner-only wiki")
     p.add_argument("--host", default="127.0.0.1")

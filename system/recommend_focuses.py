@@ -44,7 +44,7 @@ from lifehug_core import (
     write_json,
 )
 from progress import READY, verdict  # noqa: E402
-from roadmap import focus_fill, load_roadmap, rebuild_roadmap  # noqa: E402
+from roadmap import focus_fill, is_complete, load_roadmap, rebuild_roadmap  # noqa: E402
 
 FOCUS_RECOMMENDATION_TYPES = ("person", "place", "period", "theme")
 
@@ -237,6 +237,8 @@ def focus_start_gate() -> dict:
         if focus.get("phase") == "maintenance":
             continue
         fill = focus_fill(focus, questions)
+        if is_complete(focus, fill):
+            continue  # v394: a finished Focus is not unfinished work
         if fill["pending"] <= 0:
             # Nothing left to answer — not "unfinished" in the owner's
             # sense, whatever the saturation ratio says against the target.
@@ -1171,6 +1173,12 @@ def _is_developing(focus: dict, questions: list[dict]) -> bool:
     if focus.get("phase") == "maintenance":
         return False
     fill = focus_fill(focus, questions)
+    if is_complete(focus, fill):
+        # v394 (ADR 0044): a finished Focus is a milestone, not a slot. It
+        # leaves the keep-3-developing count so a new Focus can be promoted;
+        # a complete Focus that gained an open question is NOT complete here
+        # (is_complete reads the live fill), so it counts again at once.
+        return False
     return fill["saturation"] < READY
 
 
