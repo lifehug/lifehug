@@ -1,7 +1,7 @@
 {
-  "version": 391,
+  "version": 393,
   "released": "2026-10-04",
-  "changelog": "v391: identity follow-ups (lifehug#459, lifehug-platform#987). `lifehug.py entity-roster --convert-identity [--dry-run]` reaches the persisted v386 converter through the front door (same JSON report, takes the writer lock). `general_listener.identity_work_items(records, roster)` and the read-only `identity-work-items` subcommand (listener JSON on stdin) turn an `ambiguous` person_identity record into one `identity_uncertain` row naming every candidate (\"Which James?\") and an `unknown_person`/`unknown_handle` record into one `new_person` row (\"New person?\", quoting the basis, naming the `entity-verdict ... --ensure --name` argv a host runs only on the owner's explicit choice); a resolved record mints nothing; the listener outcome carries them as `identity_work_items`. Handle statements for `same as @h` (object/theme fold) and `@a is in @b` (place containment) are pinned to their `--fold-into` / `--located-in` argv.",
+  "changelog": "v393: the viewer adopts the design palette — one palette for OSS and platform (lifehug#461, twin of lifehug-platform#996). `system/design/palette.yaml` mirrors the platform's `architecture/design/palette.yaml` byte for byte (sha256 `da772bb6fa9a29fe85c910fa7c688c726547c83aedec97d43d405f4ea2b4227e`, pinned on both sides); `system/design/palette.py` reads it with the standard library and emits the CSS custom properties (light under `:root`, dark under `prefers-color-scheme: dark`) and `type_color()` (an unknown type draws the neutral fallback and logs a warning). The graph's hard-coded `TYPE_COLORS` are gone: nodes, edges and the new type legend wear the tokens in the palette's FIXED categorical order; selection is a ring (2 px at radius+4 in the node's type colour, neighbours 1 px, keyboard focus the same ring, no rectangular outline); Fit / Reset / Full screen take the platform's paper control spec in the canvas's top-right corner at 44 px; the graph canvas and list follow dark mode.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -662,6 +662,11 @@
     "docs/adr/0042-a-question-passes-or-it-is-not-a-question.md",
     "docs/adr/0043-one-person-one-record.md",
     "tests/test_v386_one_record.py",
-    "tests/test_v389_compile_by_record.py"
+    "tests/test_v389_compile_by_record.py",
+    "system/design/__init__.py",
+    "system/design/palette.py",
+    "system/design/palette.yaml",
+    "docs/design/palette.md",
+    "tests/test_v393_design_palette.py"
   ]
 }
