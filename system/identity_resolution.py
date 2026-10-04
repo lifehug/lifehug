@@ -529,40 +529,114 @@ ROSTER_ALIAS_KEY = "aliases"
 #: corroborate a relationship word the mention itself supplied.
 ROSTER_RELATIONSHIP_KEY = "relationship"
 
-#: The roster field that says a row is a DUPLICATE of another row — curation
-#: found this spelling already answers to an existing Focus and pointed it
-#: there rather than minting a second page for it (`entity_roster.py`'s own
-#: convention; `entity_candidate.py`, `entity_verdict.py`, `wiki_compile.py`
-#: and every other reader already treat a non-null value here as "this row is
-#: not its own identity"). `roster_index` is the one place that convention
-#: reaches identity resolution (v343, `timeline-rules:13`): a row with this
-#: field set contributes NO ref, NO key and NO census token — every spelling
-#: it carries is expected to already be curated onto the row it maps to, so a
-#: bare "James" no longer runs against both the alias row AND its target as
-#: if they were two different people.
-ROSTER_MAPS_TO_FOCUS_KEY = "maps_to_focus"
+#: v386 (ADR 0043, lifehug-platform `docs/design/identity.md` §2.1, D6) — ONE
+#: PERSON, ONE RECORD. ``maps_to_focus`` used to mean two different things on a
+#: roster row: "this person has a Focus" and "this row was folded into row X";
+#: and :func:`is_alias_row` read ANY value as a pointer, so a real person who
+#: had a Focus vanished from timeline identity the moment the row was mapped
+#: (and a row left unmapped stayed invisible to recommendation suppression).
+#: The overload is split into two refs that never mean each other:
+#:
+#: * :data:`ROSTER_FOCUS_KEY` (``focus``) — the Focus slug that ATTENDS to this
+#:   record. The record stays a live person: offered, counted, bound.
+#: * :data:`ROSTER_FOLDED_INTO_KEY` (``folded_into``) — the survivor slug when
+#:   this row is a DUPLICATE pointer (a fold is a pointer, never a deletion,
+#:   ADR 0041). The only thing :func:`is_alias_row` reads.
+#:
+#: :data:`LEGACY_MAPS_TO_FOCUS_KEY` is read by the one-version converter
+#: (`roster_relations.convert_legacy_roster`) and by nothing else that decides.
+ROSTER_FOCUS_KEY = "focus"
+ROSTER_FOLDED_INTO_KEY = "folded_into"
+LEGACY_MAPS_TO_FOCUS_KEY = "maps_to_focus"
+#: The pre-v386 name of the legacy key, kept so an importer does not break.
+ROSTER_MAPS_TO_FOCUS_KEY = LEGACY_MAPS_TO_FOCUS_KEY
 
-#: v357 (`timeline-rules:18`). The same convention, stated as the rule every
-#: reader of a roster answers the same way — the census, the BINDING path and
-#: the card path alike. v343 put it into :func:`roster_index`, which is what
-#: the card path reads; the fold's birth index and family-tier index read the
-#: raw rows through `axis_membership.roster_person_rows` and still counted the
-#: owner's ``james`` row (``maps_to_focus: anthon-james-taylor``) as a person
-#: with a ref and a birthday of its own. :func:`is_alias_row` is the one
-#: predicate both seats now ask.
+#: v357 (`timeline-rules:18`), restated for v386: a POINTER row — one folded
+#: into another record — is not a person. It is never offered, never counted
+#: toward ambiguity, never bound to and never anchors an age, in the binding
+#: path exactly as in the card path. A row that merely HAS a Focus is a person.
 AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE = (
-    "a roster row with maps_to_focus set is a pointer to another row, not a "
+    "a roster row with folded_into set is a pointer to another row, not a "
     "person: it is never offered, never counted toward ambiguity, never bound "
     "to, and never anchors an age — in the binding path exactly as in the card "
-    "path"
+    "path; a row with a focus is a person"
 )
 
 
 def is_alias_row(entity: object) -> bool:
-    """Is this roster row a POINTER (:data:`AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE`)?"""
+    """Is this roster row a POINTER (:data:`AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE`)?
+
+    Reads :data:`ROSTER_FOLDED_INTO_KEY` ONLY (v386). A row with a ``focus``
+    is a live record."""
     return isinstance(entity, dict) and bool(
-        collapsed_text(entity.get(ROSTER_MAPS_TO_FOCUS_KEY))
+        collapsed_text(entity.get(ROSTER_FOLDED_INTO_KEY))
     )
+
+
+def split_legacy_pointers(entities: object) -> list:
+    """The one-version reading of ``maps_to_focus`` (v386, ADR 0043), for a
+    reader handed RAW rows: a value naming ANOTHER row of the same snapshot is
+    ``folded_into``; anything else is ``focus``. Rows already carrying either
+    new key, and rows without the legacy key, are returned unchanged (the same
+    objects). Pure; never writes. `roster_relations.convert_legacy_roster` is
+    the persisted converter and applies exactly this split."""
+    rows = [e for e in (entities or ()) if isinstance(e, dict)]
+    if not any(LEGACY_MAPS_TO_FOCUS_KEY in e and ROSTER_FOCUS_KEY not in e
+               and ROSTER_FOLDED_INTO_KEY not in e for e in rows):
+        return rows
+    slugs = {_entity_slug(e) for e in rows} - {""}
+    out = []
+    for entity in rows:
+        if LEGACY_MAPS_TO_FOCUS_KEY not in entity or ROSTER_FOCUS_KEY in entity \
+                or ROSTER_FOLDED_INTO_KEY in entity:
+            out.append(entity)
+            continue
+        target = collapsed_text(entity.get(LEGACY_MAPS_TO_FOCUS_KEY))
+        own = _entity_slug(entity)
+        key = normalized_mention_key(target).replace(" ", "-")
+        fields = {ROSTER_FOCUS_KEY: None, ROSTER_FOLDED_INTO_KEY: None}
+        if target and key in slugs and key != own:
+            fields[ROSTER_FOLDED_INTO_KEY] = target
+        elif target:
+            fields[ROSTER_FOCUS_KEY] = target
+        converted = {k: v for k, v in entity.items() if k != LEGACY_MAPS_TO_FOCUS_KEY}
+        converted.update(fields)
+        out.append(converted)
+    return out
+
+
+def folded_into_of(entity: object) -> str:
+    """The survivor slug a pointer row folds into, or ``""``."""
+    if not isinstance(entity, dict):
+        return ""
+    return collapsed_text(entity.get(ROSTER_FOLDED_INTO_KEY))
+
+
+def focus_of(entity: object) -> str:
+    """The Focus slug attending to this record, or ``""``.
+
+    A row not yet converted (no ``focus``/``folded_into`` key at all) reads its
+    legacy ``maps_to_focus`` for this one version — the converter's own default
+    reading of an unknown target — so a reader handed a raw pre-v386 dict does
+    not lose the Focus link."""
+    if not isinstance(entity, dict):
+        return ""
+    if ROSTER_FOCUS_KEY in entity or ROSTER_FOLDED_INTO_KEY in entity:
+        return collapsed_text(entity.get(ROSTER_FOCUS_KEY))
+    return collapsed_text(entity.get(LEGACY_MAPS_TO_FOCUS_KEY))
+
+
+def roster_home(entity: object) -> str | None:
+    """Where this record already lives — its Focus or its survivor — or
+    ``None``. The "has a home, so no page of its own" question that
+    `entity_roster.base_page_eligible` and the candidate lanes ask (v386)."""
+    home = folded_into_of(entity) or focus_of(entity)
+    return home or None
+
+
+def has_home(entity: object) -> bool:
+    """:func:`roster_home` as a bool."""
+    return roster_home(entity) is not None
 
 #: Determiners and possessives a mention may wrap a name in. They carry no
 #: identity, so they are dropped before a mention's tokens are counted —
@@ -884,6 +958,11 @@ class RosterIndex:
     #: on the snapshot, and whether that census was read at all.
     called_otherwise: frozenset = frozenset()
     usage_read: bool = False
+    #: v386 (D9). Alias keys the owner marked SHARED with somebody who has no
+    #: record (:data:`ROSTER_ALIAS_META_KEY`). A BARE mention of one is held as
+    #: uncertain — never attributed — while the record's exclusive spellings
+    #: keep resolving.
+    shared_alias_keys: frozenset = frozenset()
 
     def size(self) -> int:
         return len(self.refs)
@@ -938,8 +1017,9 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
     Two v343 (`timeline-rules:13`) exclusions, both narrow and both read off
     an existing roster convention rather than a new one:
 
-    * A row with :data:`ROSTER_MAPS_TO_FOCUS_KEY` set is dropped ENTIRELY —
-      no ref, no exact key, no census token. It is curation's own statement
+    * A POINTER row (:func:`is_alias_row` — ``folded_into`` set, v386) is
+      dropped ENTIRELY — no ref, no exact key, no census token. A row that
+      merely has a ``focus`` is a live person and is indexed. It is curation's own statement
       that this spelling is not a second identity (see the field's
       docstring), so a "James" alias row naming the same person as
       "Anthon James Taylor" never again runs as its own candidate.
@@ -959,6 +1039,7 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
     else:
         entities = list(snapshot or ())
         kind = collapsed_text(entity_type) or "person"
+    entities = split_legacy_pointers(entities)
 
     role_words = _COLLECTIVE_ROLE_WORDS
     refs: dict = {}
@@ -970,6 +1051,7 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
     full_names: dict = {}
     called_otherwise: set = set()
     usage_read = False
+    shared_alias_keys: set = set()
     for entity in entities:
         if not isinstance(entity, dict):
             continue
@@ -1010,6 +1092,8 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
                 keys.append(key)
                 by_alias_key.setdefault(key, []).append(ref)
 
+        shared_alias_keys.update(shared_alias_keys_of(entity))
+
         if is_collective:
             continue
 
@@ -1047,6 +1131,7 @@ def roster_index(snapshot: object, *, entity_type: object = None) -> RosterIndex
         full_names={k: tuple(v) for k, v in full_names.items()},
         called_otherwise=frozenset(called_otherwise),
         usage_read=usage_read,
+        shared_alias_keys=frozenset(shared_alias_keys),
     )
 
 
@@ -1649,6 +1734,21 @@ def resolve_mention(
     """
     matches = candidates_for(mention, roster, entity_type=entity_type)
 
+    held = _shared_alias_hold(mention, roster, entity_type=entity_type)
+    if held:
+        # v386 (D9, :data:`A_SHARED_ALIAS_HOLDS_A_BARE_MENTION`): the owner said
+        # this spelling is also somebody with no record. Held, never attributed.
+        return resolution_record(
+            {
+                "mention": mention,
+                "candidates": list(held),
+                "resolution": "uncertain",
+                "reason": SHARED_NAME_TOKEN_REASON,
+                "evidence_ref": evidence_ref,
+            },
+            now=now,
+        )
+
     if not (len(matches) == 1 and matches[0]["basis"] == "exact_ref"):
         # v360 (:data:`WHAT_HE_CALLS_THEM_DECIDES_A_BARE_NAME`), read BEFORE
         # an exact key: the brother's roster row carries the alias "James", and
@@ -2205,6 +2305,640 @@ def derive_episode_ref(
     )
 
 
+
+# --------------------------------------------------------------------------
+# v386 (ADR 0043) — ONE PERSON, ONE RECORD: typed resolution with context
+# --------------------------------------------------------------------------
+#
+# Controlling design: lifehug-platform `docs/design/identity.md` §3.1, §4.1.2,
+# §4.1.6a–6c, decisions D6–D9. A name is not an identity. Several records may
+# legitimately answer to one string (three generations of James); a relation
+# word is a SET with a cardinality (two sons, one father); places NEST and a
+# city is never its state; an alias can be shared with somebody who has no
+# record. `resolve_person` / `resolve_place` answer with a typed
+# :class:`Resolution` whose ``ambiguous`` kind is first-class: a caller renders
+# it or asks, and never picks. Pure, like the rest of this module.
+
+#: The roster field holding per-alias decisions (D9, and the I-4 handle):
+#: ``{normalized alias key: {"exclusive": bool, "shared_with": str, "handle":
+#: bool}}``. Aliases stay plain strings in ``aliases`` (every reader keeps
+#: working); the metadata rides beside them, the ``alias_ownership`` precedent.
+ROSTER_ALIAS_META_KEY = "alias_meta"
+ALIAS_EXCLUSIVE = "exclusive"
+ALIAS_SHARED_WITH = "shared_with"
+ALIAS_HANDLE = "handle"
+
+#: The top-level roster key the converter files retired placeholder rows under
+#: (D6): ``[{word, relationship, cardinality, mentions, aliases, ...}]``.
+RELATION_QUERIES_KEY = "relation_queries"
+
+A_SHARED_ALIAS_HOLDS_A_BARE_MENTION = (
+    "an alias the owner marked shared with somebody who has no record holds a "
+    "bare mention of it as uncertain — never attributed to the record — while "
+    "the record's exclusive spellings keep resolving; nobody is minted for the "
+    "other claimant"
+)
+
+A_HANDLE_IS_EXCLUSIVE = (
+    "a handle is an alias no other record holds as a name, an alias or a "
+    "handle; a second claim is refused, never shared"
+)
+
+
+def alias_meta_of(entity: object, alias: object) -> dict:
+    """The decision on one alias of one record: ``{"exclusive", "shared_with",
+    "handle"}`` — exclusive, unshared and not a handle unless recorded."""
+    out = {ALIAS_EXCLUSIVE: True, ALIAS_SHARED_WITH: None, ALIAS_HANDLE: False}
+    if not isinstance(entity, dict):
+        return out
+    meta = entity.get(ROSTER_ALIAS_META_KEY)
+    entry = meta.get(normalized_mention_key(alias)) if isinstance(meta, dict) else None
+    if isinstance(entry, dict):
+        shared = collapsed_text(entry.get(ALIAS_SHARED_WITH)) or None
+        out[ALIAS_SHARED_WITH] = shared
+        out[ALIAS_EXCLUSIVE] = bool(entry.get(ALIAS_EXCLUSIVE, shared is None)) and shared is None
+        out[ALIAS_HANDLE] = bool(entry.get(ALIAS_HANDLE, False))
+    return out
+
+
+def shared_alias_keys_of(entity: object) -> set:
+    """Normalized keys of every alias this record marked shared (D9)."""
+    if not isinstance(entity, dict):
+        return set()
+    meta = entity.get(ROSTER_ALIAS_META_KEY)
+    if not isinstance(meta, dict):
+        return set()
+    return {
+        normalized_mention_key(key)
+        for key, entry in meta.items()
+        if isinstance(entry, dict)
+        and (collapsed_text(entry.get(ALIAS_SHARED_WITH)) or entry.get(ALIAS_EXCLUSIVE) is False)
+    } - {""}
+
+
+def handle_of(entity: object) -> str:
+    """The owner-chosen short handle's alias text (``"katie"``), or ``""``."""
+    if not isinstance(entity, dict):
+        return ""
+    meta = entity.get(ROSTER_ALIAS_META_KEY)
+    if not isinstance(meta, dict):
+        return ""
+    raw = entity.get(ROSTER_ALIAS_KEY) or ()
+    if isinstance(raw, (str, bytes)):
+        raw = [raw]
+    for alias in raw:
+        entry = meta.get(normalized_mention_key(alias))
+        if isinstance(entry, dict) and entry.get(ALIAS_HANDLE):
+            return collapsed_text(alias)
+    return ""
+
+
+def _shared_alias_hold(mention: object, roster: object, *, entity_type: object = None) -> tuple[dict, ...]:
+    """The records a BARE shared alias names, as candidates — or ``()``
+    (:data:`A_SHARED_ALIAS_HOLDS_A_BARE_MENTION`)."""
+    index = roster_index(roster, entity_type=entity_type)
+    key = normalized_mention_key(mention)
+    if not key or key not in index.shared_alias_keys:
+        return ()
+    refs = (*index.by_alias_key.get(key, ()), *index.by_name_key.get(key, ()))
+    return tuple(
+        RosterCandidate(ref=ref, name=index.name_of(ref), basis="alias").to_dict()
+        for ref in dict.fromkeys(refs)
+    )
+
+
+# -- relations are sets (6a, D6) --------------------------------------------
+
+#: How many people one relation WORD can name for one owner. Absent = no bound
+#: (``None``): a son, a sister, a friend, a cousin. A grandparent word without a
+#: side names two people; with a side ("maternal grandmother") one. This table
+#: is the cardinality `relation_words.RELATION_WORD_CARDINALITY` re-exports.
+RELATION_WORD_CARDINALITY = {
+    "dad": 1, "father": 1, "mom": 1, "mother": 1,
+    "wife": 1, "husband": 1, "spouse": 1, "partner": 1,
+    "stepmother": 1, "stepfather": 1, "fiance": 1, "boyfriend": 1, "girlfriend": 1,
+    "parent": 2,
+    "grandma": 2, "grandmother": 2, "grandpa": 2, "grandfather": 2,
+    "grandparent": 4,
+}
+
+#: The same bound per roster ``relationship`` value.
+RELATIONSHIP_CARDINALITY = {"spouse": 1, "partner": 1, "parent": 2, "grandparent": 4}
+
+#: Side words that make a grandparent word name one person.
+GRANDPARENT_SIDE_WORDS = frozenset({"maternal", "paternal"})
+
+#: The grammatical gender of the gendered relation words (used only to narrow
+#: a set — "my father" among two parents — never to state anybody's sex).
+_MALE_RELATION_WORDS = frozenset({
+    "son", "father", "dad", "brother", "husband", "grandfather", "grandpa",
+    "boyfriend", "stepfather", "uncle", "nephew",
+})
+_FEMALE_RELATION_WORDS = frozenset({
+    "daughter", "mother", "mom", "sister", "wife", "grandmother", "grandma",
+    "girlfriend", "stepmother", "aunt", "niece",
+})
+
+#: Collective words — always a set, never one record.
+COLLECTIVE_RELATION_WORDS = frozenset({
+    "kids", "children", "family", "parents", "siblings", "grandparents",
+    "friends", "neighbors", "neighbours", "cousins",
+})
+
+#: Role words that are relations of their own, outside the kinship vocabulary,
+#: mapped to the ``relationship`` value a relation query records.
+_ROLE_RELATIONSHIP = {
+    "son": "child", "daughter": "child", "child": "child", "kid": "child",
+    "kids": "child", "children": "child",
+    "brother": "sibling", "sister": "sibling", "sibling": "sibling", "siblings": "sibling",
+    "parent": "parent", "parents": "parent", "mom": "parent", "dad": "parent",
+    "mother": "parent", "father": "parent",
+    "grandparents": "grandparent", "grandma": "grandparent", "grandpa": "grandparent",
+    "grandmother": "grandparent", "grandfather": "grandparent",
+    "wife": "spouse", "husband": "spouse", "spouse": "spouse", "partner": "spouse",
+    "friend": "friend", "friends": "friend", "neighbor": "neighbor",
+    "neighbors": "neighbor", "neighbours": "neighbor",
+    "cousin": "cousin", "cousins": "cousin", "family": "family",
+}
+
+A_ROLE_WORD_IS_A_SET_NOT_A_RECORD = (
+    "a role word whose relation names more than one person (son, kids, "
+    "siblings, friend) is a relation query answered as a set, never a roster "
+    "record; role-word aliases stay only on records whose relation names "
+    "exactly one person (dad, my wife)"
+)
+
+
+def _role_key(text: object) -> str:
+    words = [w for w in normalized_mention_key(text).split() if w not in MENTION_QUALIFIER_WORDS]
+    return " ".join(words)
+
+
+def relation_cardinality(word: object) -> int | None:
+    """How many people ``word`` can name for one owner — ``None`` is unbounded.
+
+    A plural or collective word is always a set (``None``). ``"maternal
+    grandmother"`` is one."""
+    key = _role_key(word)
+    if not key:
+        return None
+    tokens = key.split()
+    side = bool(set(tokens) & GRANDPARENT_SIDE_WORDS)
+    tokens = [t for t in tokens if t not in GRANDPARENT_SIDE_WORDS]
+    if len(tokens) != 1:
+        return None
+    one = tokens[0]
+    if one in COLLECTIVE_RELATION_WORDS:
+        return None
+    base = one if one in RELATION_WORD_CARDINALITY or one in _ROLE_RELATIONSHIP else depluralized(one)
+    if base != one and one not in RELATION_WORD_CARDINALITY:
+        return None  # a plural is a set
+    bound = RELATION_WORD_CARDINALITY.get(base)
+    if bound and side and base in ("grandma", "grandmother", "grandpa", "grandfather"):
+        return 1
+    return bound
+
+
+def relation_word_gender(word: object) -> str:
+    """``"male"`` / ``"female"`` for a gendered relation word, else ``""``."""
+    key = _role_key(word)
+    for token in reversed(key.split()):
+        base = token if token in _MALE_RELATION_WORDS | _FEMALE_RELATION_WORDS else depluralized(token)
+        if base in _MALE_RELATION_WORDS:
+            return "male"
+        if base in _FEMALE_RELATION_WORDS:
+            return "female"
+    return ""
+
+
+def role_relationship(word: object) -> str:
+    """The ``relationship`` value a role word names (``son`` → ``child``)."""
+    key = _role_key(word)
+    tokens = [t for t in key.split() if t not in GRANDPARENT_SIDE_WORDS]
+    if len(tokens) != 1:
+        return ""
+    one = tokens[0]
+    return _ROLE_RELATIONSHIP.get(one) or _ROLE_RELATIONSHIP.get(depluralized(one), "")
+
+
+def is_role_phrase(text: object) -> bool:
+    """A spelling that is ONLY a role word, possibly possessed ("my son",
+    "Kids", "the neighbors") — no name in it."""
+    key = _role_key(text)
+    tokens = [t for t in key.split() if t not in GRANDPARENT_SIDE_WORDS]
+    if len(tokens) != 1:
+        return False
+    one = tokens[0]
+    return bool(one in _COLLECTIVE_ROLE_WORDS or one in _ROLE_RELATIONSHIP
+                or depluralized(one) in _ROLE_RELATIONSHIP)
+
+
+def is_placeholder_name(name: object) -> bool:
+    """A roster row NAMED by a role word whose relation is a set
+    (:data:`A_ROLE_WORD_IS_A_SET_NOT_A_RECORD`): Son, Daughter, Kids, Parents,
+    Siblings, Friend, Neighbor. "Mom", "Dad" and "Grandma" are not — each names
+    a bounded handful and a row by that name is somebody."""
+    if not is_role_phrase(name):
+        return False
+    return relation_cardinality(name) is None
+
+
+# -- typed resolution --------------------------------------------------------
+
+RESOLVED = "resolved"
+AMBIGUOUS = "ambiguous"
+UNKNOWN = "unknown"
+RESOLUTION_KINDS = (RESOLVED, AMBIGUOUS, UNKNOWN)
+
+A_RESOLUTION_IS_TYPED_AND_AMBIGUOUS_IS_AN_ANSWER = (
+    "resolve_person and resolve_place answer resolved, ambiguous or unknown; "
+    "ambiguous names every candidate and a caller renders it or asks — it "
+    "never picks"
+)
+
+#: The possessive compound that names a PLACE, never a person (D9):
+#: "BJ's house", "Grandma's farm".
+DWELLING_WORDS = (
+    "house", "home", "place", "farm", "ranch", "cabin", "apartment", "condo",
+    "cottage", "trailer", "shop", "store", "barn", "land", "property",
+)
+PLACE_POSSESSIVE_RE = re.compile(
+    r"^(?P<owner>.+?)['’]s\s+(?:old\s+|new\s+|little\s+)?(?:" + "|".join(DWELLING_WORDS) + r")$",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """What a mention is: ``resolved`` (one ref), ``ambiguous`` (several
+    ``candidates`` — first-class, never resolved by a caller), or ``unknown``.
+    ``reason`` names the rung that decided."""
+
+    kind: str
+    ref: str = ""
+    candidates: tuple = ()
+    reason: str = ""
+
+    @property
+    def resolved(self) -> bool:
+        return self.kind == RESOLVED
+
+    def to_dict(self) -> dict:
+        return {"kind": self.kind, "ref": self.ref,
+                "candidates": [dict(c) for c in self.candidates], "reason": self.reason}
+
+
+@dataclass(frozen=True)
+class ResolveContext:
+    """What surrounds a mention: the clause it sits in, a stated year, and the
+    Focus category the text was filed under (its slug or its title)."""
+
+    clause: str = ""
+    year: int | None = None
+    focus_category: str = ""
+
+
+def _context(value: object) -> ResolveContext:
+    if isinstance(value, ResolveContext):
+        return value
+    if isinstance(value, dict):
+        year = value.get("year")
+        try:
+            year = int(year) if year not in (None, "") else None
+        except (TypeError, ValueError):
+            year = None
+        return ResolveContext(clause=collapsed_text(value.get("clause")), year=year,
+                              focus_category=collapsed_text(value.get("focus_category")))
+    return ResolveContext()
+
+
+_YEAR_RE = re.compile(r"(?<!\d)(1[89]\d\d|20\d\d)(?!\d)")
+
+
+def _born_year(entity: dict) -> int | None:
+    born = entity.get("born")
+    if isinstance(born, dict):
+        for key in ("best", "earliest", "edtf", "latest"):
+            match = _YEAR_RE.search(str(born.get(key) or ""))
+            if match:
+                return int(match.group(1))
+    elif isinstance(born, (str, int)):
+        match = _YEAR_RE.search(str(born))
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _person_rows(roster: object) -> list[dict]:
+    if isinstance(roster, dict):
+        rows = roster.get("entities") or []
+    elif isinstance(roster, RosterIndex):
+        return []
+    else:
+        rows = list(roster or ())
+    return split_legacy_pointers(rows)
+
+
+def _rows_by_ref(roster: object, kind: str = "person") -> dict:
+    out: dict = {}
+    for row in _person_rows(roster):
+        slug = _entity_slug(row)
+        if slug:
+            out.setdefault(entity_ref(kind, slug), row)
+    return out
+
+
+def _gender_of(entity: dict) -> str:
+    gender = collapsed_text(entity.get("relation_gender")).casefold()
+    if gender in ("male", "female"):
+        return gender
+    raw = entity.get(ROSTER_ALIAS_KEY) or ()
+    if isinstance(raw, (str, bytes)):
+        raw = [raw]
+    for spelling in (entity.get("relation_word"), *raw):
+        if spelling and is_role_phrase(spelling):
+            found = relation_word_gender(spelling)
+            if found:
+                return found
+    return ""
+
+
+def _spelling_steps(entity: dict) -> set:
+    raw = entity.get(ROSTER_ALIAS_KEY) or ()
+    if isinstance(raw, (str, bytes)):
+        raw = [raw]
+    steps = set()
+    for spelling in (entity.get("name"), *raw):
+        steps.add(generation_of_tokens(mention_tokens(spelling)[0])[1])
+    return steps
+
+
+def _narrow(refs: list, keep) -> list:
+    narrowed = [ref for ref in refs if keep(ref)]
+    return narrowed if narrowed else refs
+
+
+def _relation_words_of(text: object) -> tuple:
+    words = []
+    for token in normalized_mention_key(text).split():
+        stem = relation_word_stem(token)
+        if stem and stem not in words:
+            words.append(stem)
+    return tuple(words)
+
+
+def _candidates(refs, index: RosterIndex, basis: str = "name") -> tuple:
+    return tuple(RosterCandidate(ref=ref, name=index.name_of(ref), basis=basis).to_dict()
+                 for ref in refs)
+
+
+def resolve_person(text: object, roster: object, *, context: object = None) -> Resolution:
+    """Resolve one person mention, deterministically, with context
+    (:data:`A_RESOLUTION_IS_TYPED_AND_AMBIGUOUS_IS_AN_ANSWER`; design §4.1.2).
+
+    Order: a dwelling possessive is a place, never a person; a shared alias is
+    held; then :func:`resolve_mention`'s ladder (exact ref, name, alias, the
+    owner's possessive as "my", full name, a relationship word the roster
+    corroborates, the given-name census); then the first-name rule (a first
+    name exactly one record answers to — ADR 0041 D4 — under the v383
+    relationship guard); then a bare relation word answered as a set. A set of
+    several is narrowed by CONTEXT — a relation word in the clause, a
+    generation marker, a stated year against ``born``, the Focus category the
+    text was filed under — and stays ``ambiguous`` when nothing singles one out.
+    """
+    mention = collapsed_text(text)
+    if not mention:
+        return Resolution(kind=UNKNOWN, reason="empty")
+    if PLACE_POSSESSIVE_RE.match(mention):
+        return Resolution(kind=UNKNOWN, reason="place_mention")
+    ctx = _context(context)
+    index = roster_index(roster, entity_type="person")
+    rows = _rows_by_ref(roster)
+    held = _shared_alias_hold(mention, index)
+    if held:
+        return Resolution(kind=AMBIGUOUS, candidates=held, reason="shared_alias")
+
+    lookup = owner_possessive_as_my(mention) if not candidates_for(mention, index) else ""
+    looked = lookup or mention
+    record = resolve_mention(looked, roster=index, evidence_ref="resolve_person",
+                             entity_type="person")
+    if record.resolution == "same" and record.resolved_ref:
+        return Resolution(kind=RESOLVED, ref=record.resolved_ref,
+                          candidates=tuple(record.candidates), reason=record.reason)
+    refs = [c["ref"] for c in record.candidates if c.get("ref") in index.refs]
+
+    names, relations = mention_tokens(looked)
+    clause_relations = _relation_words_of(ctx.clause) if ctx.clause else ()
+    wanted_words = tuple(dict.fromkeys((*relations, *clause_relations)))
+
+    def satisfies(ref: str, words: tuple) -> bool:
+        if not words:
+            return True
+        wanted: set = set()
+        for word in words:
+            wanted |= RELATIONSHIP_MENTION_WORDS.get(word, frozenset())
+        recorded = index.relationship_of.get(ref, "")
+        if not recorded or recorded not in wanted:
+            return False
+        genders = {relation_word_gender(w) for w in words} - {""}
+        gender = _gender_of(rows.get(ref, {}))
+        return not (len(genders) == 1 and gender and gender not in genders)
+
+    reason = record.reason
+    if not refs and names:
+        # The first-name rule (ADR 0041 D4) under the v383 relationship guard.
+        bearers = [ref for ref in index.refs_named(names[0])]
+        bearers = [ref for ref in bearers
+                   if not wanted_words or not index.relationship_of.get(ref)
+                   or satisfies(ref, wanted_words)]
+        if len(bearers) == 1:
+            return Resolution(kind=RESOLVED, ref=bearers[0],
+                              candidates=_candidates(bearers, index), reason="first_name")
+        refs, reason = bearers, "first_name_shared"
+    if not refs and not names and relations:
+        # A bare relation word: answered as a set (6a).
+        members = [ref for ref in index.refs if satisfies(ref, relations)]
+        if not members:
+            return Resolution(kind=UNKNOWN, reason="relation_unknown")
+        if len(members) == 1:
+            return Resolution(kind=RESOLVED, ref=members[0],
+                              candidates=_candidates(members, index),
+                              reason="relation_one_known")
+        refs, reason = members, "relation_set"
+    if not refs:
+        return Resolution(kind=UNKNOWN, reason=reason or "no_candidate")
+
+    # Context, to split a collision.
+    steps: list = []
+    if wanted_words:
+        refs = _narrow(refs, lambda ref: satisfies(ref, wanted_words))
+        steps.append("relationship")
+    _base, step = generation_of_tokens(names)
+    if step:
+        refs = _narrow(refs, lambda ref: step in _spelling_steps(rows.get(ref, {})))
+        steps.append("generation")
+    years = [ctx.year] if ctx.year else [int(y) for y in _YEAR_RE.findall(f"{mention} {ctx.clause}")]
+    if years and len(refs) > 1:
+        year = years[0]
+        exact = [ref for ref in refs if _born_year(rows.get(ref, {})) == year]
+        refs = exact or _narrow(refs, lambda ref: (_born_year(rows.get(ref, {})) or 0) <= year)
+        steps.append("year")
+    if ctx.focus_category and len(refs) > 1:
+        cat = normalized_mention_key(ctx.focus_category)
+        cat_slug = cat.replace(" ", "-")
+
+        def filed_under(ref: str) -> bool:
+            row = rows.get(ref, {})
+            if collapsed_text(focus_of(row)) and normalized_mention_key(focus_of(row)).replace(" ", "-") == cat_slug:
+                return True
+            raw = row.get(ROSTER_ALIAS_KEY) or ()
+            return cat in {normalized_mention_key(s) for s in (row.get("name"), *raw)}
+        refs = _narrow(refs, filed_under)
+        steps.append("focus_category")
+    if len(refs) == 1:
+        return Resolution(kind=RESOLVED, ref=refs[0], candidates=_candidates(refs, index),
+                          reason="context:" + "+".join(steps) if steps else reason)
+    return Resolution(kind=AMBIGUOUS, candidates=_candidates(refs, index), reason=reason)
+
+
+def resolve_place(text: object, roster: object) -> Resolution:
+    """Resolve one place mention by name or alias — or, for ``"City, State"``,
+    by the name INSIDE the named container (``located_in``). Containment is
+    never read upward: a city mention never resolves to its state, and a state
+    mention never to a city inside it (design 6c, D8). A folded duplicate
+    answers as its survivor."""
+    mention = collapsed_text(text)
+    if not mention:
+        return Resolution(kind=UNKNOWN, reason="empty")
+    rows = _rows_by_ref(roster, "place")
+    by_slug = {_entity_slug(row): ref for ref, row in rows.items()}
+
+    def live(ref: str) -> str:
+        seen = set()
+        while ref in rows and is_alias_row(rows[ref]) and ref not in seen:
+            seen.add(ref)
+            target = by_slug.get(normalized_mention_key(folded_into_of(rows[ref])).replace(" ", "-"))
+            if not target:
+                break
+            ref = target
+        return ref
+
+    def named(key: str) -> list:
+        out = []
+        for ref, row in rows.items():
+            raw = row.get(ROSTER_ALIAS_KEY) or ()
+            if isinstance(raw, (str, bytes)):
+                raw = [raw]
+            spellings = {normalized_mention_key(s) for s in (row.get("name"), row.get("slug"), *raw)}
+            if key in spellings:
+                out.append(live(ref))
+        return list(dict.fromkeys(out))
+
+    key = normalized_mention_key(mention).removeprefix("the ")
+    found = named(key) or named(normalized_mention_key(mention))
+    if not found and "," in mention:
+        inner, _, outer = mention.partition(",")
+        containers = set(named(normalized_mention_key(outer)))
+        if containers:
+            def inside(ref: str) -> bool:
+                seen = set()
+                parent = collapsed_text(rows.get(ref, {}).get("located_in"))
+                while parent and parent not in seen:
+                    if parent in containers:
+                        return True
+                    seen.add(parent)
+                    parent = collapsed_text(rows.get(parent, {}).get("located_in"))
+                return False
+            found = [ref for ref in named(normalized_mention_key(inner)) if inside(ref)]
+    if len(found) == 1:
+        return Resolution(kind=RESOLVED, ref=found[0],
+                          candidates=({"ref": found[0], "name": collapsed_text(rows[found[0]].get("name")),
+                                       "basis": "name"},),
+                          reason="place_name")
+    if found:
+        return Resolution(kind=AMBIGUOUS, reason="place_shared_name", candidates=tuple(
+            {"ref": ref, "name": collapsed_text(rows[ref].get("name")), "basis": "name"} for ref in found))
+    return Resolution(kind=UNKNOWN, reason="no_candidate")
+
+
+# -- disambiguated display (6b, D7) -----------------------------------------
+
+A_COLLIDING_NAME_ALWAYS_CARRIES_A_DISAMBIGUATOR = (
+    "a person whose name or first name another live record shares is always "
+    "printed with what tells them apart — the relation, and a birth year when "
+    "the relation alone does not — on every surface, including a model's own "
+    "context"
+)
+
+_GENDERED_RELATION = {
+    ("child", "male"): "son", ("child", "female"): "daughter",
+    ("parent", "male"): "father", ("parent", "female"): "mother",
+    ("sibling", "male"): "brother", ("sibling", "female"): "sister",
+    ("spouse", "male"): "husband", ("spouse", "female"): "wife",
+    ("grandparent", "male"): "grandfather", ("grandparent", "female"): "grandmother",
+}
+
+
+def relation_label(entity: object) -> str:
+    """The relation word a record is displayed with ("son", "father", "friend")."""
+    if not isinstance(entity, dict):
+        return ""
+    relationship = normalized_mention_key(entity.get(ROSTER_RELATIONSHIP_KEY))
+    if not relationship:
+        return ""
+    return _GENDERED_RELATION.get((relationship, _gender_of(entity)), relationship)
+
+
+def _given(entity: dict) -> str:
+    names = mention_tokens(entity.get("name"))[0]
+    return names[0] if names else ""
+
+
+def display_name(record: object, roster: object) -> str:
+    """The record's name — bare when unique, ``"Name (relation[, b. YYYY])"``
+    when another live record shares its name or first name
+    (:data:`A_COLLIDING_NAME_ALWAYS_CARRIES_A_DISAMBIGUATOR`). A generational
+    suffix stays in the name ("James Edwin Taylor Sr (grandfather)")."""
+    if not isinstance(record, dict):
+        return ""
+    name = collapsed_text(record.get("name")) or _entity_slug(record)
+    own_slug = _entity_slug(record)
+    key, given = normalized_mention_key(name), _given(record)
+    colliders = [
+        row for row in _person_rows(roster)
+        if _entity_slug(row) != own_slug and not is_alias_row(row)
+        and (normalized_mention_key(row.get("name")) == key or (given and _given(row) == given))
+    ]
+    if not colliders:
+        return name
+    label = relation_label(record)
+    parts = [label] if label else []
+    born = _born_year(record)
+    if born and (not label or any(relation_label(row) == label for row in colliders)):
+        parts.append(f"b. {born}")
+    return f"{name} ({', '.join(parts)})" if parts else name
+
+
+def record_view(record: object, roster: object, *, entity_type: str = "person") -> dict:
+    """What a surface prints for one record: its ref, its name, its
+    disambiguated :func:`display_name`, and its HANDLE beside them — ``@slug``
+    always, plus the owner's short ``@handle`` when one is recorded — as
+    separate fields, never inline in the name."""
+    if not isinstance(record, dict):
+        return {}
+    slug = _entity_slug(record)
+    short = handle_of(record)
+    return {
+        "ref": entity_ref(entity_type, slug),
+        "slug": slug,
+        "name": collapsed_text(record.get("name")) or slug,
+        "display_name": display_name(record, roster) if entity_type == "person"
+        else (collapsed_text(record.get("name")) or slug),
+        "handle": f"@{slug}",
+        "short_handle": f"@{normalized_mention_key(short).replace(' ', '-')}" if short else "",
+    }
+
+
 __all__ = [
     "CANDIDATE_BASES",
     "DETERMINISTIC_REASONS",
@@ -2234,6 +2968,47 @@ __all__ = [
     "AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE",
     "GENERATIONAL_SUFFIX_STEPS",
     "ROSTER_MAPS_TO_FOCUS_KEY",
+    "ROSTER_FOCUS_KEY",
+    "ROSTER_FOLDED_INTO_KEY",
+    "LEGACY_MAPS_TO_FOCUS_KEY",
+    "ROSTER_ALIAS_META_KEY",
+    "ALIAS_EXCLUSIVE",
+    "ALIAS_SHARED_WITH",
+    "ALIAS_HANDLE",
+    "RELATION_QUERIES_KEY",
+    "RELATION_WORD_CARDINALITY",
+    "RELATIONSHIP_CARDINALITY",
+    "COLLECTIVE_RELATION_WORDS",
+    "A_SHARED_ALIAS_HOLDS_A_BARE_MENTION",
+    "A_HANDLE_IS_EXCLUSIVE",
+    "A_ROLE_WORD_IS_A_SET_NOT_A_RECORD",
+    "A_RESOLUTION_IS_TYPED_AND_AMBIGUOUS_IS_AN_ANSWER",
+    "A_COLLIDING_NAME_ALWAYS_CARRIES_A_DISAMBIGUATOR",
+    "PLACE_POSSESSIVE_RE",
+    "RESOLVED",
+    "AMBIGUOUS",
+    "UNKNOWN",
+    "RESOLUTION_KINDS",
+    "Resolution",
+    "ResolveContext",
+    "alias_meta_of",
+    "display_name",
+    "focus_of",
+    "folded_into_of",
+    "handle_of",
+    "has_home",
+    "is_placeholder_name",
+    "is_role_phrase",
+    "record_view",
+    "relation_cardinality",
+    "relation_label",
+    "relation_word_gender",
+    "resolve_person",
+    "resolve_place",
+    "role_relationship",
+    "roster_home",
+    "shared_alias_keys_of",
+    "split_legacy_pointers",
     "full_name_candidates",
     "generation_of_tokens",
     "generational_suffix",

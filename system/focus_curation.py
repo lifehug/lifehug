@@ -198,6 +198,7 @@ def build_roster_context(idea_types: set[str]) -> list[dict]:
     for the CURATE call, never re-derived (entity_roster.load_roster is the
     one roster authority)."""
     try:
+        import identity_resolution as ir  # noqa: PLC0415
         from entity_roster import load_roster  # noqa: PLC0415
     except Exception:
         return []
@@ -207,12 +208,19 @@ def build_roster_context(idea_types: set[str]) -> list[dict]:
             entities = load_roster(etype).get("entities", [])
         except Exception:
             continue
+        roster = {"type": etype, "entities": entities}
         for entity in entities:
+            # v386 (ADR 0043, D7): the curator sees the disambiguated name
+            # ("James Taylor (father)") and the two separate refs — the Focus
+            # that attends to the record, and the survivor of a fold.
             out.append({
                 "type": etype,
                 "name": entity.get("name"),
+                "display_name": (ir.display_name(entity, roster) if etype == "person"
+                                 else entity.get("name")),
                 "aliases": entity.get("aliases", []),
-                "maps_to_focus": entity.get("maps_to_focus"),
+                "focus": ir.focus_of(entity) or None,
+                "folded_into": ir.folded_into_of(entity) or None,
             })
     return out
 

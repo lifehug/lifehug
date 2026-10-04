@@ -252,7 +252,7 @@ def settled_place_refs(snapshot: object) -> set[str]:
 
 
 def alias_decision(entity_type: str, ref: object, alias: object, snapshot: object, *,
-                   owner: str | None = None) -> dict:
+                   owner: str | None = None, handle: bool = False) -> dict:
     """Add ``alias`` to the entity at ``ref``, or refuse with a collision.
 
     Design §4.3, reusing the eras program's shared-alias rule verbatim: two
@@ -267,6 +267,14 @@ def alias_decision(entity_type: str, ref: object, alias: object, snapshot: objec
     remains ``applied: False`` and names the ambiguity; ``changed`` describes
     recorded state, not a successful unique identity decision. Ownership is
     retained separately from whether this call first inserted the alias.
+
+    v386 (ADR 0043, design §4.1.4b): ``handle=True`` files the alias as the
+    record's short HANDLE (``@katie``) — an alias entry flagged ``handle`` in
+    `identity_resolution.ROSTER_ALIAS_META_KEY`. A handle is exclusive by
+    construction (`identity_resolution.A_HANDLE_IS_EXCLUSIVE`): any other
+    record holding the text as a name, alias, handle or slug refuses it, and
+    no ``owner`` claim can record it anyway. One handle per record — a new one
+    replaces the flag on the old (the old spelling stays an ordinary alias).
 
     Returns one of:
       ``{"applied": True, "snapshot": ..., "changed": bool}``
@@ -288,7 +296,14 @@ def alias_decision(entity_type: str, ref: object, alias: object, snapshot: objec
         entity_ref_value = entity_ref(entity_type, entity)
         if entity_ref_value != target_ref:
             colliders[entity_ref_value] = entity
+    if handle:
+        key = ir.normalized_mention_key(alias_text)
+        for entity in entities:
+            if entity is not target and _slug_of(entity) == key.replace(" ", "-"):
+                colliders[entity_ref(entity_type, entity)] = entity
     refusal = {}
+    if colliders and handle:
+        owner = None
     if colliders:
         candidates = [{"ref": target_ref, "name": target.get("name")}]
         candidates.extend(
@@ -312,7 +327,16 @@ def alias_decision(entity_type: str, ref: object, alias: object, snapshot: objec
     if owner:
         standing = ownership.get(key) or {"owners": [], "created": not exists}
         ownership[key] = {**standing, "owners": sorted(set(standing["owners"]) | {owner})}
-    if exists and ownership == old_ownership:
+    meta = dict(target.get(ir.ROSTER_ALIAS_META_KEY) or {})
+    old_meta = dict(meta)
+    if handle:
+        meta = {k: ({**v, ir.ALIAS_HANDLE: False} if isinstance(v, dict) and v.get(ir.ALIAS_HANDLE) else v)
+                for k, v in meta.items()}
+        meta[key] = {**(meta.get(key) or {}), ir.ALIAS_HANDLE: True, ir.ALIAS_EXCLUSIVE: True}
+        meta = {k: v for k, v in meta.items()
+                if not (isinstance(v, dict) and not any(v.get(f) for f in (ir.ALIAS_HANDLE, ir.ALIAS_SHARED_WITH))
+                        and v.get(ir.ALIAS_EXCLUSIVE, True))}
+    if exists and ownership == old_ownership and meta == old_meta:
         return {"applied": True, "snapshot": snap, "changed": False, **refusal,
                 **({"owner": owner} if owner else {})}
     updated_entities = []
@@ -321,11 +345,16 @@ def alias_decision(entity_type: str, ref: object, alias: object, snapshot: objec
             entity = {**entity, "aliases": existing_aliases if exists else [*existing_aliases, alias_text]}
             if owner:
                 entity["alias_ownership"] = ownership
+            if meta != old_meta:
+                if meta:
+                    entity[ir.ROSTER_ALIAS_META_KEY] = meta
+                else:
+                    entity.pop(ir.ROSTER_ALIAS_META_KEY, None)
         updated_entities.append(entity)
     # Owned conflicting claims stay discoverable by the existing multi-match
     # resolver. This records ambiguity, NOT a successful unique alias mapping.
     return {"applied": True, "snapshot": {**snap, "entities": updated_entities},
-            "changed": not exists, **refusal,
+            "changed": not exists or meta != old_meta, **refusal,
             **({"owner": owner, "ownership_changed": ownership != old_ownership} if owner else {})}
 
 
@@ -371,8 +400,18 @@ def retract_alias(entity_type: str, ref: object, alias: object,
     changed = len(kept) != len(list(target.get("aliases") or ()))
     if not changed and not owner:
         return {"applied": True, "snapshot": snap, "changed": False}
-    updated = [{**entity, "aliases": kept,
-                **({"alias_ownership": ownership} if owner else {})} if entity is target else entity
+    meta = {k: v for k, v in dict(target.get(ir.ROSTER_ALIAS_META_KEY) or {}).items()
+            if not (changed and ir.normalized_mention_key(k) == wanted)}
+
+    def retracted(entity: dict) -> dict:
+        entity = {**entity, "aliases": kept, **({"alias_ownership": ownership} if owner else {})}
+        if ir.ROSTER_ALIAS_META_KEY in entity:
+            if meta:
+                entity[ir.ROSTER_ALIAS_META_KEY] = meta
+            else:
+                entity.pop(ir.ROSTER_ALIAS_META_KEY)
+        return entity
+    updated = [retracted(entity) if entity is target else entity
                for entity in roster_entities(snap)]
     return {"applied": True, "snapshot": {**snap, "entities": updated},
             "changed": changed, **({"ownership_changed": True} if owner else {})}
@@ -404,6 +443,263 @@ def located_in(child_ref: object, parent_ref: object, snapshot: object) -> dict:
         raise RosterRelationError(f"unknown place: {child!r}")
     snap = snapshot if isinstance(snapshot, dict) else {"entities": []}
     return {**snap, "entities": updated}
+
+
+# --------------------------------------------------------------------------
+# v386 (ADR 0043) — one person, one record
+# --------------------------------------------------------------------------
+
+
+def share_alias(entity_type: str, ref: object, alias: object, shared_with: object,
+                snapshot: object) -> dict:
+    """Mark ``alias`` on the record at ``ref`` as SHARED with somebody who has
+    no record (D9, `identity_resolution.A_SHARED_ALIAS_HOLDS_A_BARE_MENTION`).
+
+    ``shared_with`` is free text ("a friend (no record)") and never a ref: no
+    record is minted for the other claimant. The alias is added first if the
+    record does not carry it yet (through :func:`alias_decision`, so a
+    collision with another RECORD still refuses). Idempotent. Pure."""
+    note = collapsed_text_of(shared_with)
+    if not note:
+        return {"applied": False, "reason": "shared_with_empty"}
+    added = alias_decision(entity_type, ref, alias, snapshot)
+    if not added.get("applied"):
+        return added
+    snap = added["snapshot"]
+    target = find_by_ref(entity_type, snap, ref)
+    key = ir.normalized_mention_key(alias)
+    meta = dict(target.get(ir.ROSTER_ALIAS_META_KEY) or {})
+    wanted = {**(meta.get(key) or {}), ir.ALIAS_EXCLUSIVE: False, ir.ALIAS_SHARED_WITH: note}
+    if meta.get(key) == wanted:
+        return {"applied": True, "snapshot": snap, "changed": bool(added.get("changed"))}
+    meta[key] = wanted
+    updated = [{**e, ir.ROSTER_ALIAS_META_KEY: meta} if e is target else e
+               for e in roster_entities(snap)]
+    return {"applied": True, "snapshot": {**snap, "entities": updated}, "changed": True}
+
+
+def contained_places(place_ref: object, snapshot: object) -> list[dict]:
+    """The place rows whose ``located_in`` is ``place_ref`` (one level), in
+    roster order — never a folded pointer."""
+    target = str(place_ref or "").strip()
+    return [e for e in roster_entities(snapshot)
+            if str(e.get("located_in") or "").strip() == target and not ir.is_alias_row(e)]
+
+
+A_PLACE_JOINS_BY_CONTAINMENT = (
+    "a place joins another by containment (located_in) or alias; a fold is "
+    "refused unless both rows are true duplicates — the same place_kind and "
+    "neither containing any place — so a city is never folded into its state"
+)
+
+
+def place_fold_refusal(loser: dict, survivor: dict, snapshot: object) -> str:
+    """Why folding place ``loser`` into ``survivor`` is refused, or ``""``
+    (:data:`A_PLACE_JOINS_BY_CONTAINMENT`, D8)."""
+    for row, label in ((loser, "loser"), (survivor, "survivor")):
+        if contained_places(entity_ref("place", row), snapshot):
+            return (f"{row.get('name')!s} contains other places — a place with places "
+                    f"inside it is joined by --located-in, never folded ({label})")
+    if collapsed_text_of(loser.get("place_kind")) != collapsed_text_of(survivor.get("place_kind")):
+        return ("the two places are different kinds "
+                f"({loser.get('place_kind') or 'none'} vs {survivor.get('place_kind') or 'none'}) — "
+                "use --located-in for containment")
+    loser_ref = entity_ref("place", loser)
+    if loser_ref in located_in_chain(entity_ref("place", survivor), snapshot) or \
+            entity_ref("place", survivor) in located_in_chain(loser_ref, snapshot):
+        return "one place is inside the other — that is containment, not a duplicate"
+    return ""
+
+
+A_CONVERTER_LOSES_NOTHING = (
+    "the v386 identity converter splits maps_to_focus into focus or "
+    "folded_into, retires set-valued placeholder rows into relation queries "
+    "carrying their whole former row, moves role-word aliases off records whose "
+    "relation is a set into the relation's query, and is byte-stable on a "
+    "second run"
+)
+
+
+def _query_for(queries: list, word: str) -> dict:
+    relationship = ir.role_relationship(word) or ir.normalized_mention_key(word)
+    for query in queries:
+        if query.get("relationship") == relationship:
+            return query
+    query = {"word": ir.normalized_mention_key(word), "relationship": relationship,
+             "cardinality": ir.RELATIONSHIP_CARDINALITY.get(relationship),
+             "mentions": 0, "aliases": [], "reattributed": [], "stripped_from": [],
+             "former_rows": []}
+    queries.append(query)
+    return query
+
+
+def convert_legacy_roster(snapshot: object, *, entity_type: str = "person") -> tuple[dict, dict]:
+    """The one-version identity converter (:data:`A_CONVERTER_LOSES_NOTHING`).
+
+    ``(converted snapshot, report)``. Pure; the caller persists. Steps:
+
+    1. ``maps_to_focus`` naming ANOTHER row of this roster → ``folded_into``;
+       naming anything else (a Focus slug) → ``focus``; the key is dropped.
+    2. (person) a row named by a set-valued role word
+       (`identity_resolution.is_placeholder_name`: Son, Kids, Parents, Friend…)
+       is removed from ``entities`` and recorded under
+       ``relation_queries`` with its mention count and its whole former row. A
+       spelling of it that carries a first name ("my son Otto") is moved to the
+       record `resolve_person` resolves it to; the rest stay set-level. Kept as
+       a row only when another row folds into it, it has a Focus, or it carries
+       a birth/death date (a dated somebody).
+    3. (person) a bare role-word alias whose relation is a set ("my son") is
+       moved off a record into that relation's query, and the record gains
+       ``relationship`` from it when it had none — the fact moves into the
+       typed field, it is not lost.
+    """
+    snap = snapshot if isinstance(snapshot, dict) else {"type": entity_type,
+                                                        "entities": list(snapshot or ())}
+    entities = [dict(e) for e in roster_entities(snap)]
+    queries = [dict(q, **{k: list(q.get(k) or []) for k in
+                          ("aliases", "reattributed", "stripped_from", "former_rows")})
+               for q in (snap.get(ir.RELATION_QUERIES_KEY) or []) if isinstance(q, dict)]
+    report: dict = {"focus": [], "folded_into": [], "relation_queries": [],
+                    "reattributed": [], "stripped_aliases": [], "kept_placeholders": []}
+    slugs = {str(e.get("slug") or "").strip() for e in entities} - {""}
+
+    for entity in entities:
+        if ir.LEGACY_MAPS_TO_FOCUS_KEY not in entity:
+            continue
+        target = collapsed_text_of(entity.pop(ir.LEGACY_MAPS_TO_FOCUS_KEY))
+        slug = str(entity.get("slug") or "").strip()
+        if not target:
+            entity.setdefault(ir.ROSTER_FOCUS_KEY, None)
+            entity.setdefault(ir.ROSTER_FOLDED_INTO_KEY, None)
+            continue
+        if target in slugs and target != slug:
+            entity[ir.ROSTER_FOLDED_INTO_KEY] = target
+            entity.setdefault(ir.ROSTER_FOCUS_KEY, None)
+            report["folded_into"].append({"slug": slug, "folded_into": target})
+        else:
+            entity[ir.ROSTER_FOCUS_KEY] = target
+            entity.setdefault(ir.ROSTER_FOLDED_INTO_KEY, None)
+            report["focus"].append({"slug": slug, "focus": target})
+
+    if entity_type == "person":
+        fold_targets = {ir.folded_into_of(e) for e in entities} - {""}
+        live: list[dict] = []
+        placeholders: list[dict] = []
+        for entity in entities:
+            if ir.is_placeholder_name(entity.get("name")) and not ir.is_alias_row(entity):
+                slug = str(entity.get("slug") or "").strip()
+                if slug in fold_targets or ir.focus_of(entity) or entity.get("born") or entity.get("died"):
+                    report["kept_placeholders"].append(slug)
+                    live.append(entity)
+                    continue
+                placeholders.append(entity)
+            else:
+                live.append(entity)
+        snap_live = {"type": "person", "entities": live}
+        run_mentions: dict[int, int] = {}
+        for row in placeholders:
+            query = _query_for(queries, str(row.get("name") or ""))
+            # Summed across this run's rows for one relation, never across runs
+            # (a monthly refresh that re-mints "Son" must not double its count).
+            run_mentions[id(query)] = run_mentions.get(id(query), 0) + int(row.get("unique_answers") or 0)
+            query["mentions"] = max(int(query.get("mentions") or 0), run_mentions[id(query)])
+            query["former_rows"] = [r for r in query["former_rows"]
+                                    if not (isinstance(r, dict) and r.get("slug") == row.get("slug"))]
+            query["former_rows"].append(row)
+            report["relation_queries"].append({"word": query["word"], "slug": row.get("slug")})
+            for spelling in [row.get("name"), *(row.get("aliases") or [])]:
+                text = collapsed_text_of(spelling)
+                if not text:
+                    continue
+                if mention_names_someone(text):
+                    found = ir.resolve_person(text, snap_live)
+                    if found.resolved:
+                        decided = alias_decision("person", found.ref, text, snap_live)
+                        if decided.get("applied"):
+                            snap_live = decided["snapshot"]
+                            query["reattributed"].append({"alias": text, "ref": found.ref})
+                            report["reattributed"].append({"alias": text, "ref": found.ref})
+                            continue
+                if text not in query["aliases"]:
+                    query["aliases"].append(text)
+        live = roster_entities(snap_live)
+        out: list[dict] = []
+        for entity in live:
+            kept, moved = [], []
+            for alias in entity.get("aliases") or []:
+                if ir.is_role_phrase(alias) and ir.relation_cardinality(alias) is None \
+                        and not ir.is_placeholder_name(entity.get("name")):
+                    moved.append(alias)
+                else:
+                    kept.append(alias)
+            if moved:
+                entity = {**entity, "aliases": kept}
+                for alias in moved:
+                    query = _query_for(queries, alias)
+                    stamp = {"slug": entity.get("slug"), "alias": alias}
+                    if stamp not in query["stripped_from"]:
+                        query["stripped_from"].append(stamp)
+                    report["stripped_aliases"].append(stamp)
+                    if not collapsed_text_of(entity.get("relationship")) and ir.role_relationship(alias):
+                        entity["relationship"] = ir.role_relationship(alias)
+            out.append(entity)
+        entities = out
+
+    converted = {**snap, "entities": entities}
+    if queries:
+        converted[ir.RELATION_QUERIES_KEY] = queries
+    report["changed"] = converted != snap
+    return converted, report
+
+
+def mention_names_someone(text: object) -> bool:
+    """Does this spelling carry a NAME beside any role word ("my son Otto")?"""
+    names, _ = ir.mention_tokens(text)
+    return bool(names) and not ir.is_role_phrase(text)
+
+
+A_FOCUS_ATTACHES_TO_ITS_PERSON = (
+    "a Focus attaches to the one record its slug or title resolves to — by "
+    "slug, by a name or alias equal to the title, or by resolve_person on the "
+    "title — never to two records, and never by guessing between candidates"
+)
+
+
+def attach_focuses(snapshot: object, focus_map: object) -> tuple[dict, list[dict]]:
+    """Set ``focus`` on the person records each Focus attends to
+    (:data:`A_FOCUS_ATTACHES_TO_ITS_PERSON`). ``focus_map`` is ``{focus slug:
+    title}``. A record that already has a focus, a pointer row, and a Focus
+    another record already holds are left alone; a title resolving to several
+    records attaches to none. Pure; ``(snapshot, attached)``."""
+    focuses = dict(focus_map or {})
+    entities = [dict(e) for e in roster_entities(snapshot)]
+    held = {ir.focus_of(e) for e in entities} - {""}
+    attached: list[dict] = []
+    for focus_slug, title in sorted(focuses.items()):
+        if focus_slug in held:
+            continue
+        title_key = ir.normalized_mention_key(title)
+        live = [e for e in entities if not ir.is_alias_row(e) and not ir.focus_of(e)]
+        matches = [e for e in live if str(e.get("slug") or "") == focus_slug]
+        if not matches:
+            matches = [e for e in live
+                       if title_key and title_key in {ir.normalized_mention_key(s)
+                                                       for s in (e.get("name"), *(e.get("aliases") or []))}]
+        if not matches:
+            found = ir.resolve_person(title, {"type": "person", "entities": entities})
+            if found.resolved:
+                matches = [e for e in live if roster_relations_ref(e) == found.ref]
+        if len(matches) != 1:
+            continue
+        matches[0][ir.ROSTER_FOCUS_KEY] = focus_slug
+        held.add(focus_slug)
+        attached.append({"slug": matches[0].get("slug"), "focus": focus_slug})
+    snap = snapshot if isinstance(snapshot, dict) else {"type": "person"}
+    return {**snap, "entities": entities}, attached
+
+
+def roster_relations_ref(entity: dict) -> str:
+    return entity_ref("person", entity)
 
 
 # --------------------------------------------------------------------------

@@ -10,13 +10,15 @@ and the candidate lane's promote-override.
     entity-verdict <type> <slug> graduate|never|clear
         [--alias A]... [--relationship R] [--living|--not-living]
         [--born EDTF [--born-basis B]] [--died EDTF [--died-basis B]]
-        [--maps-to SLUG] [--ensure [--name NAME]]
+        [--fold-into ROW | --focus FOCUS] [--retract-alias A]...
+        [--share-alias A --with WHO] [--located-in PLACE] [--handle H]
+        [--ensure [--name NAME]]   (--maps-to: deprecated, rewritten)
 
   - `graduate` — an entity the owner knows matters shouldn't have to wait
     for its second mention: `page_eligible` is forced true regardless of
-    score/answer thresholds (the entity must still be UNMAPPED —
-    `maps_to_focus` wins; refused on a mapped entity, which already has a
-    home), and `wiki_compile.plan_entities`'s real-mention bar drops to >= 1
+    score/answer thresholds (the entity must still have no home — a
+    `focus` or `folded_into` wins; refused on such an entity, which already
+    has a page there), and `wiki_compile.plan_entities`'s real-mention bar drops to >= 1
     for it. Never a zero-mention page: a page still needs at least one real
     source.
   - `never` — a permanent veto for the junk class the AI keeps
@@ -83,10 +85,21 @@ refused (no partial union, the roster file untouched), the package's refusal
 — `{"applied": false, "reason": "identity_uncertain", "candidates": [...]}`,
 both claimants named — is printed as JSON on stdout, and the CLI exits 2. A
 re-add of an alias already present stays an idempotent success. A fold is a
-pointer, never a deletion: the loser keeps its row with `maps_to_focus =
-<survivor>`. After a successful `--maps-to`/`--alias` the CLI runs the
+pointer, never a deletion: the loser keeps its row with `folded_into =
+<survivor>` (v386; `maps_to_focus` before). After a successful `--maps-to`/`--alias` the CLI runs the
 keyless `entity_roster.recount` for the touched type, so the fold's effect on
 mention counts is visible on the next read.
+
+v386 (ADR 0043 — one person, one record): `--maps-to` meant two things
+and is split. `--fold-into ROW` is the duplicate fold (the loser becomes a
+pointer, `folded_into`); `--focus FOCUS` attaches a Focus to this record,
+which STAYS a live person (`focus`). `--maps-to` is accepted for one version
+and rewritten (a row slug → `--fold-into`, else `--focus`) with a
+deprecation line on stderr. `--retract-alias` undoes an alias for every type
+(`roster_relations.retract_alias`); `--share-alias A --with WHO` marks an alias
+shared with somebody who has no record (D9); `--located-in` is the place join
+(D8 — a place fold is refused unless the rows are true duplicates);
+`--handle` files the record's exclusive short @handle.
 
 Usage:
     python3 system/entity_verdict.py person betty-jo graduate
@@ -119,9 +132,9 @@ from entity_roster import (  # noqa: E402
     _focus_map,
     apply_owner_verdict,
     base_page_eligible,
-    roster_file,
+    read_roster_payload,
 )
-from lifehug_core import read_json, write_json  # noqa: E402
+from lifehug_core import write_json  # noqa: E402
 
 VERDICTS = ("graduate", "never", "clear")
 
@@ -253,9 +266,10 @@ def _preferred_date(existing: object, incoming: object) -> object:
 
 
 def _points_at(entity: dict, slug: str) -> bool:
-    """A pointer row (a folded duplicate) whose ``maps_to_focus`` names
-    ``slug`` — the same identity as ``slug``, never a rival claimant."""
-    return bool(slug) and str(entity.get("maps_to_focus") or "").strip() == slug
+    """A pointer row (a folded duplicate) whose ``folded_into`` names
+    ``slug`` — the same identity as ``slug``, never a rival claimant (v386:
+    a row that merely shares a Focus is a different record)."""
+    return bool(slug) and ir.folded_into_of(entity) == slug
 
 
 def _decided_aliases(entity_type: str, entities: Sequence[dict], entry: dict,
@@ -314,7 +328,8 @@ def _ensured_entry(slug: str, name: str | None) -> dict:
         "score": 0.0,
         "unique_answers": 0,
         "page_eligible": False,
-        "maps_to_focus": None,
+        "focus": None,
+        "folded_into": None,
         "source": ENSURED_SOURCE,
     }
 
@@ -331,7 +346,14 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
                   ensure: bool = False,
                   name: str | None = None,
                   grandparent_side: str | None = None,
-                  relation_word: str | None = None) -> dict:
+                  relation_word: str | None = None,
+                  fold_into: str | None = None,
+                  focus: str | None = None,
+                  retract_aliases: Sequence[str] = (),
+                  share_alias: str | None = None,
+                  shared_with: str | None = None,
+                  located_in: str | None = None,
+                  handle: str | None = None) -> dict:
     """Apply one verdict — and, since v190, one round of identity facts — to
     one roster entity, atomically. Returns the entity's post-verdict record
     (the same dict object written to disk). Raises `EntityVerdictError` on
@@ -367,14 +389,25 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
                 f"grandparent side must be one of {', '.join(GRANDPARENT_SIDES)}")
     if relation_word is not None:
         relation_word = " ".join(str(relation_word).split())[:40]
+    fold_into = str(fold_into).strip() if fold_into is not None else None
+    focus = str(focus).strip() if focus is not None else None
     maps_to = str(maps_to).strip() if maps_to is not None else None
     if maps_to == "":
         raise EntityVerdictError("--maps-to requires a slug")
-    if maps_to is not None and maps_to == slug:
-        raise EntityVerdictError(f"refusing: {slug!r} cannot map to itself")
+    if fold_into == "":
+        raise EntityVerdictError("--fold-into requires a row slug")
+    if focus == "":
+        raise EntityVerdictError("--focus requires a Focus slug")
+    if fold_into is not None and focus is not None:
+        raise EntityVerdictError("--fold-into and --focus are different acts — pass one")
+    if slug in (maps_to, fold_into):
+        raise EntityVerdictError(f"refusing: {slug!r} cannot fold into itself")
+    if share_alias is not None and not str(shared_with or "").strip():
+        raise EntityVerdictError("--share-alias needs --with (who else answers to it)")
+    if located_in is not None and entity_type != "place":
+        raise EntityVerdictError("--located-in is a place join (place rows only)")
 
-    path = roster_file(entity_type)
-    data = read_json(path, default=None)
+    path, data = read_roster_payload(entity_type)
     entities = data.get("entities") if isinstance(data, dict) else None
     if not isinstance(entities, list):
         if not ensure:
@@ -403,25 +436,92 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
             if isinstance(e, dict) and e.get("slug")))
         raise EntityVerdictError(f"no such {entity_type}: {slug!r} (known: {known or 'none'})")
 
-    if maps_to is None and verdict == "graduate" and target.get("maps_to_focus"):
-        raise EntityVerdictError(
-            f"refusing: {slug!r} already maps to Focus {target['maps_to_focus']!r} — "
-            "graduate is refused on a mapped entity (it already has a home there)")
-
-    # The merge target must exist before anything is written: another entity
-    # in THIS roster, or a known Focus slug. A typo must never produce a
-    # dangling map.
-    merge_into = None
+    # v386 (ADR 0043): the legacy `--maps-to` is rewritten into the act it
+    # meant — a row slug folds, anything else attaches a Focus.
     if maps_to is not None:
+        if any(isinstance(e, dict) and e.get("slug") == maps_to and e is not target
+               for e in entities):
+            fold_into = maps_to
+        else:
+            focus = maps_to
+
+    # The pure, per-alias acts first — retract, share, handle, located_in — so
+    # a refusal leaves the file untouched.
+    snapshot = {"entities": entities}
+    ref = roster_relations.entity_ref(entity_type, target)
+    for alias in retract_aliases or ():
+        result = roster_relations.retract_alias(entity_type, ref, alias, snapshot)
+        if not result.get("applied"):
+            raise EntityVerdictError(f"--retract-alias {alias!r} refused: {result.get('reason')}")
+        snapshot = result["snapshot"]
+    if share_alias is not None:
+        result = roster_relations.share_alias(entity_type, ref, share_alias, shared_with, snapshot)
+        if not result.get("applied"):
+            if result.get("reason") == roster_relations.IDENTITY_UNCERTAIN_KIND:
+                raise EntityAliasContested({**result, "alias": share_alias})
+            raise EntityVerdictError(f"--share-alias refused: {result.get('reason')}")
+        snapshot = result["snapshot"]
+    if handle is not None:
+        result = roster_relations.alias_decision(entity_type, ref, str(handle).lstrip("@"),
+                                                 snapshot, handle=True)
+        if not result.get("applied"):
+            if result.get("reason") == roster_relations.IDENTITY_UNCERTAIN_KIND:
+                raise EntityAliasContested({**result, "alias": handle})
+            raise EntityVerdictError(f"--handle refused: {result.get('reason')}")
+        snapshot = result["snapshot"]
+    if located_in is not None:
+        parent_slug = located_in.split("/", 1)[-1] if located_in.startswith("place/") else located_in
+        parent = next((e for e in snapshot["entities"] if e.get("slug") == parent_slug), None)
+        if parent is None or parent_slug == slug:
+            raise EntityVerdictError(f"refusing: --located-in {located_in!r} names no other place")
+        parent_ref = roster_relations.entity_ref("place", parent)
+        if ref in roster_relations.located_in_chain(parent_ref, snapshot) or parent_ref == ref:
+            raise EntityVerdictError("refusing: that containment would be a cycle")
+        snapshot = roster_relations.located_in(ref, parent_ref, snapshot)
+    if snapshot["entities"] is not entities:
+        entities = [e for e in snapshot["entities"]]
+        data["entities"] = entities
+        target = next(e for e in entities if isinstance(e, dict) and e.get("slug") == slug)
+
+    if fold_into is None and focus is None and verdict == "graduate" and ir.has_home(target):
+        raise EntityVerdictError(
+            f"refusing: {slug!r} already has a home ({ir.roster_home(target)!r}) — "
+            "graduate is refused on an entity with a Focus or a fold (it already has a page there)")
+
+    # The fold target must exist before anything is written: another entity in
+    # THIS roster. A Focus target must be a known Focus that no OTHER record
+    # already holds (v386 — one person, one record: never a twin).
+    merge_into = None
+    if fold_into is not None:
         merge_into = next(
             (e for e in entities
-             if isinstance(e, dict) and e.get("slug") == maps_to and e is not target),
+             if isinstance(e, dict) and e.get("slug") == fold_into and e is not target),
             None,
         )
-        if merge_into is None and maps_to not in _focus_map():
+        if merge_into is None:
             raise EntityVerdictError(
-                f"refusing: --maps-to {maps_to!r} names neither another {entity_type} "
-                "on this roster nor a known Focus slug")
+                f"refusing: --fold-into {fold_into!r} names no other {entity_type} on this roster")
+        if ir.is_alias_row(merge_into):
+            raise EntityVerdictError(
+                f"refusing: {fold_into!r} is itself folded into {ir.folded_into_of(merge_into)!r} — "
+                "fold into the survivor")
+        if entity_type == "place":
+            reason = roster_relations.place_fold_refusal(target, merge_into, {"entities": entities})
+            if reason:
+                raise EntityVerdictError(f"refusing: {reason}")
+        if ir.focus_of(target) and ir.focus_of(merge_into) and \
+                ir.focus_of(target) != ir.focus_of(merge_into):
+            raise EntityVerdictError(
+                "refusing: both records have a Focus — merge the Focuses first (focus-merge)")
+    if focus is not None:
+        if focus not in _focus_map():
+            raise EntityVerdictError(f"refusing: --focus {focus!r} is not a known Focus slug")
+        twin = next((e for e in entities if isinstance(e, dict) and e is not target
+                     and not ir.is_alias_row(e) and ir.focus_of(e) == focus), None)
+        if twin is not None:
+            raise EntityVerdictError(
+                f"refusing: Focus {focus!r} already attends to {twin.get('slug')!r} — "
+                f"fold {slug!r} into it instead (one person, one record)")
 
     # v383 (ADR 0041): every alias this verdict writes is DECIDED first, by the
     # package's one collision rule, before anything is mutated — a contested
@@ -460,20 +560,27 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
         if chosen is not None:
             target[date_field] = chosen
 
-    if maps_to is not None:
-        # maps-to WINS over graduate (module docstring): a mapped entity
+    if fold_into is not None or focus is not None:
+        # A fold or a Focus WINS over graduate (module docstring): the record
         # already has a home, so the graduation is skipped rather than the
-        # whole call failing. An owner_verdict already on the record is left
-        # alone; `apply_owner_verdict` and `base_page_eligible` both make
-        # `maps_to_focus` beat `graduate` continuously anyway.
-        target["maps_to_focus"] = maps_to
+        # whole call failing. `apply_owner_verdict` and `base_page_eligible`
+        # both make a home beat `graduate` continuously anyway.
+        target.pop("maps_to_focus", None)
+        if focus is not None:
+            target["focus"] = focus
+            target.setdefault("folded_into", None)
+        else:
+            target["folded_into"] = fold_into
+            if ir.focus_of(target) and not ir.focus_of(merge_into):
+                merge_into["focus"] = ir.focus_of(target)
+            target["focus"] = None
         if merge_into is not None and survivor_aliases is not None:
             # The merge lives on the SURVIVOR: the loser's canonical name and
             # every alias fold into the target's aliases, which is exactly how
             # `wiki_compile.plan_entities` (matching `[name] + aliases`) and
             # `entity_roster.apply_previous_decisions` (folding by
             # `_entity_keys`) already express "this is really that page".
-            # The loser KEEPS its row as a pointer (`maps_to_focus` above) —
+            # The loser KEEPS its row as a pointer (`folded_into` above) —
             # a fold is never a deletion (ADR 0012's shape, ADR 0041).
             merge_into["aliases"] = survivor_aliases
         if verdict == "never":
@@ -482,7 +589,7 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
             target.pop("owner_verdict", None)
         min_score, min_answers = THRESHOLDS.get(entity_type, (8.0, 2))
         target["page_eligible"] = base_page_eligible(
-            entity_type, bool(target.get("qualifies")), target.get("maps_to_focus"),
+            entity_type, bool(target.get("qualifies")), ir.roster_home(target),
             float(target.get("score", 0.0) or 0.0), int(target.get("unique_answers", 0) or 0),
             min_score, min_answers)
         apply_owner_verdict(entity_type, target)
@@ -493,13 +600,48 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
         target.pop("owner_verdict", None)
         min_score, min_answers = THRESHOLDS.get(entity_type, (8.0, 2))
         target["page_eligible"] = base_page_eligible(
-            entity_type, bool(target.get("qualifies")), target.get("maps_to_focus"),
+            entity_type, bool(target.get("qualifies")), ir.roster_home(target),
             float(target.get("score", 0.0) or 0.0), int(target.get("unique_answers", 0) or 0),
             min_score, min_answers)
     else:
         target["owner_verdict"] = verdict
         apply_owner_verdict(entity_type, target)
 
+    write_json(path, data)
+    return target
+
+
+def attach_focus(slug: str, focus_slug: str) -> dict:
+    """v386 (ADR 0043): attach Focus ``focus_slug`` to the person record
+    ``slug`` — the one write `roadmap.focus_new`/`approve_recommendation` make
+    when a Focus is created for a person. The record stays a live person;
+    ``page_eligible`` is recomputed (its page is now the Focus's). Idempotent.
+    Refuses a twin: a Focus another live record already holds. Unlike
+    :func:`apply_verdict` it does not consult the bank's Focus list, because
+    the caller has just created the Focus."""
+    path, data = read_roster_payload("person")
+    entities = (data or {}).get("entities") or []
+    target = next((e for e in entities if isinstance(e, dict) and e.get("slug") == slug), None)
+    if target is None:
+        raise EntityVerdictError(f"no such person: {slug!r}")
+    if ir.is_alias_row(target):
+        raise EntityVerdictError(f"refusing: {slug!r} is folded into {ir.folded_into_of(target)!r}")
+    twin = next((e for e in entities if isinstance(e, dict) and e is not target
+                 and not ir.is_alias_row(e) and ir.focus_of(e) == focus_slug), None)
+    if twin is not None:
+        raise EntityVerdictError(
+            f"refusing: Focus {focus_slug!r} already attends to {twin.get('slug')!r}")
+    if ir.focus_of(target) == focus_slug and "maps_to_focus" not in target:
+        return target
+    target.pop("maps_to_focus", None)
+    target["focus"] = focus_slug
+    target.setdefault("folded_into", None)
+    min_score, min_answers = THRESHOLDS.get("person", (8.0, 2))
+    target["page_eligible"] = base_page_eligible(
+        "person", bool(target.get("qualifies")), ir.roster_home(target),
+        float(target.get("score", 0.0) or 0.0), int(target.get("unique_answers", 0) or 0),
+        min_score, min_answers)
+    apply_owner_verdict("person", target)
     write_json(path, data)
     return target
 
@@ -534,9 +676,33 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"How the death date was arrived at "
                              f"({', '.join(chronology.BASES)}; default stated)")
     parser.add_argument("--maps-to", metavar="SLUG",
-                        help="This entity is really that existing page — another "
-                             "entity on this roster, or a Focus slug. Wins over "
-                             "graduate in the same call.")
+                        help="DEPRECATED (v386, one version): rewritten to "
+                             "--fold-into when SLUG is a row, else --focus.")
+    parser.add_argument("--fold-into", dest="fold_into", metavar="ROW",
+                        help="This record is a duplicate of that row: keep it as a "
+                             "pointer, union its names onto the survivor (ADR 0041). "
+                             "Wins over graduate. Refused for a place unless both "
+                             "are true duplicates (use --located-in).")
+    parser.add_argument("--focus", metavar="FOCUS",
+                        help="Attach this record to that Focus (the Focus attends to "
+                             "this person; the record stays live). Refused when "
+                             "another record already holds the Focus.")
+    parser.add_argument("--retract-alias", dest="retract_alias", action="append",
+                        default=[], metavar="NAME",
+                        help="Take a name back off this record (repeatable)")
+    parser.add_argument("--share-alias", dest="share_alias", metavar="NAME",
+                        help="Mark a name as shared with somebody who has no record "
+                             "(needs --with): a bare mention of it is held, never "
+                             "attributed; nobody is minted (D9)")
+    parser.add_argument("--with", dest="shared_with", metavar="WHO",
+                        help="With --share-alias: who else answers to it, free text "
+                             "(\"a friend (no record)\")")
+    parser.add_argument("--located-in", dest="located_in", metavar="PLACE",
+                        help="place only: this place is inside that place "
+                             "(containment, never a fold — D8)")
+    parser.add_argument("--handle", metavar="HANDLE",
+                        help="The record's short @handle (exclusive: refused when any "
+                             "other record answers to it)")
     parser.add_argument("--ensure", action="store_true",
                         help="Create the roster entry when the slug is unknown, "
                              "rather than refusing — for a person a LANDMARK "
@@ -550,6 +716,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="The word the owner calls this person by (Grandpa, Mom)")
     parser.add_argument("--json", action="store_true", help="Print the result as JSON")
     args = parser.parse_args(argv)
+    if args.maps_to is not None:
+        print("⚠ entity-verdict: --maps-to is deprecated (v386, ADR 0043) — rewritten to "
+              "--fold-into when it names a row, else --focus; use those", file=sys.stderr)
 
     try:
         entity = apply_verdict(
@@ -562,6 +731,10 @@ def main(argv: list[str] | None = None) -> int:
             ensure=args.ensure, name=args.name,
             grandparent_side=args.grandparent_side,
             relation_word=args.relation_word,
+            fold_into=args.fold_into, focus=args.focus,
+            retract_aliases=args.retract_alias,
+            share_alias=args.share_alias, shared_with=args.shared_with,
+            located_in=args.located_in, handle=args.handle,
         )
     except EntityAliasContested as exc:
         # v383 (ADR 0041): the package's own refusal, verbatim, on stdout —
@@ -573,7 +746,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"✗ entity-verdict: {exc}", file=sys.stderr)
         return 1
 
-    if args.maps_to or args.alias:
+    if args.maps_to or args.alias or args.fold_into or args.retract_alias or args.share_alias:
         # v383 (ADR 0041): a fold or an alias moves mention counts; the
         # keyless recount makes that visible on the next read instead of at
         # the next monthly model call. Deterministic, no model.
@@ -590,13 +763,15 @@ def main(argv: list[str] | None = None) -> int:
         "never": "vetoed — never a page (owner override)",
         "clear": "cleared to automatic",
     }[args.verdict]
-    if args.maps_to:
-        verb = f"mapped to {args.maps_to} (owner override)"
+    home = ir.roster_home(entity)
+    if args.maps_to or args.fold_into or args.focus:
+        verb = (f"folded into {ir.folded_into_of(entity)} (owner override)" if ir.folded_into_of(entity)
+                else f"attached to Focus {ir.focus_of(entity)} (owner override)")
     eligible = "eligible" if entity.get("page_eligible") else "not eligible"
     print(f"✓ {args.type}/{args.slug} {verb} — page_eligible: {eligible}")
-    if args.maps_to and args.verdict == "graduate":
-        print(f"  note: graduate superseded by --maps-to {args.maps_to} — "
-              "a mapped entity already has a home there")
+    if (args.maps_to or args.fold_into or args.focus) and args.verdict == "graduate":
+        print(f"  note: graduate superseded by {home} — "
+              "the record already has a home there")
     learned = []
     if args.alias:
         learned.append(f"aliases: {', '.join(entity.get('aliases', []))}")

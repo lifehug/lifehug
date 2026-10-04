@@ -202,7 +202,7 @@ Four rules travel with the composer and none of them is a preference:
   reads `"When was {what}?"` (`temporal_timeline._is_gerund_phrase`) rather
   than the ungrammatical `"When did {what} happen?"`. And an
   `identity_uncertain` candidate set is filtered — roster rows with
-  `maps_to_focus` set and collective/role rows (`entity_roster.ROLE_WORDS`)
+  `folded_into` set (v386; `maps_to_focus` before) and collective/role rows (`entity_roster.ROLE_WORDS`)
   are excluded by `identity_resolution.roster_index` before a mention is even
   resolved, and the OWNER's own roster row is dropped from the running by
   `identity_resolution.identity_work_item`'s `owner_refs` — so a card mints

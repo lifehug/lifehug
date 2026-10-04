@@ -114,9 +114,11 @@ class FoldKeepsThePointer(_RosterDir):
         self.assertEqual(code, 0, err)
         rows = self._rows()
         self.assertIn("james", rows, "a fold never deletes the loser's row")
-        self.assertEqual(rows["james"]["maps_to_focus"], "anthon-james-taylor")
+        # v386 (ADR 0043): the deprecated --maps-to naming a ROW is the fold.
+        self.assertEqual(rows["james"]["folded_into"], "anthon-james-taylor")
+        self.assertNotIn("maps_to_focus", rows["james"])
         self.assertEqual(rows["anthon-james-taylor"]["aliases"], ["James", "Jimmy"])
-        self.assertIsNone(rows["anthon-james-taylor"]["maps_to_focus"])
+        self.assertIsNone(rows["anthon-james-taylor"].get("folded_into"))
         first = self._bytes()
         code, _, _ = self._cli("person", "james", "clear", "--maps-to", "anthon-james-taylor")
         self.assertEqual(code, 0)
@@ -368,7 +370,7 @@ class RecountIsADeterministicJoin(unittest.TestCase):
         self.assertEqual(code, 0)
         rows = {e["slug"]: e for e in entity_roster.load_roster("person")["entities"]}
         self.assertEqual(rows["james-ortega"]["unique_answers"], 1)
-        self.assertEqual(rows["ortega"]["maps_to_focus"], "james-ortega")
+        self.assertEqual(rows["ortega"]["folded_into"], "james-ortega")
 
 
 if __name__ == "__main__":

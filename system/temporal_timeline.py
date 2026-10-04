@@ -212,7 +212,7 @@ from temporal_claims import (  # noqa: E402
 #: ``confidence`` is ``0.0`` no longer mints or joins a node at all
 #: (:func:`_claim_is_empty`, read from ``_group_claims`` — the claim itself
 #: stays in the substrate, unminted); an ``identity_uncertain`` candidate set is
-#: filtered to drop roster alias rows (``maps_to_focus`` set) and collective/role
+#: filtered to drop roster alias rows (``folded_into`` set, v386) and collective/role
 #: rows before it is offered, and the owner's own roster row is dropped from a
 #: candidate set built for the owner's own given name
 #: (``identity_resolution.roster_index``, ``identity_resolution.identity_work_item``

@@ -67,14 +67,16 @@ class NormalizeTests(unittest.TestCase):
         people = er.normalize("person",
             [{"name": "Wife", "aliases": [], "qualifies": True, "maps_to_focus": "katie"}],
             CANDS, FOCUS_MAP, min_score=8, min_answers=2)
-        self.assertEqual(people[0]["maps_to_focus"], "katie")
+        # v386 (ADR 0043): the Focus that attends to the record is `focus`.
+        self.assertEqual(people[0]["focus"], "katie")
+        self.assertIsNone(people[0]["folded_into"])
         self.assertFalse(people[0]["page_eligible"])     # enriches Katie, no standalone page
 
     def test_own_slug_is_focus_maps_to_it(self):
         people = er.normalize("person",
             [{"name": "Dad", "aliases": [], "qualifies": True, "maps_to_focus": None}],
             CANDS, FOCUS_MAP, min_score=8, min_answers=2)
-        self.assertEqual(people[0]["maps_to_focus"], "dad")
+        self.assertEqual(people[0]["focus"], "dad")
         self.assertFalse(people[0]["page_eligible"])
 
 
@@ -90,7 +92,7 @@ class DeterministicTests(unittest.TestCase):
         people = er.deterministic("person",
             [{"entity": "Mom", "score": 50.0, "unique_answers": 9, "cross_categories": [], "evidence": []}],
             {"mom": "Mom"}, min_score=8, min_answers=2)
-        self.assertEqual(people[0]["maps_to_focus"], "mom")
+        self.assertEqual(people[0]["focus"], "mom")
         self.assertFalse(people[0]["page_eligible"])
 
     def test_proper_name_becomes_eligible_person(self):
@@ -226,7 +228,7 @@ class PreviousRosterPromptTests(unittest.TestCase):
         self.assertIn("Previous roster", prompt)
         self.assertIn('"Grandma Betty Jo" (slug: grandma-betty-jo)', prompt)
         self.assertIn("Grandma, Grandma Betty, Betty Jo", prompt)
-        self.assertIn("maps_to_focus: katie", prompt)
+        self.assertIn("focus: katie", prompt)
         self.assertIn("Never re-split", prompt)
 
     def test_prompt_omits_block_without_previous_roster(self):
@@ -269,7 +271,7 @@ class ApplyPreviousDecisionsTests(unittest.TestCase):
         raw, _ = er.apply_previous_decisions([
             {"name": "Wife", "aliases": [], "qualifies": True, "maps_to_focus": None},
         ], PREV_ROSTER)
-        self.assertEqual(raw[0]["maps_to_focus"], "katie")
+        self.assertEqual(raw[0]["focus"], "katie")
 
     def test_unmatched_new_names_pass_through(self):
         raw, forced = er.apply_previous_decisions([

@@ -540,7 +540,7 @@ whose only label is a pronoun/placeholder (`landmarks_interaction.EMPTY_SUBJECT_
 AND whose `confidence` is exactly `0.0` mints no node and no work item at all —
 the claim stays in the substrate, unminted; an `identity_uncertain` candidate
 set is filtered before it is offered, dropping roster alias rows
-(`maps_to_focus` set), collective/role rows ("Kids", "Parents", ...), and the
+(`folded_into` set — `maps_to_focus` before v386), collective/role rows ("Kids", "Parents", ...), and the
 owner's own roster row when the mention is the owner's own given name; and a
 bare gerund/participle `{what}` ("Harvey arriving") reads "When was {what}?"
 rather than the ungrammatical "When did {what} happen?".

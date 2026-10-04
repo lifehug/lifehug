@@ -1,0 +1,116 @@
+# ADR 0043: One person, one record
+
+Date: 2026-10-04
+Status: ratified (owner, 2026-10-04 — design decisions D3, D6, D7, D8, D9)
+
+## Context
+
+The owner, 2026-10-04: *"We have the idea of an entity and the idea of a
+focus. Then we have a roster and then we have wiki pages. Fundamentally these
+should all be similar or the same in concept. … Under Entity Recommendations or
+Focus it says 'author's father', or 'Dottie' or 'Harvey'. Those are already
+focuses, so it is not connecting these people."* (lifehug-platform
+`docs/design/identity.md`, tracking lifehug-platform#987.)
+
+One person had five representations — a Focus category, a roster row, a wiki
+page, a recommendation's raw detector string and a claim's `subject_ref` — and
+only the roster row carried aliases. The others did not point at it, and the
+row itself could not hold the plain fact "this is a real person who has a
+Focus", because of ONE overloaded field: `maps_to_focus` meant both "this
+person has a Focus" and "this row was folded into row X", and
+`identity_resolution.is_alias_row` read any value as a pointer. A row mapped to
+its Focus vanished from the Timeline's identity index; a row left unmapped was
+invisible to recommendation suppression (`_focus_covered_aliases`), so people
+with Focuses and pages were recommended as new Focuses. The recommender
+compared raw strings ("Author's father") by exact lowercase and never called
+the owner-possessive reading the claim resolver already had. And names collide
+in a real family: three generations share a first name, two children share a
+role word, a state holds three cities, a grandmother shares a nickname with a
+friend nobody has recorded.
+
+## Decision
+
+**A person is one record. Everything else is a view of it or a decision about
+it.** The record is the roster row, keyed `person/<slug>`.
+
+1. **The overload is split.** A row carries `focus` (the Focus that ATTENDS to
+   it — the record stays a live person: offered, counted, bound) and
+   `folded_into` (the survivor, when the row is a duplicate pointer — a fold is
+   a pointer, never a deletion, ADR 0041). `is_alias_row` reads `folded_into`
+   only; `page_eligible` requires both to be empty. A one-version converter
+   (`roster_relations.convert_legacy_roster`, read on every load, persisted on
+   the next write and by `entity-roster --convert-identity`) maps a
+   `maps_to_focus` naming another row to `folded_into` and anything else to
+   `focus`, drops the key, and is byte-stable on a second run — the
+   `state/landmarks.json` converter precedent (amendment Q1). Pure readers
+   handed raw rows apply the same split (`identity_resolution
+   .split_legacy_pointers`). Each Focus attaches to the one record its slug,
+   title or a resolved title names (`attach_focuses`), never to two.
+2. **Resolution is typed and takes context.** `resolve_person(text, roster, *,
+   context)` returns a `Resolution` — `resolved` (one ref), `ambiguous` (every
+   candidate) or `unknown`. `ambiguous` is first-class: callers render it or
+   ask, never pick. The ladder: a dwelling possessive is a place; a shared
+   alias is held; `resolve_mention`'s exact/alias/owner-possessive/full-name/
+   relationship-qualified/census rungs; the first name exactly one record
+   answers to (ADR 0041 D4) under the v383 relationship guard; a bare relation
+   word answered as a set. A collision is split by context only: a relationship
+   word in the clause, a generation marker, a stated year against `born`, the
+   Focus the text was filed under. `resolve_place` resolves by name or alias,
+   or "City, State" by containment — never upward.
+3. **Recommendations, approvals and normalization resolve first.** `recommend`
+   skips a person who already has a Focus or page and labels a row with
+   `resolved_ref`/`resolved_name` beside the raw string (D5);
+   `approve_recommendation`/`focus_new` attach the Focus (`person_ref` on the
+   Focus, `focus` on the record) and refuse a twin; `normalize` sets `focus` by
+   slug OR by a name/alias equal to a Focus title.
+4. **Relations are sets (D6).** `relationship` is the typed field with a
+   cardinality (`identity_resolution.RELATION_WORD_CARDINALITY`, re-exported by
+   `relation_words`): a spouse or a father is one, a son is a set. Rows named
+   by a set-valued role word (Son, Daughter, Kids, Parents, Siblings, Friend,
+   Neighbor) are retired into top-level `relation_queries` carrying their
+   counts and whole former rows; a spelling of one that names somebody ("my son
+   Otto") moves to that record; role-word aliases stay only on cardinality-one
+   relations, and the ones moved off are recorded on the query.
+5. **Colliding names always display with a disambiguator (D7).**
+   `display_name(record, roster)` is the bare name when unique and
+   `Name (relation[, b. YYYY])` when another live record shares the name or the
+   first name; `record_view` carries the record's handle (`@slug`, and the
+   owner's short `@handle`) as a separate field, never inline.
+6. **Places nest (D8).** `--located-in` writes `located_in`; a place fold is
+   refused unless both rows are true duplicates (same `place_kind`, neither
+   containing a place, neither inside the other); a place page lists the
+   places inside it, nested.
+7. **Objects and themes fold (6d)** exactly as people do.
+8. **An alias can be shared with somebody who has no record (D9, D3).** An
+   alias decision (`alias_meta`) may say `exclusive: false, shared_with:
+   "<free text>"`: a BARE mention of it is held as uncertain — in
+   `resolve_person` and in the claim resolver alike — while the record's
+   exclusive compounds keep resolving; nobody is minted for the other claimant.
+   A handle (`handle: true`) is exclusive by construction: refused when any
+   other record answers to it.
+9. **One writer, every door.** `entity-verdict` gains `--fold-into`, `--focus`,
+   `--retract-alias` (every type), `--share-alias/--with`, `--located-in`,
+   `--handle`; `--maps-to` is accepted for one version and rewritten with a
+   deprecation line. The `focus-merge` roster union and the monthly refresh's
+   alias union decide every alias through `roster_relations.alias_decision`.
+
+Considered and rejected: a new identity store beside the roster (two writers
+for one fact — the recurring-defect doctrine's failure shape); resolving a
+collision by picking the most-mentioned candidate (a wrong attribution is worse
+than a question); minting a record for an unrecorded nickname claimant (the
+owner's rule: a mention alone never makes a person, D3).
+
+## Consequences
+
+- Binds: no reader treats `focus` as a pointer; no writer writes
+  `maps_to_focus`. A new person-reading surface prints `display_name`, and a
+  caller of `resolve_person` treats `ambiguous` as an answer to render.
+- Binds: hosts that read roster files directly (the platform's vendored
+  readers) read `focus`/`folded_into` or call `split_legacy_pointers`; the pin
+  that carries this version runs `entity-roster --convert-identity` once.
+- Forecloses: folding a city into its state; a role-word row standing for a
+  set; a bare shared nickname attributed to the one record that happens to
+  carry it.
+- Delete-when: after one version every vault has been converted — the legacy
+  reading (`split_legacy_pointers`, the `--maps-to` rewrite, `focus_of`'s
+  fallback) is deleted in the following release.

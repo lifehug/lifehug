@@ -566,9 +566,14 @@ def build_entity_candidate_subject(
     page_eligible = roster_entry.get("page_eligible", False)
     if type(page_eligible) is not bool:
         raise CandidateResearchError("entity page_eligible must be boolean")
-    maps_to_focus = roster_entry.get("maps_to_focus")
-    if maps_to_focus is not None and not isinstance(maps_to_focus, str):
-        raise CandidateResearchError("entity maps_to_focus must be a string or null")
+    # v386 (ADR 0043): a record's home is its `focus` or its `folded_into`
+    # (`maps_to_focus` on a legacy row, one version).
+    for home_field in ("focus", "folded_into", "maps_to_focus"):
+        value = roster_entry.get(home_field)
+        if value is not None and not isinstance(value, str):
+            raise CandidateResearchError(f"entity {home_field} must be a string or null")
+    maps_to_focus = roster_entry.get("folded_into") or roster_entry.get("focus") \
+        or roster_entry.get("maps_to_focus")
     if verdict == "never":
         candidate_state = "tombstoned"
     elif verdict == "graduate" or page_eligible or bool(maps_to_focus):

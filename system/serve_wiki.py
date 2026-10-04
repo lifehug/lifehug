@@ -51,6 +51,7 @@ from lifehug_core import (
     split_frontmatter,
 )
 from entity_roster import ENTITY_TYPES, THRESHOLDS, load_roster
+import identity_resolution as _ir
 from question_candidates import AUTO_PROMOTE_THRESHOLD, unified_quality_score, _infer_category
 from progress import verdict
 from recommend_focuses import (
@@ -1070,7 +1071,7 @@ def _entities_section_html() -> str:
         # pending (Scope 3), and disappears from the lane entirely.
         cands = [
             e for e in entities
-            if not e.get("page_eligible") and not e.get("maps_to_focus")
+            if not e.get("page_eligible") and not _ir.has_home(e)
             and e.get("owner_verdict") != "never"
         ]
         decided = [e for e in entities if e.get("owner_verdict") == "graduate"]
@@ -1080,10 +1081,14 @@ def _entities_section_html() -> str:
         else:
             min_score, _min_answers = THRESHOLDS.get(etype, (8.0, 2))
             rows = []
+            roster_snapshot = {"type": etype, "entities": entities}
             for e in sorted(cands, key=lambda x: _entity_sort_key(x, min_score)):
                 slug = str(e.get("slug") or "")
+                # v386 (D7): a colliding name always carries its disambiguator.
+                shown = (_ir.display_name(e, roster_snapshot) if etype == "person"
+                         else str(e.get("name", "?")))
                 rows.append([
-                    html.escape(str(e.get("name", "?"))),
+                    html.escape(shown or "?"),
                     html.escape(", ".join(e.get("aliases", []) or [])) or "—",
                     format(e.get("score", 0) or 0, ".1f"),
                     str(e.get("unique_answers", 0) or 0),
@@ -1098,8 +1103,10 @@ def _entities_section_html() -> str:
                 slug = str(e.get("slug") or "")
                 verdict = str(e.get("owner_verdict") or "")
                 label = _VERDICT_LABEL.get(verdict, verdict)
+                shown = (_ir.display_name(e, {"type": etype, "entities": entities})
+                         if etype == "person" else str(e.get("name", "?")))
                 rows.append([
-                    html.escape(str(e.get("name", "?"))),
+                    html.escape(shown or "?"),
                     f'{_badge("owner")} {html.escape(label)}',
                     ("yes" if e.get("page_eligible") else "no"),
                     _entity_verdict_form(etype, slug, "clear", "Clear", quiet=True) if slug else "—",
@@ -2162,7 +2169,7 @@ def view_review():
     # not pending, so it does not inflate this count or auto-open the lane.
     entity_total = sum(
         len([e for e in load_roster(t).get("entities", [])
-             if not e.get("page_eligible") and not e.get("maps_to_focus")
+             if not e.get("page_eligible") and not _ir.has_home(e)
              and e.get("owner_verdict") != "never"])
         for t in ENTITY_TYPES)
     # Only `graduate` verdicts render anything below the candidates table

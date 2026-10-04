@@ -83,7 +83,8 @@ class FirstNameAliases(unittest.TestCase):
         self.assertIn("Charlee", rows["charlee-joy-taylor"]["aliases"])
         self.assertIn("Dottie", rows["dottie-ovelle-taylor"]["aliases"])
         self.assertEqual(rows["harvey"]["aliases"], [])
-        self.assertEqual(rows["daughter"]["aliases"], [])
+        # v386 (ADR 0043, D6): "Daughter" is a relation query, not a record.
+        self.assertNotIn("daughter", rows)
         self.assertNotIn("James", rows["james-taylor"]["aliases"])
         self.assertNotIn("James", rows["james-everett-taylor"]["aliases"])
         self.assertEqual(rows["anthon-james-taylor"]["aliases"].count("James"), 1)
