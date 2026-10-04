@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A Focus at 100% is a milestone, not an end (v392, ADR 0044).
+"""A Focus at 100% is a milestone, not an end (v394, ADR 0044).
 
 Before this module, finishing a Focus changed nothing: its category ran out of
 open questions, the planner moved on, and the Focus kept its slot in the

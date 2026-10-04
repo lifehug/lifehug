@@ -465,7 +465,7 @@ def focus_weight(focus: dict, fill: dict) -> float:
     if not fill["room"]:
         return 0.0
     if is_complete(focus, fill):
-        # v392 (ADR 0044): a complete Focus is never queued. `room` already
+        # v394 (ADR 0044): a complete Focus is never queued. `room` already
         # reads False at 100%; this keeps the rule true by NAME too.
         return 0.0
     base = PRIMARY_BASE if focus.get("primary") else TIER_BASE.get(focus.get("tier", "standard"), 1.0)

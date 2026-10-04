@@ -311,7 +311,7 @@ else
   MIRROR_OUT="$LAST_STEP_OUT"
 fi
 
-# A Focus at 100% is a milestone, not an end (v392, ADR 0044). Every Focus whose
+# A Focus at 100% is a milestone, not an end (v394, ADR 0044). Every Focus whose
 # category has no open question left and at least one answered takes
 # phase=complete, files its second pass (the gap-finders this run already
 # computed, for that Focus's person only) as Review candidates parked at

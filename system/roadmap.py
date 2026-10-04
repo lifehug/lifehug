@@ -51,7 +51,7 @@ PRIMARY_CAP = 0.40        # the author's own life story (primary focus) may take
 FINISHING_CAP = 0.50      # raised cap while a Focus is being pushed to done
 MAINTENANCE_FACTOR = 0.1  # weight multiplier once a Focus is saturated
 
-#: v392 (ADR 0044): the `phase` a Focus takes when every question in its
+#: v394 (ADR 0044): the `phase` a Focus takes when every question in its
 #: categories is answered. Set by `focus_complete.sweep`, never by hand; the
 #: other phases (`active` / `finishing` / `maintenance`) are unchanged.
 COMPLETE_PHASE = "complete"
@@ -406,7 +406,7 @@ _USER_FIELDS = ("label", "tier", "objective", "deliverable", "target_depth",
                 "living", "relationship",
                 # v386 (ADR 0043): the person record this Focus attends to.
                 "person_ref",
-                # v392 (ADR 0044): the completion record (completed_at, the
+                # v394 (ADR 0044): the completion record (completed_at, the
                 # coverage snapshot, the one Mirror row's state) is the
                 # person's history, not derived: it survives a re-derive.
                 "completion")

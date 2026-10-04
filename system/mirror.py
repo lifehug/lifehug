@@ -454,7 +454,7 @@ def abandon_actionable_item(item: object, reason: str = "") -> MirrorResolution:
 
 
 def load_focus_complete_rows(*, include_resolved: bool = False) -> list[dict]:
-    """The `focus_complete` rows for THIS vault (v392, ADR 0044): one per
+    """The `focus_complete` rows for THIS vault (v394, ADR 0044): one per
     completed Focus whose milestone has not been played. Derived from the
     roadmap record; each row names its three Plays (`keep_going` / `rest` /
     `make`) and carries its Play target. Writes nothing."""

@@ -1,4 +1,4 @@
-"""v392 (ADR 0044) — a Focus at 100% is a milestone, not an end.
+"""v394 (ADR 0044) — a Focus at 100% is a milestone, not an end.
 
 Every fixture is SYNTHETIC: an invented person (Katie), invented gaps, a
 throwaway vault per test. Nothing is copied from any real vault.

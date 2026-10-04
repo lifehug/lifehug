@@ -177,7 +177,7 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # never write) — same family as judgment-update.
     "focus-curate",
     "focus-dismiss", "focus-finish",
-    # v392 (ADR 0044): the weekly completion sweep rewrites state/roadmap.json
+    # v394 (ADR 0044): the weekly completion sweep rewrites state/roadmap.json
     # and files second-pass candidates; the Play records its row's outcome.
     # Classified BY NAME like focus-autopilot (--dry-run writes nothing).
     "focus-complete-sweep", "focus-complete-play",

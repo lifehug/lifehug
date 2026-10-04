@@ -861,7 +861,7 @@ def view_foundation():
         badges = _badge(focus.get("tier", "?"))
         phase = focus.get("phase", "active")
         if is_complete(focus, fill):
-            # v392 (ADR 0044): a quiet mark, not a banner. A complete Focus
+            # v394 (ADR 0044): a quiet mark, not a banner. A complete Focus
             # whose category gained a question reads as developing again.
             badges += ' <span class="muted fnd-complete" title="every question answered">\u2713 complete</span>'
         elif phase not in ("active", COMPLETE_PHASE):

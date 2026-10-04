@@ -238,7 +238,7 @@ def focus_start_gate() -> dict:
             continue
         fill = focus_fill(focus, questions)
         if is_complete(focus, fill):
-            continue  # v392: a finished Focus is not unfinished work
+            continue  # v394: a finished Focus is not unfinished work
         if fill["pending"] <= 0:
             # Nothing left to answer — not "unfinished" in the owner's
             # sense, whatever the saturation ratio says against the target.
@@ -1174,7 +1174,7 @@ def _is_developing(focus: dict, questions: list[dict]) -> bool:
         return False
     fill = focus_fill(focus, questions)
     if is_complete(focus, fill):
-        # v392 (ADR 0044): a finished Focus is a milestone, not a slot. It
+        # v394 (ADR 0044): a finished Focus is a milestone, not a slot. It
         # leaves the keep-3-developing count so a new Focus can be promoted;
         # a complete Focus that gained an open question is NOT complete here
         # (is_complete reads the live fill), so it counts again at once.
