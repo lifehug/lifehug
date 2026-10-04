@@ -1,7 +1,7 @@
 {
-  "version": 389,
+  "version": 390,
   "released": "2026-10-04",
-  "changelog": "v389: pages are views of records (ADR 0043, lifehug-platform#987, after v388). A person page is written at its RECORD's slug, so a Focus whose record has another slug (`katie` on `katie-taylor`) compiles to `wiki/people/katie-taylor.md` and its old path keeps a one-line redirect stub (`origin: redirect`, `redirect_to`) for one version; the record's aliases reach the page's mention scan; page frontmatter gains `person_ref`/`record_ref`, `handle`, `aliases`, `relationship`, `answers`; a relationship page keeps its path and names the record; a folded record's page leaves by the orphan rule and links to it follow the pointer. The viewer's person page opens with an identity header read from the record, Review rows gain \"add a name\" and \"this is that record\", the Focus-idea lane gains \"fold into a person\", and the People index lists records with no page under \"Known, no page yet\". The entity-verdict job accepts fold_into, focus, retract_aliases, located_in and handle.",
+  "changelog": "v390: handles — `@katie` is the record, typeable in any conversation (ADR 0043 \"Handles\", lifehug-platform#987, after v389). Every identity record has a handle, its slug with an `@` (`@katie-taylor`, `@yucaipa`, `@orange-shorts`), and may carry one short owner-chosen handle (`entity-verdict <type> <slug> clear --handle katie`): lowercase letters, digits and hyphens, unique across every record of every type — refused, naming the claimant, when any other record holds it as a slug, name, alias or handle; `--clear-handle` removes it. One grammar, `identity_resolution.parse_handles` (word-bounded; never inside an email or a URL), resolves a token by a handle alias first, then by slug across person, place, object, theme and period; a token naming two types is ambiguous and says both, and an unknown one is `unknown_handle` — never a guess. A person can now teach identity by handle with no model judgement: \"this is @katie\" files an alias, \"same as @orange-shorts\" folds an object (or aliases a person), \"@yucaipa is in @california\" files containment; the listener outcome carries them as `handle_statements`. The classifier's and listener's people blocks show each person's `@handle`, and the viewer's identity header shows it beside the name.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -337,6 +337,7 @@
     "system/go_dig_writer.py",
     "system/identity_questions.py",
     "system/identity_resolution.py",
+    "system/identity_handles.py",
     "system/ingest.py",
     "system/ingest_story.py",
     "system/interaction_evals.py",
@@ -482,6 +483,7 @@
     "tests/test_general_listener.py",
     "tests/test_go_dig.py",
     "tests/test_identity_resolution.py",
+    "tests/test_v390_handles.py",
     "tests/test_ingest_and_planner.py",
     "tests/test_interaction_evals.py",
     "tests/test_interaction_registry.py",

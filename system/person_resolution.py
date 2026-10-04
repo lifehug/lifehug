@@ -10,8 +10,8 @@ DELEGATES to them; the v387 fallback bodies were deleted at the v388 rebase,
 as promised. What stays here is what the two callers (the classifier's "People
 you already know" block and post-processor, the general listener's
 ``person_identity`` list) need on top: the refs-only :class:`Resolution` view
-with a ``basis``, the explicit ``@handle`` path (I-4 replaces it with
-`identity_resolution.parse_handles`), and the block renderer.
+with a ``basis``, the explicit ``@handle`` path (delegated to
+`identity_resolution.parse_handles`, v390), and the block renderer.
 
 The adapter never guesses: ``ambiguous`` and ``unknown`` pass through.
 It is pure: it reads the roster snapshot it is handed and never the disk.
@@ -19,7 +19,6 @@ It is pure: it reads the roster snapshot it is handed and never the disk.
 
 from __future__ import annotations
 
-import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,8 +39,9 @@ RESOLUTION_KINDS = (RESOLVED, AMBIGUOUS, UNKNOWN)
 BASIS_HANDLE = "handle"
 BASIS_STATEMENT = "statement"
 
-#: An explicit reference typed by the person: ``@mara-holt``.
-HANDLE_RE = re.compile(r"(?<![\w@])@(?P<handle>[a-z0-9][a-z0-9-]*)", re.IGNORECASE)
+#: An explicit reference typed by the person: ``@mara-holt``. The grammar is
+#: the package's one (`identity_resolution.HANDLE_RE`, v390).
+HANDLE_RE = ir.HANDLE_RE
 
 
 @dataclass(frozen=True)
@@ -104,29 +104,27 @@ def _from_upstream(result: ir.Resolution) -> Resolution:
 
 
 # --------------------------------------------------------------------------
-# handles — design §4.1.4b (I-4 builds `identity_resolution.parse_handles`)
+# handles — design §4.1.4b; the grammar is `identity_resolution.parse_handles`
 # --------------------------------------------------------------------------
 
 def parse_handles(text: object) -> tuple[str, ...]:
-    """Every ``@handle`` in ``text``, lowercased, in order, deduplicated."""
-    upstream = getattr(ir, "parse_handles", None)
-    if callable(upstream):
-        return tuple(str(h).lstrip("@").casefold() for h in upstream(text))
-    body = text if isinstance(text, str) else ""
-    return tuple(dict.fromkeys(m.group("handle").casefold()
-                               for m in HANDLE_RE.finditer(body)))
+    """Every ``@handle`` in ``text``, lowercased, no ``@``, in order,
+    deduplicated — `identity_resolution.parse_handles`' tokens."""
+    return tuple(dict.fromkeys(span.raw.lstrip("@").casefold()
+                               for span in ir.parse_handles(text)))
 
 
 def resolve_handle(handle: object, roster: object) -> Resolution:
-    """An explicit ``@slug`` — EXACT slug match only, never a fuzzy rung.
-
-    I-4 adds owner-chosen short handles; until then a handle is a slug.
-    """
-    wanted = str(handle or "").lstrip("@").casefold()
-    for entity in person_rows(roster):
-        if ir._entity_slug(entity) == wanted:
-            return Resolution(RESOLVED, ref_of(entity), (ref_of(entity),),
-                              "handle", BASIS_HANDLE)
+    """An explicit ``@handle`` against the PERSON roster — an alias flagged
+    ``handle`` first, then a slug; never a fuzzy rung
+    (`identity_resolution.resolve_handle`, v390). A handle that names a record
+    of another type is not a person: ``unknown_handle`` here."""
+    found = ir.resolve_handle(handle, {"person": person_rows(roster)})
+    if found.kind == AMBIGUOUS:
+        return Resolution(AMBIGUOUS, candidates=tuple(found.candidates),
+                          reason=found.reason, basis=BASIS_HANDLE)
+    if found.resolved:
+        return Resolution(RESOLVED, found.ref, (found.ref,), "handle", BASIS_HANDLE)
     return Resolution(UNKNOWN, reason="unknown_handle", basis=BASIS_HANDLE)
 
 
@@ -220,7 +218,8 @@ def render_known_people(person_roster: object, *, story_text: str = "",
                         limit: int = KNOWN_PEOPLE_LIMIT) -> str:
     """One line per person record, bounded, saying what it hid.
 
-    ``- <display name> — also: <aliases> · <relationship> · focus: <slug>``,
+    ``- <display name> @<handle> — also: <aliases> · <relationship> · focus: <slug>``
+    (v390: the handle is the owner's short ``@handle`` when set, else ``@<slug>``),
     the display name disambiguated when two records share it (design D7).
     Ordered people-this-text-names first, then family, then everyone else,
     roster order within a tier, so the surviving set is stable. Pure.
@@ -250,6 +249,8 @@ def render_known_people(person_roster: object, *, story_text: str = "",
         if aliases:
             tail.append("also: " + ", ".join(aliases))
         shown = display_name(entity, person_roster)
+        view = ir.record_view(entity, person_roster)
+        handles = view.get("short_handle") or view.get("handle") or ""
         rel = ir.collapsed_text(entity.get(ir.ROSTER_RELATIONSHIP_KEY))
         if rel and not shown.endswith(")"):
             # A disambiguated name already says the relationship.
@@ -257,7 +258,7 @@ def render_known_people(person_roster: object, *, story_text: str = "",
         focus = person_focus(entity)
         if focus:
             tail.append(f"focus: {focus}")
-        line = f"- {shown}"
+        line = f"- {shown}" + (f" {handles}" if handles else "")
         if tail:
             line += " — " + " · ".join(tail)
         lines.append(line)

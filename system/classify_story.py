@@ -1191,7 +1191,7 @@ names they go by, how they stand to the author, and their Focus if they have
 one. When the story names one of them — by any listed name, or by a
 relationship word that can only mean them ("my wife" when one spouse is
 listed) — write their listed name exactly as shown, without the part in
-parentheses, in `people[].name` and `focus_opportunities[].entity`. Never write
+parentheses and without the `@handle` after it, in `people[].name` and `focus_opportunities[].entity`. Never write
 "the author's father" or "my wife" for someone listed here. A person who is not
 listed is written as the story names them; never match a stranger to a listed
 person because a first name is shared.

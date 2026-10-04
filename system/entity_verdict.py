@@ -11,7 +11,7 @@ and the candidate lane's promote-override.
         [--alias A]... [--relationship R] [--living|--not-living]
         [--born EDTF [--born-basis B]] [--died EDTF [--died-basis B]]
         [--fold-into ROW | --focus FOCUS] [--retract-alias A]...
-        [--share-alias A --with WHO] [--located-in PLACE] [--handle H]
+        [--share-alias A --with WHO] [--located-in PLACE] [--handle H | --clear-handle]
         [--ensure [--name NAME]]   (--maps-to: deprecated, rewritten)
 
   - `graduate` — an entity the owner knows matters shouldn't have to wait
@@ -99,7 +99,8 @@ deprecation line on stderr. `--retract-alias` undoes an alias for every type
 (`roster_relations.retract_alias`); `--share-alias A --with WHO` marks an alias
 shared with somebody who has no record (D9); `--located-in` is the place join
 (D8 — a place fold is refused unless the rows are true duplicates);
-`--handle` files the record's exclusive short @handle.
+`--handle` files the record's exclusive short @handle (unique across every
+roster, charset-checked); `--clear-handle` removes it.
 
 Usage:
     python3 system/entity_verdict.py person betty-jo graduate
@@ -123,6 +124,7 @@ if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
 import chronology  # noqa: E402
+import identity_handles  # noqa: E402
 import identity_resolution as ir  # noqa: E402
 import roster_relations  # noqa: E402
 from entity_roster import (  # noqa: E402
@@ -353,7 +355,8 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
                   share_alias: str | None = None,
                   shared_with: str | None = None,
                   located_in: str | None = None,
-                  handle: str | None = None) -> dict:
+                  handle: str | None = None,
+                  clear_handle: bool = False) -> dict:
     """Apply one verdict — and, since v190, one round of identity facts — to
     one roster entity, atomically. Returns the entity's post-verdict record
     (the same dict object written to disk). Raises `EntityVerdictError` on
@@ -461,14 +464,35 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
                 raise EntityAliasContested({**result, "alias": share_alias})
             raise EntityVerdictError(f"--share-alias refused: {result.get('reason')}")
         snapshot = result["snapshot"]
+    if handle is not None and clear_handle:
+        raise EntityVerdictError("--handle and --clear-handle are different acts — pass one")
     if handle is not None:
-        result = roster_relations.alias_decision(entity_type, ref, str(handle).lstrip("@"),
+        # v390 (§4.1.4b): a handle is lowercase letters, digits and hyphens, and
+        # unique across EVERY roster's names, aliases, slugs and handles — the
+        # claimant is named and nothing is written.
+        handle_text = identity_handles.normalize_handle(handle)
+        if not handle_text:
+            raise EntityVerdictError(
+                f"invalid handle {str(handle)!r}: lowercase letters, digits and "
+                f"hyphens, up to {identity_handles.HANDLE_MAX_LENGTH} characters")
+        rosters = {t: (snapshot if t == entity_type else read_roster_payload(t)[1])
+                   for t in ENTITY_TYPES}
+        colliders = identity_handles.claimants(handle_text, rosters,
+                                               exclude=(entity_type, slug))
+        if colliders:
+            raise EntityAliasContested(identity_handles.refusal(
+                handle_text, ref, str(target.get("name") or slug), colliders))
+        result = roster_relations.alias_decision(entity_type, ref, handle_text,
                                                  snapshot, handle=True)
         if not result.get("applied"):
             if result.get("reason") == roster_relations.IDENTITY_UNCERTAIN_KIND:
-                raise EntityAliasContested({**result, "alias": handle})
+                raise EntityAliasContested({**result, "alias": handle_text})
             raise EntityVerdictError(f"--handle refused: {result.get('reason')}")
         snapshot = result["snapshot"]
+    if clear_handle:
+        entities_now = [identity_handles.without_handle(e) if e.get("slug") == slug else e
+                        for e in snapshot["entities"] if isinstance(e, dict)]
+        snapshot = {**snapshot, "entities": entities_now}
     if located_in is not None:
         parent_slug = located_in.split("/", 1)[-1] if located_in.startswith("place/") else located_in
         parent = next((e for e in snapshot["entities"] if e.get("slug") == parent_slug), None)
@@ -701,8 +725,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="place only: this place is inside that place "
                              "(containment, never a fold — D8)")
     parser.add_argument("--handle", metavar="HANDLE",
-                        help="The record's short @handle (exclusive: refused when any "
-                             "other record answers to it)")
+                        help="The record's short @handle: lowercase letters, digits and "
+                             "hyphens, unique across every record's name, alias, slug and "
+                             "handle in the vault (refused, exit 2, naming the claimant)")
+    parser.add_argument("--clear-handle", dest="clear_handle", action="store_true",
+                        help="Remove the short @handle (the @<slug> handle stays)")
     parser.add_argument("--ensure", action="store_true",
                         help="Create the roster entry when the slug is unknown, "
                              "rather than refusing — for a person a LANDMARK "
@@ -735,6 +762,7 @@ def main(argv: list[str] | None = None) -> int:
             retract_aliases=args.retract_alias,
             share_alias=args.share_alias, shared_with=args.shared_with,
             located_in=args.located_in, handle=args.handle,
+            clear_handle=args.clear_handle,
         )
     except EntityAliasContested as exc:
         # v383 (ADR 0041): the package's own refusal, verbatim, on stdout —
@@ -746,7 +774,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"✗ entity-verdict: {exc}", file=sys.stderr)
         return 1
 
-    if args.maps_to or args.alias or args.fold_into or args.retract_alias or args.share_alias:
+    if args.maps_to or args.alias or args.fold_into or args.retract_alias or args.share_alias \
+            or args.handle or args.clear_handle:
         # v383 (ADR 0041): a fold or an alias moves mention counts; the
         # keyless recount makes that visible on the next read instead of at
         # the next monthly model call. Deterministic, no model.
@@ -783,6 +812,8 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, flag, None) and entity.get(field):
             learned.append(
                 f"{field}: {chronology.display_date(entity[field], with_basis=False)}")
+    if args.handle or args.clear_handle:
+        learned.append(f"handle: {identity_handles.handle_for(entity)}")
     if learned:
         print(f"  identity — {'; '.join(learned)}")
     return 0

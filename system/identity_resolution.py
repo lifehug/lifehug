@@ -3066,4 +3066,39 @@ __all__ = [
     "roster_index",
     "unresolve",
     "unresolved_subject_ref",
+    "HANDLE_RE",
+    "parse_handles",
+    "resolve_handle",
 ]
+
+
+# --------------------------------------------------------------------------
+# v390 (ADR 0043, design §4.1.4b) — handles: `@katie` is the record. The
+# grammar and the resolution live in `identity_handles` (it imports THIS
+# module, so these are lazy delegates — one definition, reachable where every
+# host already looks).
+# --------------------------------------------------------------------------
+
+def parse_handles(text: object, rosters: object = None) -> list:
+    """Every ``@handle`` token in ``text`` as ``HandleSpan(span, raw, ref,
+    reason)`` — `identity_handles.parse_handles`. With ``rosters``
+    (``{type: roster}``) each carries its ``ref``; without, the grammar alone."""
+    import identity_handles  # noqa: PLC0415
+
+    return identity_handles.parse_handles(text, rosters)
+
+
+def resolve_handle(handle: object, rosters: object):
+    """One explicit ``@handle`` against ``{type: roster}`` —
+    `identity_handles.resolve_handle`."""
+    import identity_handles  # noqa: PLC0415
+
+    return identity_handles.resolve_handle(handle, rosters)
+
+
+def __getattr__(name: str):  # PEP 562: the handle grammar's regex, defined once.
+    if name == "HANDLE_RE":
+        import identity_handles  # noqa: PLC0415
+
+        return identity_handles.HANDLE_RE
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
