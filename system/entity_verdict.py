@@ -75,6 +75,19 @@ fact, which is exactly what the recurring-defect doctrine exists to prevent.
     would strand the identity. Without `--maps-to`, `graduate` on an
     already-mapped entity keeps raising exactly as it did before v190.
 
+v383 (ADR 0041 — the roster is the identity ledger): every alias this verb
+writes — each `--alias`, and the loser's name + aliases during `--maps-to` —
+is a decision under `roster_relations.alias_decision`'s collision rule. An
+alias another row already answers to binds to NEITHER: the WHOLE verdict is
+refused (no partial union, the roster file untouched), the package's refusal
+— `{"applied": false, "reason": "identity_uncertain", "candidates": [...]}`,
+both claimants named — is printed as JSON on stdout, and the CLI exits 2. A
+re-add of an alias already present stays an idempotent success. A fold is a
+pointer, never a deletion: the loser keeps its row with `maps_to_focus =
+<survivor>`. After a successful `--maps-to`/`--alias` the CLI runs the
+keyless `entity_roster.recount` for the touched type, so the fold's effect on
+mention counts is visible on the next read.
+
 Usage:
     python3 system/entity_verdict.py person betty-jo graduate
     python3 system/entity_verdict.py object the-orange-cone never --json
@@ -97,6 +110,8 @@ if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
 import chronology  # noqa: E402
+import identity_resolution as ir  # noqa: E402
+import roster_relations  # noqa: E402
 from entity_roster import (  # noqa: E402
     ENTITY_TYPES,
     PERSON_DATE_FIELDS,
@@ -121,6 +136,28 @@ class EntityVerdictError(ValueError):
     """A verdict that must not apply — unknown type/slug, or `graduate` on
     a mapped entity. Always raised BEFORE any write: a refused verdict
     leaves the roster file byte-for-byte unchanged."""
+
+
+#: The CLI's exit code for a verdict refused by the alias collision rule
+#: (v383, ADR 0041) — distinct from 1 (a malformed or impossible verdict) so a
+#: host can render the two claimants and ask, rather than report an error.
+EXIT_IDENTITY_UNCERTAIN = 2
+
+
+class EntityAliasContested(EntityVerdictError):
+    """v383 (ADR 0041): an alias this verdict would write already answers to
+    ANOTHER roster row. `roster_relations.alias_decision`'s collision rule —
+    one alias claimed by two entities binds to NEITHER — refuses the WHOLE
+    verdict: no partial union, the roster file untouched. ``result`` is the
+    package's own refusal (``{"applied": False, "reason":
+    "identity_uncertain", "candidates": [...], ...}``) plus the ``alias`` that
+    collided, so a host names both claimants and asks; it never picks."""
+
+    def __init__(self, result: dict) -> None:
+        self.result = result
+        names = " or ".join(str(c.get("name")) for c in result.get("candidates") or ())
+        super().__init__(f"alias {result.get('alias')!r} is contested — it could be {names}; "
+                         "nothing was written")
 
 
 def _validated_identity(
@@ -215,19 +252,47 @@ def _preferred_date(existing: object, incoming: object) -> object:
         else existing
 
 
-def _union_aliases(entry: dict, additions: Sequence[str]) -> None:
-    """Union `additions` into `entry["aliases"]` in place — trimmed, order
-    preserved, deduplicated case-insensitively, and never the entry's own
-    canonical name. Idempotent: a second identical call is a no-op."""
-    canonical = str(entry.get("name") or "").strip().lower()
-    existing = [str(a or "").strip() for a in entry.get("aliases", []) if str(a or "").strip()]
-    seen = {a.lower() for a in existing} | {canonical}
-    for alias in additions:
-        if alias.lower() in seen:
+def _points_at(entity: dict, slug: str) -> bool:
+    """A pointer row (a folded duplicate) whose ``maps_to_focus`` names
+    ``slug`` — the same identity as ``slug``, never a rival claimant."""
+    return bool(slug) and str(entity.get("maps_to_focus") or "").strip() == slug
+
+
+def _decided_aliases(entity_type: str, entities: Sequence[dict], entry: dict,
+                     additions: Sequence[str], *, same_identity: Sequence[dict] = ()) -> list[str]:
+    """``entry``'s alias list after ``additions``, every one decided by
+    `roster_relations.alias_decision` (v383, ADR 0041 — the collision rule).
+
+    Nothing is mutated: the caller writes the returned list only once EVERY
+    alias of the verdict has been decided, so a refusal leaves no partial
+    union. The entry's own canonical name is never added as an alias of
+    itself. Rows that are the SAME identity are not rival claimants and are
+    left out of the collision snapshot: ``same_identity`` (the loser of the
+    fold in flight, or its survivor) and any pointer row already folded into
+    ``entry``. Raises :class:`EntityAliasContested` on a collision; an alias
+    already present is an idempotent success.
+    """
+    slug = str(entry.get("slug") or "").strip()
+    excluded = {id(e) for e in same_identity}
+    snapshot = {"entities": [
+        e for e in entities
+        if isinstance(e, dict) and (e is entry or (id(e) not in excluded and not _points_at(e, slug)))
+    ]}
+    ref = roster_relations.entity_ref(entity_type, entry)
+    canonical = ir.normalized_mention_key(entry.get("name"))
+    for raw in additions:
+        alias = str(raw or "").strip()
+        if not alias or ir.normalized_mention_key(alias) == canonical:
             continue
-        seen.add(alias.lower())
-        existing.append(alias)
-    entry["aliases"] = existing
+        decision = roster_relations.alias_decision(entity_type, ref, alias, snapshot)
+        if decision.get("applied"):
+            snapshot = decision["snapshot"]
+            continue
+        if decision.get("reason") == roster_relations.IDENTITY_UNCERTAIN_KIND:
+            raise EntityAliasContested({**decision, "alias": alias})
+        raise EntityVerdictError(f"alias {alias!r} refused: {decision.get('reason')}")
+    decided = roster_relations.find_by_ref(entity_type, snapshot, ref) or entry
+    return [str(a) for a in decided.get("aliases") or () if str(a or "").strip()]
 
 
 #: v202 (family-landmark §D): the entry `ensure` creates for a person the
@@ -358,9 +423,24 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
                 f"refusing: --maps-to {maps_to!r} names neither another {entity_type} "
                 "on this roster nor a known Focus slug")
 
+    # v383 (ADR 0041): every alias this verdict writes is DECIDED first, by the
+    # package's one collision rule, before anything is mutated — a contested
+    # alias refuses the whole verdict and the roster file stays untouched.
+    fold_peers = (merge_into,) if merge_into is not None else ()
+    target_aliases = (
+        _decided_aliases(entity_type, entities, target, aliases, same_identity=fold_peers)
+        if aliases else None)
+    survivor_aliases = None
+    if merge_into is not None:
+        loser_names = [str(target.get("name") or "").strip(),
+                       *(target_aliases if target_aliases is not None
+                         else [str(a or "").strip() for a in target.get("aliases", [])])]
+        survivor_aliases = _decided_aliases(
+            entity_type, entities, merge_into, loser_names, same_identity=(target,))
+
     # Identity facts first — they apply whatever the verdict is.
-    if aliases:
-        _union_aliases(target, aliases)
+    if target_aliases is not None:
+        target["aliases"] = target_aliases
     if relationship is not None:
         target["relationship"] = relationship
     if living is not None:
@@ -387,17 +467,15 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
         # alone; `apply_owner_verdict` and `base_page_eligible` both make
         # `maps_to_focus` beat `graduate` continuously anyway.
         target["maps_to_focus"] = maps_to
-        if merge_into is not None:
+        if merge_into is not None and survivor_aliases is not None:
             # The merge lives on the SURVIVOR: the loser's canonical name and
             # every alias fold into the target's aliases, which is exactly how
             # `wiki_compile.plan_entities` (matching `[name] + aliases`) and
             # `entity_roster.apply_previous_decisions` (folding by
             # `_entity_keys`) already express "this is really that page".
-            _union_aliases(
-                merge_into,
-                [str(target.get("name") or "").strip(),
-                 *[str(a or "").strip() for a in target.get("aliases", [])]],
-            )
+            # The loser KEEPS its row as a pointer (`maps_to_focus` above) —
+            # a fold is never a deletion (ADR 0012's shape, ADR 0041).
+            merge_into["aliases"] = survivor_aliases
         if verdict == "never":
             target["owner_verdict"] = "never"
         elif verdict == "clear":
@@ -485,9 +563,23 @@ def main(argv: list[str] | None = None) -> int:
             grandparent_side=args.grandparent_side,
             relation_word=args.relation_word,
         )
+    except EntityAliasContested as exc:
+        # v383 (ADR 0041): the package's own refusal, verbatim, on stdout —
+        # both claimants named — so a host renders them and asks.
+        print(json.dumps(exc.result, indent=2, ensure_ascii=False, sort_keys=True))
+        print(f"✗ entity-verdict: {exc}", file=sys.stderr)
+        return EXIT_IDENTITY_UNCERTAIN
     except EntityVerdictError as exc:
         print(f"✗ entity-verdict: {exc}", file=sys.stderr)
         return 1
+
+    if args.maps_to or args.alias:
+        # v383 (ADR 0041): a fold or an alias moves mention counts; the
+        # keyless recount makes that visible on the next read instead of at
+        # the next monthly model call. Deterministic, no model.
+        from entity_roster import recount  # noqa: PLC0415
+        recounted = recount(args.type)
+        entity = next((e for e in recounted["entities"] if e.get("slug") == args.slug), entity)
 
     if args.json:
         print(json.dumps(entity, indent=2, ensure_ascii=False))

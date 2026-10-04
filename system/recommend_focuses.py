@@ -580,12 +580,29 @@ def _roster_alias_fold_map(entity_type: str) -> dict[str, str]:
     except Exception:
         return {}
     out: dict[str, str] = {}
-    for entity in entities:
+    names_by_slug = {str(e.get("slug") or "").strip(): str(e.get("name") or "").strip()
+                     for e in entities if isinstance(e, dict)}
+    names_by_slug.pop("", None)
+
+    def survivor_of(entity: dict) -> str | None:
+        """v383 (ADR 0041): a row folded into ANOTHER row of this roster
+        (`entity-verdict --maps-to <row>`) is a pointer — its spellings count
+        for the survivor, never for itself."""
+        target = str(entity.get("maps_to_focus") or "").strip()
+        if target and target != str(entity.get("slug") or "").strip():
+            return names_by_slug.get(target) or None
+        return None
+
+    # Rows that are their own identity claim their keys first; a pointer row's
+    # keys then fold to its survivor, so a key both carry (the loser's name,
+    # unioned onto the survivor by the fold) can never stay with the loser.
+    for entity in sorted(entities, key=lambda e: survivor_of(e) is not None):
         name = str(entity.get("name") or "").strip()
         if not name:
             continue
+        canonical = survivor_of(entity) or name
         for key in _entity_keys(entity):
-            out.setdefault(key, name)
+            out.setdefault(key, canonical)
     return out
 
 

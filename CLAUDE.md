@@ -117,6 +117,16 @@ restatement of a landmark ("Brief residence in Solothurn"), fold into it by
 themselves (`landmark_fold`). `timeline-move-decide` is the read-only preview
 of a drop's window. A saved gesture needs no conversation.
 
+**The roster is the identity ledger (v383, ADR 0041).** When the owner says
+two roster rows are one person, fold them — `entity-verdict person <loser>
+clear --maps-to <survivor>` — never edit or delete a row by hand: the loser
+stays as a pointer. Every alias `entity-verdict` writes passes the collision
+rule; an exit 2 means the alias already answers to another row, and the JSON
+on stdout names both — ask the owner which, never pick. A landmark name the
+roster already answers to (a `partnerships`/`family`/`children` entry) joins
+that row as an alias on the next `entity-roster --ensure-introduced`.
+Counts move with `entity-roster --type <t> --recount` (no model).
+
 **The graph's joins (v376, issue #434).** A Focus's page is decided by the
 compiler's one category→page rule, `system/focus_pages.py`
 (`A_FOCUS_KNOWS_ITS_OWN_PAGE`): a `## Focuses` category is a person page

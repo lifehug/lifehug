@@ -3040,6 +3040,9 @@ def cmd_entity_roster(args: argparse.Namespace) -> int:
         if getattr(args, "dry_run", False):
             flags.append("--dry-run")
         return run_python("entity_roster.py", flags)
+    if getattr(args, "recount", False):
+        # v383 (ADR 0041): the keyless count join — never the model path.
+        return run_python("entity_roster.py", [*flags, "--recount"])
     if args.emit_task:
         flags.extend(["--emit-task", args.emit_task])
     elif args.from_response:
@@ -3989,6 +3992,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "Deterministic and additive; no AI, no roster rewrite")
     p.add_argument("--dry-run", action="store_true",
                    help="With --ensure-introduced: report the rows, write nothing")
+    p.add_argument("--recount", action="store_true",
+                   help="Recompute --type's answer counts/scores through the roster-folded "
+                        "join (v383, ADR 0041). Deterministic; no AI")
     p.set_defaults(func=cmd_entity_roster)
 
     p = sub.add_parser("entity-verdict",

@@ -251,6 +251,37 @@ separate, scalar module constant governing the dyadic relationship-edge
 path, not the node-graduation path this page covers) is
 2 <!-- parity: wiki_compile.RELATIONSHIP_MIN_MENTION_ANSWERS = 2 -->.
 
+### The identity ledger (v383, ADR 0041)
+
+The roster is the owner-curated identity ledger for people (and the other
+four types). Three rules hold everywhere a roster row's identity changes:
+
+- **A fold is a pointer, never a deletion.** `entity-verdict <type> <loser>
+  clear --maps-to <survivor>` keeps the loser's row and sets its
+  `maps_to_focus` to the survivor; the loser's name and aliases join the
+  survivor's aliases. The resolver already treats a pointer row as never a
+  candidate, and the count fold reads its spellings as the survivor's.
+- **An alias is a decision under the collision rule.** Every alias the verb
+  writes — each `--alias`, and the loser's names during `--maps-to` — goes
+  through `roster_relations.alias_decision`. An alias another row already
+  answers to binds to NEITHER: the whole verdict is refused, the roster file
+  is untouched, the package's `{"applied": false, "reason":
+  "identity_uncertain", "candidates": [...]}` is printed and the CLI exits 2.
+  The host names both claimants and asks; it never picks.
+- **Counts are a deterministic join.** `entity-roster --type <t> --recount`
+  recomputes `unique_answers`/`score` through `_build_entity_stats` →
+  `_fold_stats_through_roster` → `_best_stats` with no model call, and
+  writes only when a count moved. A successful `--maps-to`/`--alias` runs it
+  for the touched type, and `--ensure-introduced` runs it after it files or
+  folds anything.
+
+`entity-roster --ensure-introduced` reads `family`, `children` and (since
+v383) `partnerships` landmark entries. A name the roster already answers to —
+by spelling, or by sharing its first token with exactly one row — is FOLDED in
+as an alias of that row rather than skipped; more than one such row, or one
+stating a different relationship, is reported as contested and nothing is
+written.
+
 ### Owner verdicts (ADR 0013)
 
 `entity-verdict <type> <slug> graduate|never|clear` writes one of two
@@ -389,7 +420,7 @@ working.
 | Theme-specific keyword curation (v97, out of this page's core scope) | `wiki_compile.theme_keyword_map()` |
 | Relationship introductions (v344) | `roster_relations.relationship_introductions(claims, roster=…, owner_names=…)` — a named subject the roster has never heard of, introduced in its OWN source by a relationship phrase the owner used (`"Dave's mom"`, `"my mother"`, `"(wife)"`, `"(brother)"`), is a person with that relationship. The relationship is derived from `identity_resolution.RELATIONSHIP_MENTION_WORDS` × `focus_candidate.FOCUS_RELATIONSHIPS` (so mother/father → `parent`, in-law → `other`), never a third list; aliases are the mention, any nickname, and the spellings that word licenses by satisfaction-set EQUALITY (`"mom"` brings `"mother"`, never `"dad"`); an alias two introduced people claim binds to NEITHER. Filed by `entity_roster.ensure_introduced_relatives()` through `entity_verdict.apply_verdict(..., ensure=True)` — the `source: "landmark:family"` door — one atomic per-row write, additive and idempotent, no AI |
 | Relation words (v358) | `relation_words.py` — owner ruling 2026-09-25: *"son is more detailed than child and gives more information, so if you have to pick one i'd pick the gendered one daughter and son"*. ONE field per person, `relation_gender` ∈ `male`\|`female`\|`neutral` (the grammatical gender of the word the owner uses, `neutral` = "keep the neutral word", itself an answer), from which every word is DERIVED with the row's `relationship` (`relation_word`): Son/Daughter, Father/Mother, Brother/Sister, Husband/Wife, Grandfather/Grandmother. The pairs come out of `identity_resolution.RELATIONSHIP_MENTION_WORDS` (the neutral word's set minus `FOCUS_RELATIONSHIPS`); the only declaration is `WORD_GENDER`. Set ONLY by the owner's answer to the card (`relation_gender_basis: answer`, `record_relation_gender`) or — read fresh on every publish, never written — a gendered word he used about that person (`stated_relation_gender`: a roster spelling that IS the word, a `family` landmark `relation`, or a v346/v347 introduction in his own tellings; a possessor and an in-law/compound are refused; a spelling two people share anchors nobody; never a first name). A plural/collective row keeps the neutral plural ("Children"). Published on the calculated projection as `relation_words`; the card (`relation_word` kind) is minted only where the relationship has a gendered pair (`A_CARD_ONLY_WHERE_THE_WORD_HAS_A_GENDERED_PAIR`). v360 follow-up (owner, 2026-09-25) (`relation-words:2`, `HIS_OWN_TELLINGS_ARE_READ_BY_A_NAME_HE_USES`): his own tellings are also read word for word (`own_telling_texts` — his answers, stories and messages, never a question heading or an external record), a full-name row is also found by the given name he says when no other identity answers to it ("my beautiful daughter Charlee" fills *Charlee Joy Taylor*), and a given name followed by more name ("my dad Desiree Ann Taylor", a lost comma) is not read. The **grandparent-side** card (`entity_roster.with_grandparent_side_cards`, *"Is Grandma Betty Jo on your mom's side or your dad's?"*) rides the same publish seam, and is not asked when his own words already say the side (`A_GRANDPARENT_SIDE_HE_SAID_IS_KNOWN`: "James Edwin Taylor Sr., my dad's dad") |
-| CLI | `lifehug.py entity-roster --type <t> [--resolve\|--emit-task PATH\|--from-response PATH\|--show\|--ensure-introduced [--dry-run]] [--min-score\|--min-answers]`, `entity-verdict <type> <slug> graduate\|never\|clear` |
+| CLI | `lifehug.py entity-roster --type <t> [--resolve\|--emit-task PATH\|--from-response PATH\|--show\|--ensure-introduced [--dry-run]\|--recount] [--min-score\|--min-answers]`, `entity-verdict <type> <slug> graduate\|never\|clear [--alias A]... [--maps-to SLUG]` (exit 2 = `identity_uncertain`) |
 | Monthly wiring | `monthly_research.sh` — entity-roster refresh (all five types) runs after `focus-autopilot` and before the final `compile`, so a newly-approved Focus's mapping and this run's roster decisions both land in the same recompile |
 | Guard tests | `tests/test_entity_owner_verdicts.py`, `tests/test_person_dates.py`, `tests/test_wiki_compile.py`, `tests/test_v97_theme_roster.py`, `tests/walkthrough_entity_verdicts.py` (repo-verify exact names before citing in a PR) |
 
