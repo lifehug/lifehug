@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import general_listener as gl  # noqa: E402
 import landmark_recorder as lr  # noqa: E402
+import temporal_work_items as twi  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 from test_v386_one_record import legacy_founder_shaped  # noqa: E402
 from test_v389_compile_by_record import Vault  # noqa: E402
@@ -160,12 +161,15 @@ class IdentityWorkItems(unittest.TestCase):
 
         self.assertEqual(
             row["work_item_id"],
-            tp.derive_work_item_id(
+            twi.canonical_work_item_id(
                 kind="identity_uncertain",
                 subject_ref=ir.unresolved_subject_ref("James"),
                 requested_field="identity",
             ),
         )
+
+    def test_new_person_is_a_registered_kind(self):
+        self.assertIn("new_person", tp.WORK_ITEM_KINDS)
 
     def test_unknown_person_and_unknown_handle_are_new_person_rows(self):
         rows = gl.identity_work_items(

@@ -1941,10 +1941,10 @@ def identity_invocations(records: object) -> list[list[str]]:
     return argvs
 
 
-#: The second work-item kind the identity listener mints (v391). Not a
-#: `temporal_projection.WORK_ITEM_KINDS` member on purpose: it is about a NAME
-#: nobody on the roster answers to, carries no claim and no node, and a person
-#: it names does not exist yet. A host renders it as "New person?".
+#: The second work-item kind the identity listener mints (v391); registered in
+#: `temporal_projection.WORK_ITEM_KINDS`. It is about a NAME nobody on the
+#: roster answers to, carries no claim and no node, and a person it names does
+#: not exist yet. A host renders it as "New person?".
 NEW_PERSON_KIND = "new_person"
 IDENTITY_UNCERTAIN_KIND = "identity_uncertain"
 
@@ -1960,7 +1960,7 @@ def identity_work_items(records: object, roster: object = ()) -> list[dict]:
     deterministic: no clock, no model, idempotent — the same records give the
     same rows in the same order, and a repeated record is one row.
 
-    ``work_item_id`` is `temporal_projection.derive_work_item_id` over
+    ``work_item_id`` is `temporal_work_items.canonical_work_item_id` over
     (kind, the unresolved mention, ``identity``) — the SAME derivation Mirror's
     own ``identity_uncertain`` rows use, so the listener, the host's recording
     job and Mirror converge on one row per mention (§5.4, answer once).
@@ -1978,7 +1978,7 @@ def identity_work_items(records: object, roster: object = ()) -> list[dict]:
     import hashlib  # noqa: PLC0415
 
     import person_resolution as pr  # noqa: PLC0415
-    import temporal_projection as tp  # noqa: PLC0415
+    import temporal_work_items as twi  # noqa: PLC0415
 
     names = {pr.ref_of(row): tc.collapsed_text(row.get("name"))
              for row in pr.person_rows(roster)}
@@ -2037,7 +2037,8 @@ def identity_work_items(records: object, roster: object = ()) -> list[dict]:
             }
             if record.get("handle"):
                 row["handle"] = record["handle"]
-        row["work_item_id"] = tp.derive_work_item_id(
+        # The vocabulary's own minting (#681: one lookup, no third spelling).
+        row["work_item_id"] = twi.canonical_work_item_id(
             kind=row["kind"], subject_ref=subject_ref,
             requested_field=ir.IDENTITY_REQUESTED_FIELD)
         if row["work_item_id"] in seen:

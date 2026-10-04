@@ -1351,6 +1351,8 @@ WORK_ITEM_PLACEMENT_GAIN = {
     # v358 (`relation_words`): the answer is a word, not a date — it places
     # nothing, and it is a Timeline-only row the daily queue never reads.
     "relation_word": 0.0,
+    # v391 (#459): places no moment.
+    "new_person": 0.0,
 }
 
 #: What an item is worth when it says nothing. Neutral on value and fit, mildly
