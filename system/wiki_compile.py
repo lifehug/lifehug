@@ -1793,8 +1793,7 @@ def redirect_stub_text(desc: dict) -> str:
 def _page_is_redirect(page: Path) -> bool:
     """A redirect stub (v389) is a pointer, never an index entry."""
     try:
-        with page.open(encoding="utf-8", errors="replace") as handle:
-            return is_redirect_stub(handle.read(1024))
+        return is_redirect_stub(page.read_text(encoding="utf-8", errors="replace")[:1024])
     except OSError:
         return False
 
