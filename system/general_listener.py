@@ -74,6 +74,7 @@ import chronology as chrono  # noqa: E402
 import conversation_delivery  # noqa: E402
 import cross_dating  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
+import identity_resolution as ir  # noqa: E402
 import landmarks_interaction as li  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 from lifehug_core import INTERACTIONS_DIR, fill_how_words_arrive  # noqa: E402
@@ -476,7 +477,10 @@ def listener_heard_nothing(user_message: object, records: object,
                            findings: object = (),
                            landmarks: object = (),
                            verdict: object = None,
-                           framework_root: str | Path | None = None
+                           framework_root: str | Path | None = None,
+                           person_identity: object = (),
+                           identity_verdict: object = None,
+                           person_roster: object = (),
                            ) -> dict | None:
     """The one definition of "there was time in it and nothing came back".
 
@@ -520,13 +524,37 @@ def listener_heard_nothing(user_message: object, records: object,
     ordinary `same_event` question path is what resolves it, not a retry of
     the same prompt), so a refusal finding clears the check exactly as
     :data:`DROPPED_NON_FAMILY` does, and is not itself added to ``heard``.
+
+    **v387: a person-identity record is a thing heard, and a message that
+    only TEACHES A NAME lints too.** When the datable half finds nothing to
+    complain about, :func:`identity_heard_nothing` is asked the same question
+    of the identity prescreen — so "Mara Ellis Dunn is my wife", with no
+    date anywhere, is one retry and then withheld if nothing came back, never
+    silence. A family-only identity drop is a decision and clears it.
     """
     heard = [item for item in
              (list(records or ()) + list(people or ()) + list(claims or ())
-              + list(identity_assertions or ()))
+              + list(identity_assertions or ()) + list(person_identity or ()))
              if isinstance(item, dict) and item]
     if heard:
         return None
+    datable = _datable_heard_nothing(
+        user_message, findings=findings, landmarks=landmarks,
+        verdict=verdict, framework_root=framework_root)
+    if datable is not None:
+        return datable
+    if IDENTITY_DECISION_FINDINGS & set(findings or ()):
+        return None
+    return identity_heard_nothing(user_message, (), findings=findings,
+                                  verdict=identity_verdict,
+                                  person_roster=person_roster)
+
+
+def _datable_heard_nothing(user_message: object, *, findings: object,
+                           landmarks: object, verdict: object,
+                           framework_root: str | Path | None) -> dict | None:
+    """The pre-v387 body of :func:`listener_heard_nothing`, unchanged, for a
+    completion that heard nothing at all."""
     if DROPPED_NON_FAMILY in tuple(findings or ()):
         return None
     if any(
@@ -763,6 +791,7 @@ def render_identity_candidates(candidates: object) -> str:
 def build_listener_prompt(*, answer: str, reply: str = "",
                           landmarks: object = (),
                           identity_candidates: object = (),
+                          person_roster: object = (),
                           reminder: str = "",
                           framework_root: str | Path | None = None) -> str:
     """The listener's whole prompt, from the leaf plus its substitutions.
@@ -778,10 +807,19 @@ def build_listener_prompt(*, answer: str, reply: str = "",
     is the contract's own and cannot drift from it by a hand edit. Event
     identity I3 adds `{identity_relations}` (`episode_fold_contract.RELATIONS`,
     the same reason) and `{identity_candidates}` (:func:`render_identity_candidates`)
-    — the host's own excerpt, never a model guess.
+    — the host's own excerpt, never a model guess. v387 adds `{known_people}`
+    (`person_resolution.render_known_people`, the classifier's own renderer at
+    the listener's cap) — the roster snapshot the host passes as
+    ``person_roster``, the same one the `person_identity` list is resolved
+    against.
     """
+    import person_resolution as pr  # noqa: PLC0415
+
     filled = load_listener_leaf(framework_root)
     known = render_all_known_entries(landmarks, framework_root=framework_root)
+    known_people = pr.render_known_people(
+        person_roster, story_text=answer,
+        limit=pr.LISTENER_KNOWN_PEOPLE_LIMIT)
     relations = " | ".join(sorted(li.person_date_relations()))
     # `.replace`, never `.format` — the leaf carries literal JSON braces.
     for token, value in (
@@ -796,6 +834,7 @@ def build_listener_prompt(*, answer: str, reply: str = "",
         ("{event_kinds}", render_event_kinds()),
         ("{identity_relations}", " | ".join(efc.RELATIONS)),
         ("{identity_candidates}", render_identity_candidates(identity_candidates)),
+        ("{known_people}", known_people),
         ("{answer}", (answer or "").strip()),
         ("{reply}", (reply or "(no reply was generated)").strip()),
         ("{reminder}", f"\n\n{reminder.strip()}" if reminder else ""),
@@ -832,17 +871,22 @@ class Heard:
     #: resolved against the caller's own candidate-context excerpt, never
     #: model-minted refs (see :func:`parse_identity_assertions`).
     identity_assertions: tuple[dict, ...] = ()
+    #: v387 (identity §4.1.4): what the person TAUGHT about who somebody is —
+    #: resolved here against the host's roster snapshot (section 8). Last,
+    #: for the same positional-compat reason as the two lists above.
+    person_identity: tuple[dict, ...] = ()
 
     def __len__(self) -> int:
         return (
             len(self.landmarks) + len(self.people) + len(self.claims)
-            + len(self.identity_assertions)
+            + len(self.identity_assertions) + len(self.person_identity)
         )
 
 
 def parse_listener_output(raw: object, *,
                           framework_root: str | Path | None = None,
-                          identity_candidates: object = ()) -> Heard:
+                          identity_candidates: object = (),
+                          person_roster: object = ()) -> Heard:
     """One listener completion through the pinned validators, per record.
 
     ``landmarks`` run `conversation_delivery._parse_landmark` then
@@ -904,8 +948,13 @@ def parse_listener_output(raw: object, *,
         data.get("identity_assertions"), candidates=identity_candidates,
     )
     findings.extend(identity_refusals)
+    person_identity, person_identity_findings = parse_person_identity(
+        data.get("person_identity"), person_roster=person_roster,
+    )
+    findings.extend(person_identity_findings)
     return Heard(tuple(records), tuple(people),
-                 tuple(dict.fromkeys(findings)), claims, identity_assertions)
+                 tuple(dict.fromkeys(findings)), claims, identity_assertions,
+                 person_identity)
 
 
 # --------------------------------------------------------------------------
@@ -1466,6 +1515,444 @@ def render_event_kinds() -> str:
     return " | ".join(tc.EVENT_KINDS)
 
 
+
+# --------------------------------------------------------------------------
+# 8. Person identity — a conversation can teach who somebody is
+#    (v387, identity design §4.1.4, ADR 0029 amendment 2026-10-04)
+# --------------------------------------------------------------------------
+#
+# Before v387 an answer could not teach identity. *"Mara Ellis Dunn is my
+# wife, the Mara Holt I talk about"* filed nothing: this listener ran only
+# when the datable prescreen fired (that sentence has no date), its `people`
+# list carries DATES and drops a dateless person, and had a date been present
+# it would have `--ensure`d a brand-new row `mara-ellis-dunn` — a duplicate.
+#
+# So the listener gains a typed `person_identity` list. (The design calls it
+# the `identity` list; the JSON key says `person_` because this module already
+# owns `identity_assertions`, the EVENT-identity list, and a model shown both
+# `identity` and `identity_assertions` side by side is being invited to mix
+# them up.) Each item is what the person TAUGHT:
+#
+#   {"name": "Mara Ellis Dunn", "refers_to": "Mara Holt",
+#    "relationship": "wife", "evidence": "Mara Ellis Dunn is my wife"}
+#
+# and, exactly like `identity_assertions`, the model emits MENTIONS and THIS
+# layer resolves them — through `person_resolution.resolve_person` (the
+# adapter onto I-1's `identity_resolution.resolve_person`) against the roster
+# snapshot the host supplies. Never a model-minted ref.
+#
+# Four outcomes, by name (:data:`PERSON_IDENTITY_RESOLUTIONS`):
+#
+# * ``resolved`` — exactly one person: the record carries ``alias_of`` and
+#   :func:`identity_invocations` files ``--alias <name>`` on it (plus
+#   ``--relationship`` only when the record has none yet).
+# * ``ambiguous`` — two or more candidates (two spouses on record; "my son"
+#   in a family with two sons; a name already borne by somebody else). Nothing
+#   is filed; the host turns the record into the existing `identity_uncertain`
+#   Mirror row naming every claimant.
+# * ``unknown_person`` — nobody on the roster. **A conversation never mints a
+#   person (D3)**: nothing is filed; the host raises "New person?" as Play.
+# * ``unknown_handle`` — an explicit ``@handle`` (design §4.1.4b) that names
+#   no record. Never guessed at, never fuzzily matched.
+#
+# FAMILY-ONLY for relationship words, by the same deterministic guard the
+# `people` list uses (`landmarks_interaction.person_date_relations`): a record
+# whose relationship word maps outside the family is DROPPED with
+# :data:`DROPPED_IDENTITY_NOT_FAMILY` — a decision, not a miss.
+#
+# **THE REPLY ACKNOWLEDGES ONLY AFTER FILING (D4).** ADR 0028's "speak, then
+# file" is deliberately reversed for identity: a host files the argv this
+# module names FIRST, and only on a successful verdict may the reply say so,
+# through :func:`acknowledgement_line`. A wrong "got it" is worse than a plain
+# reply, and an alias refused by the collision rule must never be announced.
+#
+# The cost is budgeted under its own purpose, :data:`IDENTITY_RECORD_PURPOSE`
+# — never `date_record` — so a host weights and audits it on its own row.
+
+#: The listener's THIRD purpose name. A host registers its own weight; this
+#: package names the purpose and invents no number.
+IDENTITY_RECORD_PURPOSE = "identity_record"
+
+#: The blocking/retryable lint of the identity half — the
+#: :data:`LISTENER_HEARD_NOTHING_LINT` shape: the identity prescreen saw
+#: somebody being named and nothing came back.
+IDENTITY_HEARD_NOTHING_LINT = "landmark_gates.identity_heard_nothing"
+
+#: The keys a leaf may emit on ONE identity record — MENTIONS, never refs.
+PERSON_IDENTITY_PROMPT_KEYS = frozenset({"name", "refers_to", "relationship",
+                                         "evidence"})
+
+IDENTITY_RESOLVED = "resolved"
+IDENTITY_AMBIGUOUS = "ambiguous"
+UNKNOWN_PERSON = "unknown_person"
+UNKNOWN_HANDLE = "unknown_handle"
+PERSON_IDENTITY_RESOLUTIONS = (IDENTITY_RESOLVED, IDENTITY_AMBIGUOUS,
+                               UNKNOWN_PERSON, UNKNOWN_HANDLE)
+
+#: Named drops. A non-family relationship word is a DECISION (it clears the
+#: backstop, like :data:`DROPPED_NON_FAMILY`); a malformed record is not.
+DROPPED_IDENTITY_NOT_FAMILY = "identity_relation_not_family"
+DROPPED_IDENTITY_MALFORMED = "identity_record_malformed"
+IDENTITY_DECISION_FINDINGS = frozenset({DROPPED_IDENTITY_NOT_FAMILY})
+
+#: A capitalised name, case-sensitive by design — that capital IS the signal.
+#: Never a pronoun, a determiner, a sentence-opening function word, or a
+#: relationship word ("Mom was my rock" teaches nobody a name).
+_NAME_STOP = (r"(?!(?:I|He|She|They|We|It|This|That|These|Those|There|Here|My|"
+              r"Our|His|Her|Their|And|But|So|Then|When|What|Who|Yes|No|"
+              r"The|A|An|" + "|".join(
+                  w.capitalize() for w in sorted(
+                      ir.RELATIONSHIP_MENTION_WORDS,
+                      key=len, reverse=True)) + r")\b)")
+_NAME_WORD = r"[A-Z](?:[a-z'\u2019]+|[A-Z]{1,3}\b)"
+_NAME = (_NAME_STOP + _NAME_WORD + r"(?:[ -](?:" + _NAME_STOP + _NAME_WORD
+         + r"|[A-Z]\.))*")
+
+#: The relationship words — DERIVED from
+#: `identity_resolution.RELATIONSHIP_MENTION_WORDS`, never re-typed.
+_REL_WORDS = "|".join(sorted(
+    ir.RELATIONSHIP_MENTION_WORDS,
+    key=len, reverse=True))
+_REL = rf"(?i:(?:my|our)\s+(?:[a-z]+\s+){{0,2}}(?:{_REL_WORDS})s?)\b"
+
+#: The explicit-reference token (design §4.1.4b).
+_HANDLE = r"@[a-z0-9][a-z0-9-]*"
+
+#: reason -> patterns, the `PRESCREEN_TABLES` shape. Each pattern's ``name``
+#: group (or ``handle``) is what the restatement check resolves.
+IDENTITY_PRESCREEN_TABLES: dict[str, tuple] = {
+    # "Mara Ellis Dunn is my wife" / "Bo was our grandpa"
+    "name_is_relation": (
+        re.compile(rf"(?P<name>{_NAME})\s+(?:is|was)\s+(?:also\s+)?{_REL}"),
+    ),
+    # "my wife Mara" / "my wife, Mara Ellis" / "Mara, my wife"
+    "relation_name": (
+        re.compile(rf"\b{_REL},?\s+(?P<name>{_NAME})"),
+        re.compile(rf"(?P<name>{_NAME}),\s+{_REL}"),
+    ),
+    # "Mara is my ..." — the design's bare "is/was my"
+    "is_my": (
+        re.compile(rf"(?P<name>{_NAME})\s+(?:is|was)\s+(?:also\s+)?(?:my|our)\b"),
+    ),
+    # "also known as BL", "goes by Kit", "née Merrill", "we called her Dot"
+    "also_known_as": (
+        re.compile(r"(?i:\b(?:also\s+known\s+as|a\.?k\.?a\.?|goes\s+by|"
+                   r"went\s+by|n[ée]e))\s+(?P<name>" + _NAME + ")"),
+        re.compile(r"(?i:\bwe\s+(?:call|called)\s+(?:her|him|them))\s+"
+                   r"(?P<name>" + _NAME + ")"),
+    ),
+    # "this is @mara-holt", "same as @dad", "@mara-holt is ..."
+    "handle": (
+        re.compile(r"\b(?:is|this\s+is|same\s+as|in)\s+(?P<handle>" + _HANDLE + ")",
+                   re.IGNORECASE),
+        re.compile(r"(?P<handle>" + _HANDLE + r")\s+(?:is|was)\b", re.IGNORECASE),
+    ),
+}
+IDENTITY_PRESCREEN_REASONS = tuple(IDENTITY_PRESCREEN_TABLES)
+
+
+def may_contain_identity(text: object) -> Verdict:
+    """*Could* this message teach who somebody is? Deterministic.
+
+    The :func:`may_contain_datable` twin: a capitalised name within one clause
+    of a relationship word, of "is/was my", "also known as", "goes by", "née",
+    "we call(ed) her/him", or an ``@handle`` beside "is"/"this is"/"same as"/
+    "in". Matched per CLAUSE, so a relationship word in one clause never
+    reaches a name in the next. ``terms`` are the names (and ``@handles``)
+    seen — what :func:`identity_heard_nothing` resolves to recognise a
+    restatement. Over-firing costs one haiku-class regeneration; under-firing
+    is a name nobody hears.
+    """
+    body = text if isinstance(text, str) else ""
+    if not body.strip():
+        return Verdict(False)
+    reasons: list[str] = []
+    terms: list[str] = []
+    for clause in re.split(r"[.;!?\n]+", body):
+        if not clause.strip():
+            continue
+        for reason in IDENTITY_PRESCREEN_REASONS:
+            for pattern in IDENTITY_PRESCREEN_TABLES[reason]:
+                for match in pattern.finditer(clause):
+                    groups = match.groupdict()
+                    term = " ".join((groups.get("name") or groups.get("handle")
+                                     or "").split())
+                    if reason not in reasons:
+                        reasons.append(reason)
+                    if term and term not in terms and len(terms) < MAX_TERMS:
+                        terms.append(term)
+    ordered = tuple(r for r in IDENTITY_PRESCREEN_REASONS if r in reasons)
+    return Verdict(bool(ordered), ordered, tuple(terms))
+
+
+def should_listen(text: object) -> bool:
+    """The host's gate for running the listener at all (identity §4.2.5): the
+    datable prescreen OR the identity prescreen. A message that only teaches
+    a name — no date anywhere — is now heard."""
+    return bool(may_contain_datable(text)) or bool(may_contain_identity(text))
+
+
+#: What a host appends to the ONE regeneration when the identity lint fires.
+IDENTITY_REMINDER = (
+    "You recorded no `person_identity`, and they named somebody{term_clause}. "
+    "Read it again: if they said who a person is — another name for someone "
+    "(\"X is my wife\", \"also known as\", \"goes by\", \"this is @handle\") — "
+    "emit a `person_identity` record for it. Record only what they actually "
+    "said — never invent a name, a relationship or a person — and if they "
+    "taught nobody anything, emit the empty list."
+)
+
+
+def identity_reminder(verdict: object = None) -> str:
+    terms = tuple(getattr(verdict, "terms", ()) or ())
+    clause = ""
+    if terms:
+        clause = " — " + ", ".join(f'"{term}"' for term in terms[:4])
+    return IDENTITY_REMINDER.format(term_clause=clause)
+
+
+def _identity_term_consumed(term: str, person_roster: object) -> bool:
+    """A name the roster ALREADY resolves is a restatement, not a lesson."""
+    import person_resolution as pr  # noqa: PLC0415
+
+    return pr.resolve_person(term, person_roster).resolved
+
+
+def _heard_tokens(heard: object) -> frozenset[str]:
+    """Every word of every string value of every record already heard."""
+    tokens: set[str] = set()
+
+    def walk(value: object) -> None:
+        if isinstance(value, str):
+            tokens.update(t.casefold() for t in _TERM_TOKEN_RE.findall(value))
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item)
+
+    walk(heard)
+    return frozenset(tokens)
+
+
+def identity_heard_nothing(user_message: object, person_identity: object, *,
+                           findings: object = (), verdict: object = None,
+                           person_roster: object = (),
+                           also_heard: object = ()) -> dict | None:
+    """The one definition of "somebody was named and no identity came back".
+
+    :func:`listener_heard_nothing`'s shape, read over the identity list: a
+    finding or ``None``. ``None`` when an identity record came back, when a
+    family-only drop decided it (:data:`IDENTITY_DECISION_FINDINGS`), when the
+    prescreen did not fire, when the person declined, or when EVERY name the
+    prescreen saw already resolves on the roster — v216's restatement dedupe,
+    decidable here because the roster answers it — or is already named by a
+    record the same completion DID return (``also_heard``: "my sister Ruth
+    was born in 1948" is answered by Ruth's `people` record, and a retry
+    asking for her identity too would be noise).
+    """
+    if any(isinstance(item, dict) and item for item in (person_identity or ())):
+        return None
+    if IDENTITY_DECISION_FINDINGS & set(findings or ()):
+        return None
+    if verdict is None:
+        verdict = may_contain_identity(user_message)
+    if not getattr(verdict, "fired", False):
+        return None
+    if li.answer_shape(user_message, "") == "skip":
+        return None
+    terms = tuple(getattr(verdict, "terms", ()) or ())
+    covered = _heard_tokens(also_heard)
+    if terms and all(
+            _identity_term_consumed(term, person_roster)
+            or _consumed(term, covered) for term in terms):
+        return None
+    quoted = ", ".join(f'"{term}"' for term in terms[:4]) or ", ".join(
+        getattr(verdict, "reasons", ()) or ())
+    return {
+        "lint": IDENTITY_HEARD_NOTHING_LINT,
+        "detail": ("they named somebody and no identity was recorded — "
+                   f"{quoted}: emit the person_identity record"),
+        "reasons": tuple(getattr(verdict, "reasons", ()) or ()),
+    }
+
+
+def _family_relationship(word: object) -> tuple[str, bool]:
+    """``(roster relationship, is_family)`` for a spoken relationship word."""
+    import roster_relations as rr  # noqa: PLC0415
+
+    stem = ir.relation_word_stem(word) or ir.normalized_mention_key(word)
+    relationship = rr.roster_relationship_for(stem) if stem else ""
+    if not relationship and stem in li.person_date_relations():
+        relationship = stem
+    return relationship, relationship in li.person_date_relations()
+
+
+def validate_person_identity(value: object, *,
+                             person_roster: object = ()) -> tuple[dict | None, str]:
+    """One emitted identity record, RESOLVED here. ``(record, finding)``.
+
+    The returned record is ``{name, alias_of, alias_of_name, relationship,
+    basis, evidence, resolution, candidates, file_relationship}``:
+    ``alias_of`` is a ``person/<slug>`` ref ONLY when ``resolution`` is
+    ``resolved``; ``basis`` is ``handle`` when the person typed an explicit
+    ``@handle`` and ``statement`` otherwise.
+    """
+    import person_resolution as pr  # noqa: PLC0415
+
+    if not isinstance(value, dict) or not value:
+        return None, DROPPED_IDENTITY_MALFORMED
+    if not set(value) <= PERSON_IDENTITY_PROMPT_KEYS:
+        return None, DROPPED_IDENTITY_MALFORMED
+    name = tc.collapsed_text(value.get("name"))[:PERSON_NAME_LIMIT]
+    if not name or not li.person_slug(name) or pr.parse_handles(name):
+        return None, DROPPED_IDENTITY_MALFORMED
+    refers_to = tc.collapsed_text(value.get("refers_to"))
+    word = tc.collapsed_text(value.get("relationship")).casefold() or None
+    if word in ("unknown", "none"):
+        word = None
+    relationship = ""
+    if word:
+        relationship, family = _family_relationship(word)
+        if not family:
+            # D3 + the owner's family-only ruling, enforced HERE, not by the leaf.
+            return None, DROPPED_IDENTITY_NOT_FAMILY
+    record: dict = {"name": name, "alias_of": None, "alias_of_name": None,
+                    "relationship": word, "basis": pr.BASIS_STATEMENT,
+                    "evidence": tc.collapsed_text(value.get("evidence")) or None,
+                    "resolution": UNKNOWN_PERSON, "candidates": [],
+                    "file_relationship": None}
+
+    handles = pr.parse_handles(refers_to)
+    if handles:
+        # §4.1.4b: an explicit reference. Exact, no model judgement.
+        record["basis"] = pr.BASIS_HANDLE
+        found = pr.resolve_handle(handles[0], person_roster)
+        if not found.resolved:
+            record["resolution"] = UNKNOWN_HANDLE
+            record["handle"] = handles[0]
+            return record, ""
+    else:
+        found = _resolve_target(refers_to, word, person_roster)
+
+    if found.kind == pr.AMBIGUOUS:
+        record["resolution"] = IDENTITY_AMBIGUOUS
+        record["candidates"] = list(found.candidates)
+        return record, ""
+    if not found.resolved:
+        record["candidates"] = list(found.candidates)
+        return record, ""
+    # The taught name must not already be somebody ELSE's: that is a
+    # collision, never a silent re-point.
+    owner = pr.resolve_person(name, person_roster)
+    if owner.resolved and owner.ref != found.ref:
+        record["resolution"] = IDENTITY_AMBIGUOUS
+        record["candidates"] = [found.ref, owner.ref]
+        return record, ""
+    target = next((row for row in pr.person_rows(person_roster)
+                   if pr.ref_of(row) == found.ref), {})
+    record["resolution"] = IDENTITY_RESOLVED
+    record["alias_of"] = found.ref
+    record["alias_of_name"] = tc.collapsed_text(target.get("name")) or None
+    record["candidates"] = [found.ref]
+    if relationship and not ir.collapsed_text(
+            target.get(ir.ROSTER_RELATIONSHIP_KEY)):
+        record["file_relationship"] = relationship
+    return record, ""
+
+
+def _resolve_target(refers_to: str, word: str | None, person_roster: object):
+    """Who the record is ABOUT: the ``refers_to`` mention and the
+    relationship word, each resolved; they must agree or it is ambiguous."""
+    import person_resolution as pr  # noqa: PLC0415
+
+    context = {"relationship": word} if word else None
+    by_mention = (pr.resolve_person(refers_to, person_roster, context=context)
+                  if refers_to else None)
+    by_word = (pr.resolve_person(f"my {word}", person_roster)
+               if word else None)
+    if by_mention is None and by_word is None:
+        return pr.Resolution(pr.UNKNOWN, reason="no_target")
+    if by_mention is None:
+        return by_word
+    if by_word is None or not by_word.resolved:
+        return by_mention
+    if by_mention.resolved and by_mention.ref != by_word.ref:
+        return pr.Resolution(pr.AMBIGUOUS,
+                             candidates=(by_mention.ref, by_word.ref),
+                             reason="mention_and_relationship_disagree")
+    if by_mention.kind == pr.UNKNOWN:
+        return by_word
+    return by_mention
+
+
+def parse_person_identity(payload: object, *, person_roster: object = ()
+                          ) -> tuple[tuple[dict, ...], tuple[str, ...]]:
+    """A leaf's ``person_identity`` list, each record judged ALONE."""
+    if isinstance(payload, dict):
+        payload = [payload]
+    if not isinstance(payload, (list, tuple)):
+        return (), ()
+    records: list[dict] = []
+    findings: list[str] = []
+    for candidate in payload:
+        record, finding = validate_person_identity(candidate,
+                                                   person_roster=person_roster)
+        if record is not None:
+            if record not in records:
+                records.append(record)
+        elif finding:
+            findings.append(finding)
+    return tuple(records), tuple(dict.fromkeys(findings))
+
+
+def identity_invocations(records: object) -> list[list[str]]:
+    """The ``entity-verdict`` argv that files each RESOLVED identity record.
+
+    ADR 0021: the package names the argv, the host writes it. Verdict
+    ``clear`` (an identity, not a page verdict); ``--alias`` under the v383
+    collision rule (`roster_relations.alias_decision` — a refusal surfaces as
+    `EntityAliasContested`, which the host turns into an `identity_uncertain`
+    row); ``--relationship`` only when the record had none; **never
+    ``--ensure``** — a conversation never mints a person (D3). ``ambiguous``,
+    ``unknown_person`` and ``unknown_handle`` records file nothing.
+    """
+    import person_resolution as pr  # noqa: PLC0415
+
+    argvs: list[list[str]] = []
+    for record in records or ():
+        if not isinstance(record, dict):
+            continue
+        if record.get("resolution") != IDENTITY_RESOLVED or not record.get("alias_of"):
+            continue
+        slug = pr.slug_of_ref(record["alias_of"])
+        argv = ["entity-verdict", "person", slug, "clear",
+                "--alias", str(record["name"])]
+        if record.get("file_relationship"):
+            argv.extend(["--relationship", str(record["file_relationship"])])
+        if argv not in argvs:
+            argvs.append(argv)
+    return argvs
+
+
+def acknowledgement_line(record: object) -> str:
+    """What the reply MAY say — and only AFTER the host filed the record (D4).
+
+    ``""`` for anything not ``resolved``: an ambiguous or unknown record is a
+    question for the Mirror, never a "got it".
+    """
+    if not isinstance(record, dict) or record.get("resolution") != IDENTITY_RESOLVED:
+        return ""
+    target = record.get("alias_of_name") or ""
+    name = record.get("name") or ""
+    if not target or not name:
+        return ""
+    if tc.normalized_mention_key(target) == tc.normalized_mention_key(name):
+        return ""
+    return f"Got it — {name} is {target}."
+
+
 # --------------------------------------------------------------------------
 # CLI — the stdin-JSON path every prompt builder in this package carries
 # --------------------------------------------------------------------------
@@ -1473,7 +1960,7 @@ def render_event_kinds() -> str:
 def main(argv: list[str] | None = None) -> int:
     """`general_listener.py [--dry-run] < payload.json`.
 
-    Payload: ``{"answer", "reply"?, "landmarks"?}``. ``--dry-run`` prints the
+    Payload: ``{"answer", "reply"?, "landmarks"?, "person_roster"?}``. ``--dry-run`` prints the
     composed prompt and the prescreen verdict and calls nothing, which is how
     a host verifies its own REPLAY against this leaf without spending a
     completion.
@@ -1493,13 +1980,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.dry_run:
             verdict = may_contain_datable(answer)
+            heard_identity = may_contain_identity(answer)
             print(json.dumps({"prescreen": {"fired": verdict.fired,
                                             "reasons": list(verdict.reasons),
-                                            "terms": list(verdict.terms)}},
+                                            "terms": list(verdict.terms)},
+                              "identity_prescreen": {
+                                  "fired": heard_identity.fired,
+                                  "reasons": list(heard_identity.reasons),
+                                  "terms": list(heard_identity.terms)}},
                              indent=2, sort_keys=True))
             print(build_listener_prompt(
                 answer=answer, reply=payload.get("reply", ""),
-                landmarks=payload.get("landmarks") or {}))
+                landmarks=payload.get("landmarks") or {},
+                person_roster=payload.get("person_roster") or {}))
             return 0
         from ai_provider import call_ai  # noqa: PLC0415
         from landmark_recorder import (  # noqa: PLC0415
@@ -1511,6 +2004,7 @@ def main(argv: list[str] | None = None) -> int:
         outcome = listen_to_answer(
             answer=answer, reply=payload.get("reply", ""),
             landmarks=payload.get("landmarks") or {},
+            person_roster=payload.get("person_roster") or {},
             call=call_ai, model=args.model,
         )
     except (li.LandmarkInteractionError, GeneralListenerError) as exc:
@@ -1528,6 +2022,11 @@ def main(argv: list[str] | None = None) -> int:
         "extractor_version": listener_extractor_version(model=args.model),
         "invocations": li.landmark_invocations(outcome.records)
         + person_invocations(outcome.people),
+        # v387: identity argv, kept apart because a host files it FIRST and
+        # acknowledges only on success (D4), and budgets it as
+        # `identity_record`.
+        "person_identity": list(outcome.person_identity),
+        "identity_invocations": identity_invocations(outcome.person_identity),
         "attempts": outcome.attempts,
         "lint_ids": list(outcome.lint_ids),
         "findings": list(outcome.findings),

@@ -839,11 +839,12 @@ class ListenerLeafTests(unittest.TestCase):
 
     def test_identity_assertions_is_the_fourth_and_last_heard_field(self):
         """v229's `claims` precedent, extended: a positional caller keeps
-        building the same `Heard`."""
+        building the same `Heard`. v387 appends `person_identity` AFTER it,
+        so `identity_assertions` keeps its position (the fifth field)."""
         fields = [f.name for f in gl.Heard.__dataclass_fields__.values()]
-        self.assertEqual(fields[-1], "identity_assertions")
+        self.assertEqual(fields[-1], "person_identity")
         self.assertEqual(fields, ["landmarks", "people", "findings", "claims",
-                                  "identity_assertions"])
+                                  "identity_assertions", "person_identity"])
 
     def test_len_counts_identity_assertions_too(self):
         heard = gl.Heard(identity_assertions=({"telling_ref": TELLING_A,

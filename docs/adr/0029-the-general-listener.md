@@ -272,3 +272,69 @@ reply itself against that card, or an `occurrence` telling of its node when the
 reply carries no time at all; and the amendment's own rule is unchanged where no
 card is named, so a message that produced nothing and answers nothing still files
 nothing.
+
+## Amendment (v387, 2026-10-04): the identity list
+
+An answer could not teach identity. *"Mara Ellis Dunn is my wife, the Mara
+Holt I talk about"* — the owner's own sentence, by shape — filed nothing: the
+listener ran only when the datable prescreen fired, and that sentence carries no
+date; its `people` list is person DATES and drops a dateless person by design
+(`person_record_has_no_date`); and had a date been present, `person_invocations`
+would have `--ensure`d a brand-new row for the new spelling — a duplicate of the
+very person the sentence was about. The identity-unification design
+(lifehug-platform `docs/design/identity.md` §4.1.4, #987) makes conversation the
+third door onto the one alias writer.
+
+**A third typed list, not a wider `people`.** The listener gains
+`person_identity` beside `landmarks` and `people` (the design calls it the
+`identity` list; the key says `person_` because this module already owns
+`identity_assertions`, the EVENT-identity list, and two keys named `identity`
+and `identity_assertions` side by side invite a model to mix them). Widening
+`people` was refused for the reason this ADR refused a heterogeneous bag in the
+first place: the two lists file through different seams with different rules.
+A `people` record is a DATE about a family member and may `--ensure` the row it
+dates (v217's seam); an identity record is a NAME for a person who must already
+exist, and may never mint one. One list carrying both would need a per-record
+mode switch, and a single mis-set flag would turn "Mara Ellis Dunn is my
+wife" into a new person.
+
+**Mentions in, resolution here.** As with `identity_assertions`, the leaf emits
+mentions — `{name, refers_to, relationship, evidence}` — and the package
+resolves them deterministically against the roster snapshot the host passes
+(`person_roster`) through `person_resolution.resolve_person`, the adapter onto
+`identity_resolution.resolve_person` (I-1). Four named outcomes: `resolved`
+(exactly one person — `entity-verdict person <slug> clear --alias <name>`, plus
+`--relationship` only when the record has none, never `--ensure`);
+`ambiguous` (two spouses on record, "my daughter" in a family with two, a name
+already borne by someone else — nothing filed, the host raises the existing
+`identity_uncertain` Mirror row with every claimant); `unknown_person` (nobody
+on the roster — **a conversation never mints a person**, decision D3; the host
+offers "New person?"); `unknown_handle` (an explicit `@handle`, design
+§4.1.4b, naming no record — never guessed). A relationship word resolves on its
+own only when it has cardinality one (wife, husband, dad, mother …); a set
+word (son, sister, grandparent) only narrows.
+
+**Family only, by the guard.** A relationship word that maps outside the
+family drops the record by name (`identity_relation_not_family`) — the same
+`person_date_relations` guard the `people` list uses, never the prompt alone.
+
+**The prescreen and the backstop.** `may_contain_identity` is the
+`may_contain_datable` twin — table-driven, case-sensitive on the capital that
+is the signal, matched per clause, relationship words DERIVED from
+`identity_resolution.RELATIONSHIP_MENTION_WORDS`. A host now runs the listener
+when `should_listen` (datable OR identity) fires. A completion that hears
+nothing at all on an identity-firing message lints
+`landmark_gates.identity_heard_nothing`, retries once and is withheld — the
+`listener_heard_nothing` shape exactly. When other facts DID come back, the
+same lint costs the same single retry and then files what it has: a missed
+identity never withholds a heard date. A name the roster already resolves, or
+that a returned record already names, is a restatement and clears it.
+
+**The reply acknowledges only after filing (D4).** ADR 0028's "speak, then
+file" is reversed for identity, deliberately: the host files the argv first and
+only a successful verdict may be acknowledged (`acknowledgement_line`). An
+alias the collision rule refuses must never have been announced.
+
+**Its own purpose name.** The identity half is budgeted as
+`identity_record` — never `date_record` — so the host can weight and audit it
+on its own row. This package names the purpose and sets no number.

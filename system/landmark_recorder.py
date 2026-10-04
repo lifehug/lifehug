@@ -161,6 +161,12 @@ class RecorderOutcome:
     #: Always empty in focused mode and for a completion that emitted no
     #: `identity_assertions` list.
     identity_assertions: tuple[dict, ...] = ()
+    #: v387 (identity §4.1.4): the PERSON-IDENTITY records a no-focus pass
+    #: heard, already resolved against the host's roster snapshot
+    #: (`general_listener.validate_person_identity`). Filed through
+    #: `general_listener.identity_invocations` — never `--ensure`. Last, for
+    #: the same reason as the two fields above.
+    person_identity: tuple[dict, ...] = ()
 
     @property
     def record(self) -> dict | None:
@@ -688,6 +694,7 @@ def record_answer(*, answer: str, call, domain: str | None = None,
                   reply: str = "", question_asked: str = "",
                   landmarks: object = (), known_labels: object = (),
                   identity_candidates: object = (),
+                  person_roster: object = (),
                   model: str = DEFAULT_RECORDER_ROLE,
                   framework_root: str | Path | None = None) -> RecorderOutcome:
     """Run the recorder over one answer: extract, lint, retry once, file.
@@ -766,6 +773,16 @@ def record_answer(*, answer: str, call, domain: str | None = None,
     clears the backstop by the same reasoning `DROPPED_NON_FAMILY` does —
     see `general_listener.listener_heard_nothing`.
 
+    **v387 adds a FIFTH typed output, `person_identity`, to the same rung —
+    still never a third attempt.** ``person_roster`` is the host's person
+    roster snapshot; the listener prompt shows it and each identity record is
+    resolved against it. The identity prescreen
+    (`general_listener.may_contain_identity`) joins the backstop: a message
+    that only teaches a name and comes back empty lints
+    `IDENTITY_HEARD_NOTHING_LINT` and withholds after the one retry; a
+    message whose OTHER facts came back but whose identity did not gets the
+    same single retry and then files what it has, carrying the lint id.
+
     ``known_labels`` is DERIVED, not hand-passed (v216, lifehug#230). Both
     lints take it and both were being run with an empty one, because the only
     thing that could fill it — the entries already in the store — reached this
@@ -779,6 +796,8 @@ def record_answer(*, answer: str, call, domain: str | None = None,
     known = () if listening else li.known_entry_labels(
         landmarks, domain, extra=known_labels, framework_root=framework_root)
     verdict = gl.may_contain_datable(answer) if listening else None
+    identity_verdict = gl.may_contain_identity(answer) if listening else None
+    person_identity: tuple[dict, ...] = ()
     prompts: list[str] = []
     reminder = ""
     finding: dict | None = None
@@ -792,6 +811,7 @@ def record_answer(*, answer: str, call, domain: str | None = None,
             gl.build_listener_prompt(answer=answer, reply=reply,
                                      landmarks=landmarks, reminder=reminder,
                                      identity_candidates=identity_candidates,
+                                     person_roster=person_roster,
                                      framework_root=framework_root)
             if listening else
             build_recorder_prompt(
@@ -804,11 +824,12 @@ def record_answer(*, answer: str, call, domain: str | None = None,
         try:
             raw = call(prompt, model)
         except Exception as exc:  # noqa: BLE001 — provider failures are data here
-            if best or people or claims or identity_assertions:
+            if best or people or claims or identity_assertions or person_identity:
                 return RecorderOutcome(status=STATUS_RECORDED, records=best,
                                        people=people, findings=findings,
                                        claims=claims,
                                        identity_assertions=identity_assertions,
+                                       person_identity=person_identity,
                                        attempts=attempt, reason=str(exc),
                                        prompts=tuple(prompts))
             return RecorderOutcome(status=STATUS_UNAVAILABLE, attempts=attempt,
@@ -821,20 +842,43 @@ def record_answer(*, answer: str, call, domain: str | None = None,
             heard = gl.parse_listener_output(
                 raw, framework_root=framework_root,
                 identity_candidates=identity_candidates,
+                person_roster=person_roster,
             )
             heard_landmarks, unnamed = refuse_unnamed_tenures(heard.landmarks)
             findings = tuple(dict.fromkeys(findings + heard.findings + unnamed))
-            if len(heard) > len(best) + len(people) + len(claims) + len(identity_assertions):
-                best, people, claims, identity_assertions = (
+            if len(heard) > (len(best) + len(people) + len(claims)
+                             + len(identity_assertions) + len(person_identity)):
+                best, people, claims, identity_assertions, person_identity = (
                     heard_landmarks, heard.people, heard.claims,
-                    heard.identity_assertions,
+                    heard.identity_assertions, heard.person_identity,
                 )
             finding = gl.listener_heard_nothing(
                 answer, best, people, claims=claims,
                 identity_assertions=identity_assertions, findings=findings,
                 landmarks=landmarks, verdict=verdict,
-                framework_root=framework_root)
+                framework_root=framework_root,
+                person_identity=person_identity,
+                identity_verdict=identity_verdict,
+                person_roster=person_roster)
             if finding is None:
+                # v387: the identity half, when other facts came back. One
+                # retry, never a withhold — the facts already heard file.
+                untaught = gl.identity_heard_nothing(
+                    answer, person_identity, findings=findings,
+                    verdict=identity_verdict, person_roster=person_roster,
+                    also_heard=(best, people, claims))
+                if untaught is not None:
+                    if attempt < MAX_ATTEMPTS:
+                        reminder = gl.identity_reminder(identity_verdict)
+                        continue
+                    return RecorderOutcome(
+                        status=STATUS_RECORDED, records=best, people=people,
+                        claims=claims, identity_assertions=identity_assertions,
+                        person_identity=person_identity, findings=findings,
+                        attempts=attempt,
+                        lint_ids=(gl.IDENTITY_HEARD_NOTHING_LINT,),
+                        reason=str(untaught.get("detail", "")),
+                        prompts=tuple(prompts))
                 # v229: the plurality rung, read over the CLAIMS. Same
                 # severity as `RECORD_EVERY_ENTRY_LINT` and the same single
                 # regeneration: it can never withhold, because a partial set
@@ -844,10 +888,12 @@ def record_answer(*, answer: str, call, domain: str | None = None,
                 if missed is None or attempt == MAX_ATTEMPTS:
                     return RecorderOutcome(
                         status=(STATUS_RECORDED
-                                if (best or people or claims or identity_assertions)
+                                if (best or people or claims or identity_assertions
+                                    or person_identity)
                                 else STATUS_NOTHING),
                         records=best, people=people, claims=claims,
                         identity_assertions=identity_assertions,
+                        person_identity=person_identity,
                         findings=findings, attempts=attempt,
                         lint_ids=((gl.CLAIMS_MISSING_SUBJECTS_LINT,) if missed
                                   else ()),
@@ -856,7 +902,9 @@ def record_answer(*, answer: str, call, domain: str | None = None,
                 reminder = gl.every_claim_reminder(len(claims),
                                                    missed.get("missed"))
                 continue
-            reminder = gl.listening_reminder(verdict)
+            reminder = (gl.identity_reminder(identity_verdict)
+                        if finding.get("lint") == gl.IDENTITY_HEARD_NOTHING_LINT
+                        else gl.listening_reminder(verdict))
             continue
         records, unnamed = refuse_unnamed_tenures(
             parse_recorder_output(raw, framework_root=framework_root))
@@ -915,8 +963,9 @@ def record_answer(*, answer: str, call, domain: str | None = None,
         status=STATUS_WITHHELD, attempts=MAX_ATTEMPTS,
         people=people, findings=findings, claims=claims,
         identity_assertions=identity_assertions,
-        lint_ids=((gl.LISTENER_HEARD_NOTHING_LINT,) if listening
-                  else (li.ANSWER_MUST_RECORD_LINT,)),
+        person_identity=person_identity,
+        lint_ids=(((finding or {}).get("lint") or gl.LISTENER_HEARD_NOTHING_LINT,)
+                  if listening else (li.ANSWER_MUST_RECORD_LINT,)),
         reason=str((finding or {}).get("detail", "")),
         prompts=tuple(prompts),
     )
@@ -925,6 +974,7 @@ def record_answer(*, answer: str, call, domain: str | None = None,
 def listen_to_answer(*, answer: str, call, reply: str = "",
                      landmarks: object = (),
                      identity_candidates: object = (),
+                     person_roster: object = (),
                      model: str = gl.DEFAULT_LISTENER_ROLE,
                      framework_root: str | Path | None = None
                      ) -> RecorderOutcome:
@@ -948,6 +998,7 @@ def listen_to_answer(*, answer: str, call, reply: str = "",
     return record_answer(domain=None, answer=answer, call=call, reply=reply,
                          landmarks=landmarks,
                          identity_candidates=identity_candidates,
+                         person_roster=person_roster,
                          model=model, framework_root=framework_root)
 
 
