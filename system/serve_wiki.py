@@ -51,6 +51,7 @@ from lifehug_core import (
     split_frontmatter,
 )
 from entity_roster import ENTITY_TYPES, THRESHOLDS, load_identity_roster, load_roster
+from design import palette as _palette
 import focus_pages
 import identity_resolution as _ir
 from question_candidates import AUTO_PROMOTE_THRESHOLD, unified_quality_score, _infer_category
@@ -399,6 +400,7 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       --line: #ddd8cf; --line-soft: #e5dfd5; --border-strong: #c8c2b8;
       --card-bg: #fff; --card-warm: #fffdf9;
     }}
+    {_palette.css()}
     body {{ margin: 0; overflow-x: hidden; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }}
     header {{ height: 52px; display: flex; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid #ddd8cf; background: #fff; position: sticky; top: 0; z-index: 20; }}
     header a {{ color: #202124; text-decoration: none; font-weight: 650; }}
@@ -578,19 +580,36 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       padding: 4px 16px 2px; margin: 0 0 26px; }}
     .source-meta table {{ margin-bottom: 8px; }}
     .source-body {{ overflow-wrap: anywhere; }}
+    /* The design palette (system/design/palette.yaml, mirrored from lifehug-platform):
+       --graph-<type>, --graph-relationship, --graph-link and the --lh-* surface/ink tokens
+       are generated above, light under :root and dark under prefers-color-scheme. */
     #graph {{ width: 100%; max-width: 100%; height: calc(100vh - 190px); height: calc(100dvh - 190px);
-      border: 1px solid #e5dfd5; border-radius: 10px; background: #fffdf9; touch-action: none; user-select: none; display: block; }}
+      border: 1px solid var(--lh-rule); border-radius: 10px; background: var(--lh-surface); touch-action: none; user-select: none; display: block; }}
+    /* No box, ever: selection and keyboard focus are the same ring (a circle at radius+4 in the node's type colour). */
+    #graph, #graph g {{ outline: none; }}
+    #graph .focus-ring {{ opacity: 0; }}
+    #graph g:focus-visible .focus-ring {{ opacity: 1; }}
     .halo-swatch {{ display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid #d4a72c; vertical-align: -1px; }}
     .graph-legend {{ display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: #6b5d49; margin: 6px 0 10px; }}
     .graph-toolbar {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }}
-    .graph-toolbar button, .graph-toolbar a {{ font: inherit; font-size: 13px; font-weight: 600; color: var(--link);
-      background: var(--card-bg); border: 1px solid #d8cdbb; border-radius: 6px; padding: 6px 12px; min-height: 36px;
-      text-decoration: none; display: inline-flex; align-items: center; box-sizing: border-box; }}
-    .graph-stage {{ min-width: 0; max-width: 100%; }}
-    .graph-stage:fullscreen, .graph-stage.graph-full {{ background: var(--card-warm); padding: 12px; box-sizing: border-box; }}
+    /* The ONE control class set. Twin of lifehug-platform apps/web/components/controls.module.css
+       (`.control`, `.cornerControls`) plus the graph's 44px modifier (`.graphControl`). */
+    .control {{ font: inherit; font-size: 0.82rem; padding: 0.3rem 0.6rem; border-radius: 6px;
+      border: 1px solid var(--lh-rule); background: transparent; color: inherit; cursor: pointer; text-decoration: none; }}
+    .cornerControls {{ position: absolute; top: 0.45rem; right: 0.55rem; z-index: 1;
+      display: inline-flex; align-items: center; gap: 0.3rem; }}
+    .graph-stage .graphControl, .graph-toolbar .graphControl {{ min-width: 2.75rem; min-height: 2.75rem; padding: 0 0.75rem; font-weight: 600;
+      background: var(--lh-surface); color: var(--lh-ink); display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; }}
+    .graphControl[hidden], .cornerControls[hidden] {{ display: none; }}
+    .graphControl:focus-visible {{ outline: 2px solid var(--link); outline-offset: 2px; }}
+    .graph-stage {{ position: relative; min-width: 0; max-width: 100%; color: var(--lh-ink); }}
+    .graph-stage:fullscreen, .graph-stage.graph-full {{ background: var(--lh-surface); padding: 12px; box-sizing: border-box; }}
     .graph-stage:fullscreen #graph, .graph-stage.graph-full #graph {{ height: calc(100vh - 88px); height: calc(100dvh - 88px); }}
+    .graph-types {{ list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 8px 0 0; padding: 0; font-size: 13px; color: var(--ink-mid); }}
+    .graph-types .swatch {{ display: inline-block; width: 0.7rem; height: 0.7rem; margin-right: 0.45rem; border-radius: 50%; vertical-align: baseline; }}
     .graph-list {{ list-style: none; margin: 0; padding: 0; }}
-    .graph-list a {{ display: flex; align-items: center; min-height: 36px; padding: 4px 2px; overflow-wrap: anywhere; }}
+    .graph-list {{ background: var(--lh-surface); color: var(--lh-ink); }}
+    .graph-list a {{ display: flex; align-items: center; min-height: 44px; padding: 4px 2px; overflow-wrap: anywhere; color: var(--lh-ink); }}
     @media (max-width: 820px) {{
       header {{ height: 60px; gap: 8px; padding: 0 12px; }}
       header > a {{ flex: 0 0 auto; }}
@@ -627,7 +646,7 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
       .source-toolbar a {{ min-height: 44px; }}
       table.dash {{ display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }}
       #graph {{ min-width: 0; height: min(62dvh, calc(100vh - 240px)); }}
-      .graph-toolbar button, .graph-toolbar a, .graph-list a {{ min-height: 44px; }}
+      .graph-list a {{ min-height: 44px; }}
     }}
   </style>
 </head>
@@ -2979,6 +2998,7 @@ def graph_data() -> dict:
             "id": p["id"],
             "label": p["label"],
             "type": p["type"],
+            "token": _palette.type_color(p["type"]),
             "sources": p["sources"],
             "kind": row["kind"],
             "credit": round(row["credit"], 3),
@@ -3039,6 +3059,10 @@ def graph_data() -> dict:
         "calibration": {t: {"scale": round(v["scale"], 4), "source": v["source"]}
                         for t, v in sorted(calibration.items())},
         "calibration_mode": mode,
+        # The design palette (system/design/palette.yaml): token NAMES only; the
+        # page's generated custom properties carry the colours, light and dark.
+        "legend": _palette.legend(n["type"] for n in nodes),
+        "edge_tokens": {e["name"]: e["token"] for e in _palette.load()["edges"]},
     }
     if anchor is not None:
         labels = {p["id"]: p["label"] for p in entities}
@@ -3058,27 +3082,29 @@ _GRAPH_HTML = """<h1>Graph</h1>
   <span>A second, thinner ring = told past its target (the fill stops at the ring)</span>
   <span class="legend-focus"><i class="halo-swatch" id="swatch-focus"></i> Gold halo = an active Focus: something picked to be told</span>
   <span class="legend-project"><i class="halo-swatch" id="swatch-project"></i> Project halo = a project</span>
-  <span>Brown edges are relationships, thicker as more of that bond's target is told</span>
+  <span>Amber edges are relationships, thicker as more of that bond's target is told</span>
   <span>First tap highlights. Second tap opens the page.</span>
 </div>
 <div class="graph-toolbar">
-  <button type="button" id="graph-fit">Fit</button>
-  <button type="button" id="graph-reset">Reset</button>
-  <button type="button" id="graph-full">Full screen</button>
-  <button type="button" id="graph-show-list" aria-pressed="false">List</button>
-  <a id="graph-open" hidden>Open page</a>
+  <button type="button" class="control graphControl" id="graph-show-list" aria-pressed="false">List</button>
+  <a class="control graphControl" id="graph-open" hidden>Open page</a>
 </div>
 <div class="graph-stage" id="graph-stage">
+<div class="cornerControls" id="graph-corner" data-testid="graph-corner-controls">
+  <button type="button" class="control graphControl" id="graph-fit">Fit</button>
+  <button type="button" class="control graphControl" id="graph-reset">Reset</button>
+  <button type="button" class="control graphControl" id="graph-full">Full screen</button>
+</div>
 <svg id="graph"></svg>
 <ul id="graph-list" class="graph-list" hidden></ul>
 </div>
+<ul class="graph-types" id="graph-types" aria-label="Entity types"></ul>
 <script>
 (function () {
-  var TYPE_COLORS = {
-    people: '#7c4f1d', relationships: '#9a6b3f', themes: '#5a7d9a', projects: '#3f8f6a',
-    places: '#8a7a3f', periods: '#6b5d49', self: '#9a5a7a', lifes_work: '#3f6f8f',
-    objects: '#8f6f3f', life: '#7c4f1d'
-  };
+  // Type colours are the design palette's custom properties (--graph-<type>,
+  // generated from system/design/palette.yaml, light and dark); the server
+  // names each node's token. No colour literal for a type lives in this file.
+  function tok(name) { return 'var(' + name + ')'; }
   function satColor(s) { return s >= 0.7 ? '#3f8f4f' : (s >= 0.3 ? '#c79a2e' : '#b3543f'); }
   var svg = document.getElementById('graph');
   var NS = 'http://www.w3.org/2000/svg';
@@ -3131,7 +3157,7 @@ _GRAPH_HTML = """<h1>Graph</h1>
       n.x = W / 2 + Math.cos(i) * 180 + (i % 7) * 12;
       n.y = H / 2 + Math.sin(i) * 180 + (i % 5) * 12;
       n.vx = 0; n.vy = 0;
-      n.fill = TYPE_COLORS[n.type] || '#8a7a63';
+      n.fill = tok(n.token);
       n.ringColor = satColor(1 - (n.gap || 0));
       byId[n.id] = n;
     });
@@ -3182,17 +3208,18 @@ _GRAPH_HTML = """<h1>Graph</h1>
     svg.appendChild(world);
     edges.forEach(function (e) {
       var relEdge = e.kind === 'relationship';
+      var ET = data.edge_tokens || {};
       var share = (e.goal > 0) ? Math.min(1, (e.told || 0) / e.goal) : 0;
       var width = relEdge ? (ST.edge_min + share * ST.edge_span) : 1;
       e.line = el('line', {
-        stroke: relEdge ? '#9a6b3f' : '#d8cdb8',
+        style: 'stroke:' + tok(relEdge ? ET.relationship : ET.link),
         'stroke-width': width
       });
       world.appendChild(e.line);
     });
     nodes.forEach(function (n) {
-      var g = el('g', {});
-      g.appendChild(el('circle', { cx: 0, cy: 0, r: n.r, fill: n.fill, stroke: '#fff', 'stroke-width': 1.5 }));
+      var g = el('g', { tabindex: 0, role: 'button', 'aria-label': 'Select ' + n.label });
+      g.appendChild(el('circle', { cx: 0, cy: 0, r: n.r, style: 'fill:' + n.fill + ';stroke:var(--lh-surface)', 'stroke-width': 2 }));
       if (n.ring) {
         // The target, on the fill's own scale: drawn over the fill so it shows
         // even when the telling has outgrown it.
@@ -3204,7 +3231,7 @@ _GRAPH_HTML = """<h1>Graph</h1>
       if (n.overR) {
         // Over-told: a second, thinner ring just outside the target.
         g.appendChild(el('circle', {
-          cx: 0, cy: 0, r: n.overR, fill: 'none', stroke: '#3f3428', 'stroke-width': 0.75,
+          cx: 0, cy: 0, r: n.overR, fill: 'none', style: 'stroke:var(--lh-ink)', 'stroke-width': 0.75,
           'stroke-opacity': 0.7
         }));
       }
@@ -3222,9 +3249,25 @@ _GRAPH_HTML = """<h1>Graph</h1>
           'stroke-opacity': ST.project_halo.opacity
         }));
       }
-      var t = el('text', { x: 0, y: -(n.outer + 4), 'text-anchor': 'middle', 'font-size': 11, fill: '#3f3428' });
+      // Selection and keyboard focus are RINGS in the node's own type colour,
+      // never a box: radius+4 at 2px for the selection, radius+3 at 1px for a
+      // neighbour of it; focus draws the same ring through CSS (:focus-visible).
+      n.selRing = el('circle', {
+        cx: 0, cy: 0, r: n.outer + 4, fill: 'none', style: 'stroke:' + n.fill,
+        'stroke-width': 2, 'pointer-events': 'none', display: 'none'
+      });
+      g.appendChild(n.selRing);
+      g.appendChild(el('circle', {
+        cx: 0, cy: 0, r: n.outer + 4, fill: 'none', 'class': 'focus-ring',
+        style: 'stroke:' + n.fill, 'stroke-width': 2, 'pointer-events': 'none'
+      }));
+      var t = el('text', { x: 0, y: -(n.outer + 4), 'text-anchor': 'middle', 'font-size': 11, style: 'fill:var(--lh-ink)' });
       t.textContent = n.label;
       g.appendChild(t);
+      g.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onTap(n); }
+        else if (ev.key === 'Escape') { selected = null; applySelection(); }
+      });
       n.g = g;
       world.appendChild(g);
     });
@@ -3250,6 +3293,15 @@ _GRAPH_HTML = """<h1>Graph</h1>
       nodes.forEach(function (n) {
         var hot = !selected || n.id === selected || (neighbor[selected] && neighbor[selected][n.id]);
         n.g.setAttribute('opacity', hot ? '1' : '0.15');
+        var isSel = n.id === selected;
+        var isNb = !!(selected && !isSel && neighbor[selected] && neighbor[selected][n.id]);
+        if (isSel || isNb) {
+          n.selRing.setAttribute('r', n.outer + (isSel ? 4 : 3));
+          n.selRing.setAttribute('stroke-width', isSel ? 2 : 1);
+          n.selRing.removeAttribute('display');
+        } else {
+          n.selRing.setAttribute('display', 'none');
+        }
       });
       edges.forEach(function (e) {
         var hot = !selected || e.source === selected || e.target === selected;
@@ -3387,6 +3439,16 @@ _GRAPH_HTML = """<h1>Graph</h1>
       if (stage.requestFullscreen) stage.requestFullscreen();
       else stage.classList.toggle('graph-full');
     });
+    var typesEl = document.getElementById('graph-types');
+    (data.legend || []).forEach(function (row) {
+      var li = document.createElement('li');
+      var sw = document.createElement('i');
+      sw.className = 'swatch';
+      sw.style.background = tok(row.token);
+      li.appendChild(sw);
+      li.appendChild(document.createTextNode(row.type));
+      typesEl.appendChild(li);
+    });
     var listBtn = document.getElementById('graph-show-list');
     nodes.slice().sort(function (a, b) { return (a.label || '').localeCompare(b.label || ''); }).forEach(function (n) {
       var li = document.createElement('li');
@@ -3400,6 +3462,7 @@ _GRAPH_HTML = """<h1>Graph</h1>
       var show = listEl.hidden;
       listEl.hidden = !show;
       svg.hidden = show;
+      document.getElementById('graph-corner').hidden = show;
       listBtn.textContent = show ? 'Map' : 'List';
       listBtn.setAttribute('aria-pressed', show ? 'true' : 'false');
     });

@@ -1,0 +1,136 @@
+# Lifehug design palette -- the ONE definition of every colour a data view uses.
+#
+# Self-contained on purpose: no path in this file points into the platform, so
+# the OSS repo (lifehug/lifehug) can vendor or mirror it unchanged and generate
+# its own CSS custom properties from it. The platform's globals.css carries the
+# generated block between the 'palette:begin' / 'palette:end' markers, and
+# apps/web tests (and services/api/tests/test_design_palette.py) fail when the two
+# disagree. To change a colour: edit this file, regenerate the CSS block
+# (docs/design/palette.md "How to add a colour"), re-run the validator.
+#
+# Derivation: the Timeline page's tone family -- warm paper and ink, amber and
+# red accents (--color-amber, --color-red), the certainty line's orange and light
+# blue, the landmark families' medium blue and violet-grey: OKLCH lightness
+# 0.53-0.75, chroma 0.10-0.15, hues stepped within it. Light slots are L 0.54-0.62
+# at C 0.13; dark slots are their own selected steps at L 0.60-0.67, C 0.12
+# (dark is not a flip of light).
+name: lifehug-design-palette
+version: 1
+validated_with: dataviz validate_palette.js (adjacent pairs, categorical); reports in docs/design/palette.md
+modes: [light, dark]
+
+surfaces:
+  - { name: canvas, token: --lh-surface, role: surface, light: "#ffffff", dark: "#201e1b" }
+  - { name: page, token: --lh-bg, role: surface, light: "#fbfaf7", dark: "#171614" }
+  - { name: rule, token: --lh-rule, role: surface, light: "#e2dcd0", dark: "#35312c" }
+  - { name: rule-strong, token: --lh-rule-strong, role: surface, light: "#cec5b4", dark: "#4a443c" }
+
+text:
+  - { name: ink, token: --lh-ink, role: text, light: "#2b2724", dark: "#ece7df" }
+  - { name: ink-soft, token: --lh-ink-soft, role: text, light: "#5c554e", dark: "#bdb5a9" }
+  - { name: ink-faint, token: --lh-ink-faint, role: text, light: "#857d73", dark: "#948b7e" }
+
+status:
+  - { name: amber, token: --color-amber, role: status, light: "#b45309", dark: "#fbbf24", oklch_light: { L: 0.555, C: 0.146, h: 49 }, oklch_dark: { L: 0.837, C: 0.164, h: 84.4 } }
+  - { name: red, token: --color-red, role: status, light: "#dc2626", dark: "#f87171", oklch_light: { L: 0.577, C: 0.215, h: 27.3 }, oklch_dark: { L: 0.711, C: 0.166, h: 22.2 } }
+
+# No sequential ramp is defined yet: no view encodes magnitude by hue. The
+# Timeline's stepped landmark families (--lh-lm-home-1..4 etc.) are ordinal
+# shades of one hue and stay with the Timeline.
+sequential: []
+
+# Categorical: identity of an entity type. The ORDER is the colour-blind-safety
+# mechanism -- never re-order, never cycle, never generate a tenth slot. An
+# unknown type gets the neutral fallback and a loud test failure, not a colour.
+categorical:
+  order: [person, place, period, object, theme, project, event, self, lifes_work]
+  fallback: { name: neutral, token: --graph-fallback, light: "#857d73", dark: "#948b7e" }
+  entries:
+    - name: person
+      slot: 1
+      token: --graph-person
+      hue_family: orange
+      light: "#ad620c"
+      dark: "#bd7634"
+      oklch_light: { L: 0.57, C: 0.129, h: 60.5 }
+      oklch_dark: { L: 0.63, C: 0.12, h: 60.4 }
+      derived_from: "--lh-lm-home / --color-amber hue 49-63"
+    - name: place
+      slot: 2
+      token: --graph-place
+      hue_family: violet
+      light: "#8160b5"
+      dark: "#9e80d1"
+      oklch_light: { L: 0.56, C: 0.131, h: 300.1 }
+      oklch_dark: { L: 0.66, C: 0.121, h: 300.2 }
+      derived_from: "--lh-lm-mission hue 298"
+    - name: period
+      slot: 3
+      token: --graph-period
+      hue_family: green
+      light: "#478638"
+      dark: "#69a45c"
+      oklch_light: { L: 0.559, C: 0.129, h: 139.9 }
+      oklch_dark: { L: 0.66, C: 0.12, h: 140 }
+      derived_from: "stepped within the tone family (no Timeline hue; green sits between amber and the blues)"
+    - name: object
+      slot: 4
+      token: --graph-object
+      hue_family: rose
+      light: "#9f4d86"
+      dark: "#b2659a"
+      oklch_light: { L: 0.541, C: 0.13, h: 340.3 }
+      oklch_dark: { L: 0.611, C: 0.119, h: 339.8 }
+      derived_from: "--color-red/--color-amber, rotated toward rose"
+    - name: theme
+      slot: 5
+      token: --graph-theme
+      hue_family: olive
+      light: "#98870c"
+      dark: "#97871d"
+      oklch_light: { L: 0.62, C: 0.126, h: 100.2 }
+      oklch_dark: { L: 0.62, C: 0.12, h: 100.1 }
+      derived_from: "--color-amber hue 84 (dark amber), desaturated to the family's chroma"
+    - name: project
+      slot: 6
+      token: --graph-project
+      hue_family: cyan
+      light: "#0887aa"
+      dark: "#0095b5"
+      oklch_light: { L: 0.58, C: 0.108, h: 224.7 }
+      oklch_dark: { L: 0.62, C: 0.113, h: 220.2 }
+      derived_from: "--lh-lm-school hue 244"
+    - name: event
+      slot: 7
+      token: --graph-event
+      hue_family: red
+      light: "#b14d51"
+      dark: "#c46668"
+      oklch_light: { L: 0.55, C: 0.131, h: 20 }
+      oklch_dark: { L: 0.62, C: 0.12, h: 19.8 }
+      derived_from: "--color-red hue 22-27"
+    - name: self
+      slot: 8
+      token: --graph-self
+      hue_family: blue
+      light: "#3f6db9"
+      dark: "#6995df"
+      oklch_light: { L: 0.54, C: 0.13, h: 259.9 }
+      oklch_dark: { L: 0.67, C: 0.121, h: 260.4 }
+      derived_from: "--lh-lm-work hue 258"
+    - name: lifes_work
+      slot: 9
+      token: --graph-lifes-work
+      hue_family: teal
+      light: "#0c9a78"
+      dark: "#0d9675"
+      oklch_light: { L: 0.611, C: 0.119, h: 169.7 }
+      oklch_dark: { L: 0.6, C: 0.117, h: 169.8 }
+      derived_from: "stepped within the tone family (teal between green and blue)"
+
+# Edges. A relationship edge wears the Timeline's amber (the same token a
+# relationship status uses); every other edge is the neutral rule colour.
+edges:
+  - { name: relationship, token: --graph-relationship, light: "#b45309", dark: "#fbbf24", derived_from: "--color-amber" }
+  - { name: link, token: --graph-link, light: "#cec5b4", dark: "#6a6258", derived_from: "--lh-rule-strong (lifted on the dark surface so a hairline edge stays visible)" }
+
