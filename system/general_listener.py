@@ -1941,6 +1941,35 @@ def identity_invocations(records: object) -> list[list[str]]:
     return argvs
 
 
+def handle_statement_records(answer: object, entity_rosters: object, *,
+                             subject: str = "", subject_ref: str = ""
+                             ) -> tuple[dict, ...]:
+    """The statements the person made BY HANDLE — resolved, deterministic, no
+    model (design §4.1.4b, P14). ``entity_rosters`` is ``{type: roster}``.
+
+    ``this is @katie`` / ``Kit is @katie`` -> ``--alias`` on that record;
+    ``same as @h`` -> ``--fold-into`` (an object or theme that is already a
+    record) or ``--alias``; ``@a is in @b`` -> ``--located-in`` (places).
+    Every record carries ``basis: "handle"``; ``unknown_handle`` / ``ambiguous``
+    / ``unknown_subject`` ones are returned too — so the host can say so — and
+    file nothing (:func:`handle_statement_invocations`). See
+    `identity_handles.handle_statements`.
+    """
+    import identity_handles as ih  # noqa: PLC0415
+
+    return tuple(st.to_dict() for st in ih.handle_statements(
+        answer, entity_rosters, subject=subject, subject_ref=subject_ref))
+
+
+def handle_statement_invocations(records: object) -> list[list[str]]:
+    """The ``entity-verdict`` argv that files each RESOLVED handle statement.
+    The same host contract as :func:`identity_invocations`: file FIRST, then
+    (and only then) acknowledge; **never ``--ensure``**."""
+    import identity_handles as ih  # noqa: PLC0415
+
+    return ih.statement_invocations(records)
+
+
 def acknowledgement_line(record: object) -> str:
     """What the reply MAY say — and only AFTER the host filed the record (D4).
 

@@ -128,3 +128,57 @@ names the record (`person_ref` / `record_ref`, `handle`, `aliases`,
 "this is that record" read and write that record through the one verdict verb,
 never the page. Records with no page are listed as "Known, no page yet", not
 given pages (D2). Delete-when: the stubs go one version after v389.
+
+## Handles (v390)
+
+`@katie` is the record, and it is typeable in any conversation (design §3.1,
+§4.1.4b, promise P14).
+
+1. **Every identity record has a handle** — its slug with an `@`
+   (`@katie-taylor`, `@yucaipa`, `@orange-shorts`), for every type: person,
+   place, object, theme, period. A record may ALSO carry ONE short,
+   owner-chosen handle (`@katie`), stored as an alias flagged `handle: true` in
+   `alias_meta` (v388). `record_view` returns both as separate fields
+   (`handle`, `short_handle`); the viewer's identity header shows them beside
+   the display name, which is unchanged.
+2. **A handle is unique across the vault.** `entity-verdict <type> <slug> clear
+   --handle h` accepts lowercase letters, digits and hyphens (64 at most;
+   `@` and capitals are normalised away) and refuses — exit 2, the
+   `identity_uncertain` shape, the claimant named, nothing written — when ANY
+   other record of ANY type already holds the text as a slug, a name, an alias
+   or a handle (`identity_handles.claimants`). It is never shared: a shared
+   alias (D9) is for a name, a handle is the opposite. A new handle replaces
+   the old (the old spelling stays an ordinary alias); `--clear-handle` unflags
+   it and falls back to the slug handle — it never deletes a name the record
+   answers to.
+3. **The grammar is the package's** (`identity_resolution.parse_handles(text)
+   -> [HandleSpan(span, raw, ref|None, reason)]`, `HANDLE_RE`): `@` + a slug
+   token, word-bounded, never inside an email address, a URL or a host name;
+   a trailing `.` or `'s` is not part of it. Resolution is by (a) an alias
+   flagged `handle` on any record, then (b) a record slug — person first, then
+   place, object, theme, period. A token naming records of two types is
+   `ambiguous_handle` and says both; no token is ever resolved by a fuzzy rung,
+   the first-token rule or a model. The viewer, the platform composer and
+   Telegram all mean the same thing by `@katie` because there is one parser.
+4. **Statements by handle file with no model judgement.**
+   `identity_handles.handle_statements(text, rosters, subject=…)` reads three
+   shapes: *this is @h* / *X is @h* → `--alias <name>` on the record `@h`
+   names; *same as @h* → `--fold-into` when the subject is an existing object
+   or theme record, else `--alias` (a person is only ever aliased); *@a is in
+   @b* → `--located-in` (both must be places). Every statement carries
+   `basis: "handle"`. An unknown handle is `unknown_handle`, a cross-type token
+   `ambiguous`, a pointer with no subject `unknown_subject`, a role word ("my
+   wife") or a period `unsupported` — each is reported and files nothing. A
+   name another record already answers to is a collision (`ambiguous`), never a
+   re-point; a name the record already holds is a `noop`; a shared FIRST name is
+   never "already known". It never passes `--ensure` — a conversation does not
+   mint a record. `listen_to_answer(…, entity_rosters=…, handle_subject=…)`
+   attaches the resolved statements to its outcome (`handle_statements`)
+   whatever the completion did, and a host files
+   `general_listener.handle_statement_invocations` FIRST, then acknowledges
+   (D4). The model-mediated `person_identity` path still accepts an `@handle`
+   in `refers_to`; both resolve through the one grammar.
+5. **Display.** The classifier's "People you already know" block and the
+   listener's known-people list print each person as `Name @handle` (the short
+   handle when set, else `@slug`); the prompts tell the model the name is
+   written without it, and that an `@handle` in `refers_to` is copied exactly.

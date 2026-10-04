@@ -322,7 +322,13 @@ four types). Three rules hold everywhere a roster row's identity changes:
   mention of it is held as uncertain, never attributed, while the record's
   exclusive compounds keep resolving, and nobody is minted. "<Name>'s
   house/farm/…" is a place mention, never a person. `--handle <h>` files
-  the record's short @handle — an alias exclusive by construction.
+  the record's short @handle — lowercase letters, digits and hyphens, unique
+  across every record of every type (refused, naming the claimant, when any
+  other record holds it as a slug, name, alias or handle); `--clear-handle`
+  removes it. In conversation, `@katie` is an explicit reference
+  (`identity_resolution.parse_handles`): "this is @katie" files an alias,
+  "same as @orange-shorts" a fold, "@yucaipa is in @california" a
+  containment — no model judgement, nothing minted (ADR 0043, Handles).
 - **An alias is a decision under the collision rule.** Every alias the verb
   writes — each `--alias`, and the loser's names during `--fold-into` — and
   every alias `focus-merge` and the monthly refresh union — goes

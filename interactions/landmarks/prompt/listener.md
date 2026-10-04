@@ -19,7 +19,8 @@ the question comes back anyway.
 ALREADY FILED — these entries are already in the store:
 {known_entries}
 
-PEOPLE YOU ALREADY KNOW — the people on file, with the other names they go by:
+PEOPLE YOU ALREADY KNOW — the people on file, each with the `@handle` that
+names that record and the other names they go by:
 {known_people}
 
 {how_words_arrive}

@@ -63,7 +63,7 @@ touches a vault.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import conversation_delivery
@@ -167,6 +167,14 @@ class RecorderOutcome:
     #: `general_listener.identity_invocations` — never `--ensure`. Last, for
     #: the same reason as the two fields above.
     person_identity: tuple[dict, ...] = ()
+    #: v390 (identity §4.1.4b, P14): the statements the person made BY
+    #: HANDLE ("this is @katie", "same as @orange-shorts", "@yucaipa is in
+    #: @california"), resolved deterministically — no model judgement, so they
+    #: are present whatever the completion did, even when it failed. Filed
+    #: through `general_listener.handle_statement_invocations`; an
+    #: ``unknown_handle`` / ``ambiguous`` one files nothing. Last, for the
+    #: same reason as the fields above.
+    handle_statements: tuple[dict, ...] = ()
 
     @property
     def record(self) -> dict | None:
@@ -975,6 +983,8 @@ def listen_to_answer(*, answer: str, call, reply: str = "",
                      landmarks: object = (),
                      identity_candidates: object = (),
                      person_roster: object = (),
+                     entity_rosters: object = None,
+                     handle_subject: str = "",
                      model: str = gl.DEFAULT_LISTENER_ROLE,
                      framework_root: str | Path | None = None
                      ) -> RecorderOutcome:
@@ -995,11 +1005,17 @@ def listen_to_answer(*, answer: str, call, reply: str = "",
     property of that mode: an off-domain fact in a focused landmark session
     is still not that session's to record.
     """
-    return record_answer(domain=None, answer=answer, call=call, reply=reply,
-                         landmarks=landmarks,
-                         identity_candidates=identity_candidates,
-                         person_roster=person_roster,
-                         model=model, framework_root=framework_root)
+    outcome = record_answer(domain=None, answer=answer, call=call, reply=reply,
+                            landmarks=landmarks,
+                            identity_candidates=identity_candidates,
+                            person_roster=person_roster,
+                            model=model, framework_root=framework_root)
+    # v390: statements by handle are the person's own explicit references —
+    # resolved with no model call, riding the outcome whatever status it has.
+    statements = gl.handle_statement_records(
+        answer, entity_rosters if entity_rosters is not None
+        else {"person": person_roster}, subject=handle_subject)
+    return replace(outcome, handle_statements=statements) if statements else outcome
 
 
 # --------------------------------------------------------------------------

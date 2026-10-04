@@ -119,7 +119,7 @@ class IdentityListenerTests(unittest.TestCase):
             "entity-verdict", "person", "rosalind-vane", "clear",
             "--alias", "Rosalind Ann Quill"]])
         # ...and the known people were SHOWN to the listener.
-        self.assertIn("Rosalind Vane — also: Roz · spouse", seen[0])
+        self.assertIn("Rosalind Vane @rosalind-vane — also: Roz · spouse", seen[0])
 
     def test_identity_listener_alias_contested(self):
         """P4: two known spouses ⇒ ambiguous, both claimants, nothing filed."""

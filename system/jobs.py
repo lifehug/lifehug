@@ -368,7 +368,7 @@ def _build_entity_verdict(payload: dict) -> tuple[Invocation, ...]:
         payload,
         required={"type", "slug", "verdict"},
         optional={"aliases", "relationship", "living", "maps_to",
-                  "fold_into", "focus", "retract_aliases", "located_in", "handle"},
+                  "fold_into", "focus", "retract_aliases", "located_in", "handle", "clear_handle"},
     )
     entity_type = _text(payload, "type", maximum=16)
     if entity_type not in ENTITY_TYPES:
@@ -410,6 +410,10 @@ def _build_entity_verdict(payload: dict) -> tuple[Invocation, ...]:
         args += ["--located-in", _token(payload, "located_in")]
     if payload.get("handle") is not None:
         args.append("--handle=" + _text(payload, "handle", maximum=40).strip())
+    if payload.get("clear_handle") is not None:
+        if payload.get("clear_handle") is not True or payload.get("handle") is not None:
+            raise ValueError("invalid clear_handle")
+        args.append("--clear-handle")
     retracted = payload.get("retract_aliases")
     if retracted is not None:
         if not isinstance(retracted, list) or len(retracted) > 16:
