@@ -21,7 +21,7 @@ fails before it mutates anything):
     c. Bank      — the loser's category headers ADOPT the survivor's own
                    header text verbatim and gain a provenance comment.
                    Question ids are NEVER renumbered (bank doctrine).
-    d. Rosters   — every entry whose `maps_to_focus` is the loser
+    d. Rosters   — every entry whose `focus` (v386; `maps_to_focus` before) is the loser
                    re-points to the survivor; the loser's name/slug join
                    the survivor's roster aliases (or the curation settled
                    ledger, when the survivor has no roster entry).
@@ -247,25 +247,25 @@ def _roster_payload(entity_type: str) -> tuple[Path, dict | None]:
     path authority. Raw (not `load_roster`'s normalized default) so a
     repoint rewrites the file without dropping its other keys
     (`resolved_at`, `source`, `sampled_answer_ids`, ...)."""
-    from entity_roster import roster_file  # noqa: PLC0415
-    path = roster_file(entity_type)
-    data = read_json(path, default=None)
-    if not isinstance(data, dict) or not isinstance(data.get("entities"), list):
-        return path, None
-    return path, data
+    from entity_roster import read_roster_payload  # noqa: PLC0415
+    # v386 (ADR 0043): through the identity converter, so a repoint reads and
+    # writes `focus`, never the retired `maps_to_focus`.
+    return read_roster_payload(entity_type)
 
 
 def _entity_matches_focus(entity: dict, focus: dict) -> bool:
     """Whether a roster entity IS this focus — either an explicit
-    `maps_to_focus` tie or a name/alias/slug key match. The key match
+    `focus` tie or a name/alias/slug key match. The key match
     delegates to entity_roster._entity_keys, which itself delegates to
     lifehug_core.normalized_focus_key: one definition of "same name",
     never a second copy here (recurring-defect doctrine)."""
     from entity_roster import _entity_keys  # noqa: PLC0415
     from lifehug_core import normalized_focus_key  # noqa: PLC0415
 
+    import identity_resolution as ir  # noqa: PLC0415
+
     focus_id = str(focus.get("id") or "")
-    if entity.get("maps_to_focus") == focus_id:
+    if ir.focus_of(entity) == focus_id:
         return True
     keys = _entity_keys(entity)
     return bool({normalized_focus_key(focus.get("label") or ""), normalized_focus_key(focus_id)} & keys)
@@ -285,7 +285,7 @@ def _roster_plan(survivor: dict, loser: dict) -> tuple[list[dict], list[dict], l
         if data is None:
             continue
         for position, entity in enumerate(data["entities"]):
-            if entity.get("maps_to_focus") == loser_id:
+            if _focus_of(entity) == loser_id:
                 repoints.append({"type": entity_type, "index": position,
                                  "entity": entity.get("name"), "from": loser_id, "to": survivor_id})
         for position, entity in enumerate(data["entities"]):
@@ -537,8 +537,23 @@ def focus_merge(survivor_id: str, loser_id: str, *, dry_run: bool = False,
     return {"status": "merged", "applied": True, "plan": plan, "record": record}
 
 
+def _focus_of(entity: dict) -> str:
+    import identity_resolution as ir  # noqa: PLC0415
+
+    return ir.focus_of(entity)
+
+
 def _apply_rosters(plan: dict) -> None:
+    """Step (d), applied. v386 (ADR 0043, design §4.1.6): the alias union is
+    no longer blind — every alias goes through
+    `roster_relations.alias_decision`, and one another record already answers
+    to is NOT written (the collision rule: it binds to neither), recorded on the
+    plan as ``roster_aliases_contested``."""
+    import roster_relations  # noqa: PLC0415
+
     survivor_id = str(plan["survivor"]["id"])
+    loser_id = str(plan["loser"]["id"])
+    contested = plan.setdefault("roster_aliases_contested", [])
     by_type: dict[str, list[dict]] = {}
     for item in plan["roster_repoints"]:
         by_type.setdefault(item["type"], []).append({"op": "repoint", **item})
@@ -552,9 +567,25 @@ def _apply_rosters(plan: dict) -> None:
         for operation in operations:
             entity = data["entities"][operation["index"]]
             if operation["op"] == "repoint":
-                entity["maps_to_focus"] = survivor_id
+                entity.pop("maps_to_focus", None)
+                entity["focus"] = survivor_id
+                entity.setdefault("folded_into", None)
             else:
-                entity["aliases"] = [*entity.get("aliases", []), *operation["aliases_added"]]
+                # Rows attending either Focus of this merge are the SAME
+                # identity after it, never rival claimants.
+                same = {survivor_id, loser_id}
+                snapshot = {"entities": [e for e in data["entities"]
+                                         if e is entity or _focus_of(e) not in same]}
+                ref = roster_relations.entity_ref(entity_type, entity)
+                for alias in operation["aliases_added"]:
+                    decided = roster_relations.alias_decision(entity_type, ref, alias, snapshot)
+                    if not decided.get("applied"):
+                        contested.append({"type": entity_type, "entity": entity.get("name"),
+                                          "alias": alias, "reason": decided.get("reason")})
+                        continue
+                    snapshot = decided["snapshot"]
+                decided_row = roster_relations.find_by_ref(entity_type, snapshot, ref) or entity
+                entity["aliases"] = list(decided_row.get("aliases") or [])
         write_json(path, data)
 
 
@@ -589,9 +620,9 @@ def print_plan(plan: dict, *, dry_run: bool) -> None:
 
     print("(d) entity rosters")
     if not plan["roster_repoints"]:
-        print("    no maps_to_focus repoints")
+        print("    no focus repoints")
     for item in plan["roster_repoints"]:
-        print(f"    {item['type']}: {item['entity']} maps_to_focus {item['from']} → {item['to']}")
+        print(f"    {item['type']}: {item['entity']} focus {item['from']} → {item['to']}")
     if plan["roster_aliases"]:
         for item in plan["roster_aliases"]:
             print(f"    {item['type']}: {item['entity']} += aliases {item['aliases_added']}")

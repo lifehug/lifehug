@@ -78,7 +78,8 @@ class PeopleBlockTests(unittest.TestCase):
         # Tilly and Roz are named by the story; then family in roster order.
         self.assertTrue(lines[0].startswith("- Rosalind Vane"))
         self.assertTrue(lines[1].startswith("- Tilly Hart"))
-        self.assertIn("- Edwin Marsh (parent)", lines[2])
+        # v388: the relation word comes from the record (its "Dad" alias).
+        self.assertIn("- Edwin Marsh (father)", lines[2])
         self.assertIn("- Edwin Marsh (child, b. 2013)", "\n".join(lines))
         joined = "\n".join(lines)
         self.assertNotIn("Kids", joined)   # a collective row is not a person
@@ -120,6 +121,14 @@ class PostProcessorTests(unittest.TestCase):
                                 "mention": "Author's father", "kind": "resolved",
                                 "ref": "person/edwin-marsh", "name": "Edwin Marsh",
                                 "rewritten": True})
+
+    def test_a_shared_first_name_alone_never_rewrites(self):
+        """v388: "Tilly Brooks" shares only a first name with Tilly Hart — the
+        first-name rung resolves it, but the post-processor never rewrites a
+        stranger onto a listed person on that alone."""
+        out = cc.resolve_classification_people(
+            {"people": [{"name": "Tilly Brooks", "relationship": "friend"}]}, ROSTER)
+        self.assertEqual(out["people"][0]["name"], "Tilly Brooks")
 
     def test_ambiguous_and_unknown_are_left_alone(self):
         result = {"people": [{"name": "Edwin", "relationship": "unknown"},

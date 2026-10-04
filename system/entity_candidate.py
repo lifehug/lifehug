@@ -683,7 +683,7 @@ def is_offer_worthy(entity_type: str, roster_entry: dict | None = None) -> bool:
     actually express a focus recommendation of a given type, rather than
     re-typing ruling 4's list here — AND only when the entry is neither
     owner-vetoed (``owner_verdict == "never"``) nor already mapped
-    (``maps_to_focus``): an entity that already has a focus does not need an
+    (``focus`` or ``folded_into``, v386): an entity that already has a focus does not need an
     offer, and one the owner has permanently vetoed is not a growth program.
 
     The package decides; the platform only reads the answer (ruling 5).
@@ -697,7 +697,10 @@ def is_offer_worthy(entity_type: str, roster_entry: dict | None = None) -> bool:
         return False
     if entry.get("owner_verdict") == "never":
         return False
-    return not entry.get("maps_to_focus")
+    # v386 (ADR 0043): a record with a home (`focus` or `folded_into`).
+    import identity_resolution as ir  # noqa: PLC0415
+
+    return not ir.has_home(entry)
 
 
 def _entity_alias_list(value: object) -> list[str]:

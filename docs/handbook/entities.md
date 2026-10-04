@@ -56,33 +56,69 @@ Nomenclature section for its full definition.
 curated list for one entity type — the output of `entity_roster.py`'s
 resolution step. Each entry carries `name`, `slug`, `aliases`, `qualifies`
 (does this meet the type's bar for being a real thing of that type at
-all), `maps_to_focus` (is this already a [Focus](glossary.md) rather than
-a bare mention-graduated entity), `score`/`unique_answers` (carried over
+all), `focus` (the [Focus](glossary.md) that attends to this record, if
+any), `folded_into` (the survivor, when this row is a duplicate pointer),
+`score`/`unique_answers` (carried over
 from the raw detector stats), `page_eligible` (the computed verdict this
 page's §4 derives), and — only when the owner has spoken — `owner_verdict`.
 **The roster is the settled-identity store** (ADR 0012's framing, reused
 by ADR 0013): there is no parallel ledger anywhere for entity identity or
 graduation decisions.
 
-**The roster feeds Timeline's identity resolution too** (v343,
-`timeline-rules:13`), and two of its own fields now gate that reading rather
-than only this page's own eligibility formula. `identity_resolution.roster_index`
-drops a `maps_to_focus`-mapped row entirely — it is a duplicate of the row it
-points at, never a second candidate for an ambiguous mention — and excludes a
-collective/role row (name or slug in `entity_roster.ROLE_WORDS`: "Kids",
-"Parents", …) from the given-name census that decides whether a bare name is
-ambiguous, though its own exact spelling still resolves a mention that uses
-it. Neither exclusion touches `page_eligible` or `qualifies`; both are read
-fresh, from the roster snapshot, at fold time.
+**One person, one record (v386, ADR 0043).** A roster row IS the person; a
+Focus, a wiki page, a recommendation and a claim's `subject_ref` are views of it
+or decisions about it. Until v386 one field, `maps_to_focus`, meant two things —
+"this person has a Focus" and "this row was folded into another" — and every
+identity reader treated any value as a pointer, so a person who had a Focus
+dropped out of the Timeline's identity index, while a person left unmapped was
+recommended as a new Focus. The two meanings are now two fields that never mean
+each other:
 
-**v357 (`timeline-rules:18`) took the mapped row out of the BINDING path too.**
-v343's exclusion lived in `roster_index`, the card path's reader; the fold's
-birth, person-key and family-tier indexes read the raw rows through
-`axis_membership.roster_person_rows`, where a pointer row still held a ref and a
-birthday of its own. `identity_resolution.is_alias_row` is now the one predicate
-both seats ask. A mapped row stays on the roster — it is how curation says
-"this spelling is that Focus", and the wiki still routes by it — but no reader
-of identity treats it as a person.
+- **`focus`** <!-- parity: identity_resolution.ROSTER_FOCUS_KEY = focus --> — the Focus slug that ATTENDS to this record. The record stays a
+  live person: `identity_resolution.roster_index` indexes it, the binding path
+  binds to it, and `recommend_focuses` treats it (and every name it carries) as
+  covered. A Focus attaches to exactly one record — by its slug, by a name or
+  alias equal to the Focus title, or by `resolve_person` on the title
+  (`roster_relations.attach_focuses`) — and `approve_recommendation` /
+  `focus_new` attach it (the Focus gains `person_ref`) and refuse a twin.
+- **`folded_into`** <!-- parity: identity_resolution.ROSTER_FOLDED_INTO_KEY = folded_into --> — the survivor's slug when this row is a DUPLICATE pointer.
+  `identity_resolution.is_alias_row` reads this field and nothing else: a
+  pointer contributes no ref, no key and no census token, in the card path and
+  the binding path (`axis_membership.roster_person_rows`) alike, and the count
+  fold reads its spellings as the survivor's.
+
+`base_page_eligible` asks for `focus is None and folded_into is None`. A
+one-version converter (`roster_relations.convert_legacy_roster`) runs on every
+`load_roster` and every roster write, and `entity-roster --convert-identity`
+persists it: a `maps_to_focus` naming another row becomes `folded_into`,
+anything else becomes `focus`, and the key is dropped — byte-stable on a second
+run. The same pass retires the **placeholder rows** — a row NAMED by a role word
+whose relation is a set (Son, Daughter, Kids, Parents, Siblings, Friend,
+Neighbor): such a word is a relation query, not a person. The row leaves
+`entities` and is recorded under the roster's top-level `relation_queries`
+(`{word, relationship, cardinality, mentions, aliases, reattributed,
+stripped_from, former_rows}`) so its count and its whole former row survive; a
+spelling of it that names somebody ("my son Otto") moves to that person's
+record. A role-word alias ("my son") stays only on a record whose relation has
+cardinality one ("my wife", "dad" — one father per word, `identity_resolution.RELATION_WORD_CARDINALITY`); elsewhere it moves onto the relation's
+query, and the record gains that `relationship` if it had none.
+
+A **collective/role** row the converter keeps (it carries a Focus, a fold or a
+birth date) keeps its exact keys but never enters the given-name census, as
+since v343. Neither rule touches `qualifies`; both are read fresh from the
+roster snapshot at fold time.
+
+**Resolution is typed and takes context.** `identity_resolution.resolve_person(
+text, roster, *, context)` answers `resolved` (one ref), `ambiguous` (every
+candidate) or `unknown` — never a pick. "Author's father" reads as "my father";
+"my son" with two sons is ambiguous and "my son Otto" resolves; a bare first name
+three records share is ambiguous unless the clause's relationship word, a
+generation marker ("Sr"), a stated year against `born`, or the Focus the text
+was filed under singles one out. `display_name(record, roster)` prints a
+colliding name with what tells it apart — "Walter Pell (father)", "Walter Finch
+Pell (son)" — on the viewer's Review rows and in the focus curator's roster
+context. `resolve_place` resolves a place by name or alias, or "Yucaipa,
+California" through containment, and never upward: a city is never its state.
 
 **Candidate research** is a separate immutable source about one still-pending
 roster entry (ADR 0020), never a roster verdict. Exact raw user-turn spans must
@@ -199,8 +235,8 @@ flowchart LR
 there is never a second copy of this rule to drift out of sync:
 
 ```
-person:                qualifies AND maps_to_focus is None AND score >= min_score AND answers >= min_answers
-place/period/object/theme:  qualifies AND maps_to_focus is None
+person:                qualifies AND focus is None AND folded_into is None AND score >= min_score AND answers >= min_answers
+place/period/object/theme:  qualifies AND focus is None AND folded_into is None
 ```
 
 People are the noisiest raw detections (pronouns, fragments, partial
@@ -257,12 +293,27 @@ The roster is the owner-curated identity ledger for people (and the other
 four types). Three rules hold everywhere a roster row's identity changes:
 
 - **A fold is a pointer, never a deletion.** `entity-verdict <type> <loser>
-  clear --maps-to <survivor>` keeps the loser's row and sets its
-  `maps_to_focus` to the survivor; the loser's name and aliases join the
-  survivor's aliases. The resolver already treats a pointer row as never a
+  clear --fold-into <survivor>` keeps the loser's row and sets its
+  `folded_into` to the survivor; the loser's name and aliases join the
+  survivor's aliases. The resolver treats a pointer row as never a
   candidate, and the count fold reads its spellings as the survivor's.
+  `--focus <focus slug>` is the OTHER act — it attaches a Focus to a live
+  record. `--maps-to` (pre-v386) is accepted for one version and rewritten
+  to whichever of the two it meant, with a deprecation line on stderr. A
+  **place** joins by containment — `--located-in <place>` — and a place
+  fold is refused unless the two are true duplicates (same `place_kind`,
+  neither containing a place, neither inside the other); a place page lists
+  the places inside it. Objects and themes fold exactly as people do.
+- **An alias can be taken back or shared.** `--retract-alias <alias>` (every
+  type) is the undo. `--share-alias <alias> --with "<who>"` records that the
+  alias is also somebody with NO record (free text, never a ref): a bare
+  mention of it is held as uncertain, never attributed, while the record's
+  exclusive compounds keep resolving, and nobody is minted. "<Name>'s
+  house/farm/…" is a place mention, never a person. `--handle <h>` files
+  the record's short @handle — an alias exclusive by construction.
 - **An alias is a decision under the collision rule.** Every alias the verb
-  writes — each `--alias`, and the loser's names during `--maps-to` — goes
+  writes — each `--alias`, and the loser's names during `--fold-into` — and
+  every alias `focus-merge` and the monthly refresh union — goes
   through `roster_relations.alias_decision`. An alias another row already
   answers to binds to NEITHER: the whole verdict is refused, the roster file
   is untouched, the package's `{"applied": false, "reason":
@@ -289,8 +340,8 @@ permanent facts onto a roster entry, enforced in both `normalize()` (fresh
 computation) and `apply_previous_decisions()` (folding across refreshes):
 
 - **`graduate`** — `page_eligible` forced `true`, regardless of
-  score/answer thresholds. **Refused outright** if the entity is already
-  `maps_to_focus`-mapped (a mapped entity already has a home; the CLI
+  score/answer thresholds. **Refused outright** if the entity already has
+  a home — a `focus` or a `folded_into` (its page is there; the CLI
   raises before writing anything). Compile's real-mention bar drops to
   **>= 1** for a graduated entity, whatever its type's normal bar is —
   but **the floor under that is absolute: zero real mentions still means
@@ -381,7 +432,7 @@ after the matching roster entry independently becomes page-eligible. This
 works for person, place, period, object, and theme, including the types whose
 ordinary real-mention bar is higher than one source: the completed research
 already proved its own per-type multi-span minimum. It never sets
-`page_eligible`, `qualifies`, `maps_to_focus`, or `owner_verdict`, so automatic
+`page_eligible`, `qualifies`, `focus`, `folded_into`, or `owner_verdict`, so automatic
 graduation and the owner's accelerate/veto pair remain unchanged.
 
 **How it self-improves:** every monthly refresh sees a strictly settled

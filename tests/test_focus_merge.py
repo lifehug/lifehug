@@ -210,7 +210,8 @@ class HappyMergeTests(FixtureBase):
 
     def test_roster_entries_repoint_to_the_survivor(self):
         roster = json.loads((entity_roster.ENTITY_DIR / "theme.json").read_text(encoding="utf-8"))
-        self.assertEqual({e["name"]: e["maps_to_focus"] for e in roster["entities"]},
+        # v386 (ADR 0043): the Focus a record is attended by is `focus`.
+        self.assertEqual({e["name"]: e["focus"] for e in roster["entities"]},
                          {"Fear": "fear", "The Fear": "fear"})
 
     def test_roster_rewrite_preserves_unrelated_payload_keys(self):
@@ -310,7 +311,7 @@ class DryRunTests(FixtureBase):
         # the concrete edits, not just the headings
         self.assertIn("['K'] → ['K', 'L']", printed)
         self.assertIn("## L: Focus — Fear", printed)
-        self.assertIn("maps_to_focus the-fear → fear", printed)
+        self.assertIn("focus the-fear → fear", printed)
         self.assertIn("remove wiki/themes/the-fear.md", printed)
         self.assertIn("[DRY RUN] nothing was written.", printed)
 
@@ -439,7 +440,7 @@ class RosterTests(FixtureBase):
         ])
         focus_merge.focus_merge("fear", "the-fear")
         roster = json.loads((entity_roster.ENTITY_DIR / "person.json").read_text(encoding="utf-8"))
-        self.assertEqual(roster["entities"][0]["maps_to_focus"], "fear")
+        self.assertEqual(roster["entities"][0]["focus"], "fear")
 
 
 # ---------------------------------------------------------------------------

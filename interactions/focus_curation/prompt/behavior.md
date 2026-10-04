@@ -14,8 +14,10 @@ Every call hands you exactly three things (see
   roster fold) — never re-decide an exact-name-modulo-case pair; if you see
   one, it means a settled roster alias doesn't exist for it yet, not that
   the deterministic layer failed.
-- `roster_context` — settled entity-roster identity signal (names, aliases,
-  `maps_to_focus`) for the same types, so you have real identity evidence to
+- `roster_context` — settled entity-roster identity signal (names — a
+  colliding person name carries its disambiguator in `display_name` —
+  aliases, the `focus` that attends to a record and the `folded_into` survivor
+  of a duplicate) for the same types, so you have real identity evidence to
   reason from, not just string shape.
 - `existing_focuses` — `{slug: label}` of every current Focus, the only
   valid targets for `map_to_focus`.

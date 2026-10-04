@@ -142,6 +142,37 @@ def _header_parens(md_text: str) -> dict[str, str | None]:
     return out
 
 
+class FocusTwinError(ValueError):
+    """v386 (ADR 0043 — one person, one record): a person Focus whose label
+    RESOLVES to a record another Focus already attends to. Creating it would
+    mint a twin of that person; the door refuses and names the record."""
+
+    def __init__(self, label: str, ref: str, focus: str):
+        self.label, self.ref, self.focus = label, ref, focus
+        super().__init__(f"{label!r} is {ref} — already attended by Focus {focus!r}; "
+                         "refusing a twin (one person, one record)")
+
+
+def resolve_focus_person(label: str) -> tuple[str | None, str]:
+    """``(person_ref, focus already attending it)`` for a person-Focus label,
+    via `identity_resolution.resolve_person` over the identity roster —
+    ``(None, "")`` when the label resolves to nobody or to several people
+    (never picked)."""
+    try:
+        import identity_resolution as ir  # noqa: PLC0415
+        from entity_roster import load_identity_roster  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return None, ""
+    people = load_identity_roster("person")
+    found = ir.resolve_person(label, people)
+    if not found.resolved:
+        return None, ""
+    for row in people.get("entities") or []:
+        if isinstance(row, dict) and ir.record_view(row, people).get("ref") == found.ref:
+            return found.ref, ir.focus_of(row)
+    return found.ref, ""
+
+
 class FocusKeyCollisionError(ValueError):
     """Raised by a Focus-creation door (focus_new, the `roadmap add` CLI)
     when the requested label's normalized_focus_key collides with an
@@ -346,7 +377,9 @@ _USER_FIELDS = ("label", "tier", "objective", "deliverable", "target_depth",
                 # offers skip them (you can't ask). relationship: which
                 # interview bank fits (parent/spouse/child/...), overriding
                 # the label heuristic.
-                "living", "relationship")
+                "living", "relationship",
+                # v386 (ADR 0043): the person record this Focus attends to.
+                "person_ref")
 
 
 def derive_roadmap(md_text: str, existing: dict | None = None) -> dict:
@@ -541,7 +574,7 @@ def _generate_and_promote(label: str, focus_type: str, deliverable: str, categor
 
 def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
               deliverable: str = "chapter", generate: bool = True,
-              context_path: str | None = None) -> dict:
+              context_path: str | None = None, person_ref: str | None = None) -> dict:
     """End-to-end: scaffold a category, register the Focus, and (optionally)
     generate + promote starter questions. Non-destructive to existing answers.
 
@@ -561,6 +594,14 @@ def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
     collision = find_focus_by_key(roadmap, label)
     if collision is not None and collision.get("id") != slugify(label):
         raise FocusKeyCollisionError(label, collision)
+    # v386 (ADR 0043): a person Focus RESOLVES first and attaches to the record
+    # it names; a record another Focus already attends to is a twin, refused.
+    if focus_type == "person":
+        resolved_ref, attending = resolve_focus_person(label)
+        if person_ref is None:
+            person_ref = resolved_ref
+        if attending and person_ref == resolved_ref and attending != slugify(label):
+            raise FocusTwinError(label, str(person_ref), attending)
 
     md = QUESTIONS_FILE.read_text(encoding="utf-8")
     tag = label if focus_type in ("project", "lifes_work") else None
@@ -583,11 +624,22 @@ def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
         focus["wiki_node"] = (
             _wiki_node_by_rule(focus, parse_categories(new_md))
             or _wiki_node_for(focus_type, label))
+        if person_ref:
+            focus["person_ref"] = person_ref
         roadmap["generated_at"] = now_utc()
         write_json(ROADMAP_FILE, roadmap)
+    if person_ref and str(person_ref).startswith("person/"):
+        # The record gains `focus` — it stays a live person (v386).
+        try:
+            import entity_verdict  # noqa: PLC0415
+            entity_verdict.attach_focus(str(person_ref).split("/", 1)[1], fid)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ⚠ Focus {fid} created but not attached to {person_ref}: {exc}",
+                  file=sys.stderr)
 
     result = {"focus_id": fid, "category": letter, "type": focus_type,
-              "tier": tier, "generated": 0, "generation_ran": False}
+              "tier": tier, "generated": 0, "generation_ran": False,
+              "person_ref": person_ref}
     if generate:
         ran, n = _generate_and_promote(label, focus_type, deliverable, letter,
                                        context_path=context_path)

@@ -695,7 +695,7 @@ class EntityVerdictIdentityTests(unittest.TestCase):
         entity = entity_verdict.apply_verdict(
             "person", "synthetic-jim", "graduate", maps_to="synthetic-jim-reynolds"
         )
-        self.assertEqual(entity["maps_to_focus"], "synthetic-jim-reynolds")
+        self.assertEqual(entity["folded_into"], "synthetic-jim-reynolds")
         self.assertFalse(entity["page_eligible"])
         # maps-to WINS: the graduation is skipped, not recorded.
         self.assertNotIn("owner_verdict", entity)
@@ -708,7 +708,7 @@ class EntityVerdictIdentityTests(unittest.TestCase):
         entity = entity_verdict.apply_verdict(
             "person", "synthetic-wife", "clear", maps_to="katie"
         )
-        self.assertEqual(entity["maps_to_focus"], "katie")
+        self.assertEqual(entity["focus"], "katie")
         self.assertFalse(entity["page_eligible"])
 
     def test_an_unknown_or_self_maps_to_is_refused_with_the_roster_untouched(self):
@@ -738,7 +738,7 @@ class EntityVerdictIdentityTests(unittest.TestCase):
         )
         self.assertEqual(entity["relationship"], "friend")
         self.assertIs(entity["living"], True)
-        self.assertEqual(entity["maps_to_focus"], "synthetic-jim-reynolds")
+        self.assertEqual(entity["folded_into"], "synthetic-jim-reynolds")
 
     def test_never_still_applies_alongside_a_mapping(self):
         self._seed(_entry("Synthetic Jim"), _entry("Synthetic Jim Reynolds"))
@@ -767,8 +767,8 @@ class EntityVerdictIdentityTests(unittest.TestCase):
             ])
         self.assertEqual(code, 0)
         text = out.getvalue()
-        self.assertIn("mapped to synthetic-jim-reynolds", text)
-        self.assertIn("graduate superseded by --maps-to", text)
+        self.assertIn("folded into synthetic-jim-reynolds", text)
+        self.assertIn("graduate superseded by synthetic-jim-reynolds", text)
         self.assertIn("relationship: friend", text)
         self.assertIn("living: no", text)
 

@@ -36,6 +36,7 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SYSTEM_DIR))
 
 import chronology
+import identity_resolution as ir
 import relation_words
 import roster_relations
 from ai_provider import failure_metadata
@@ -337,7 +338,7 @@ def preserve_existing_object_roster(entity_type: str, entities: list[dict],
 #: conversation (`entity-verdict --relationship/--living|--not-living`, and
 #: since v217 `--born/--died`). An entry carrying any of them survives a
 #: refresh that drops or contradicts it, exactly as an owner_verdict alone did
-#: before v190. `maps_to_focus` is deliberately NOT here: a merge's durability
+#: before v190. `focus`/`folded_into` (v386; `maps_to_focus` before) are deliberately NOT here: a merge's durability
 #: lives on the SURVIVOR (the loser's names are unioned into the target's
 #: aliases, which `_entity_keys`/`apply_previous_decisions` then fold by
 #: forever), not on the loser's own row.
@@ -367,6 +368,11 @@ def _has_settled_identity(entry: dict) -> bool:
     """True when this entry carries an owner decision a refresh must not lose."""
     if entry.get("owner_verdict"):
         return True
+    # v386 (ADR 0043, P8): a fold pointer and an alias decision are settled
+    # identity too — a refresh that does not mention the loser must not
+    # delete the record of the fold.
+    if ir.folded_into_of(entry) or entry.get(ir.ROSTER_ALIAS_META_KEY):
+        return True
     return any(entry.get(field) is not None for field in _SETTLED_IDENTITY_FIELDS)
 
 
@@ -380,7 +386,7 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
     a merged entity ('Grandma Betty Jo' → 'Grandma' + 'Betty Jo'). Two raw entries
     hitting the same previous entry collapse into one, with aliases unioned.
     `qualifies` is the OR of the folded raw entries (the AI can still demote an
-    entity by marking every variant unqualified); `maps_to_focus` falls back to
+    entity by marking every variant unqualified); `focus`/`folded_into` fall back to
     the previous value when the raw output drops it.
 
     Exception — role-word promotion: when the previous canonical is a bare
@@ -495,8 +501,8 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
             if promoted and str(slot.get("name", "")).strip().lower() in ROLE_WORDS:
                 slot["name"] = canonical  # the proper name upgrades the slot too
             slot["qualifies"] = bool(slot.get("qualifies")) or bool(e.get("qualifies"))
-            if not slot.get("maps_to_focus"):
-                slot["maps_to_focus"] = e.get("maps_to_focus") or None
+            if not slot.get("focus") and not slot.get("folded_into"):
+                slot["focus"] = e.get("focus") or e.get("maps_to_focus") or None
             forced += 1
         canonical = str(slot.get("name") or canonical)
         # Union aliases: previous name/aliases + raw name/aliases, minus the
@@ -509,9 +515,17 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
                 continue
             seen.add(alias.lower())
             merged_aliases.append(alias)
-        slot["aliases"] = merged_aliases
-        if not slot.get("maps_to_focus"):
-            slot["maps_to_focus"] = prev.get("maps_to_focus") or None
+        # v386 (ADR 0041 §6, design §4.1.6): the refresh's alias union is a
+        # DECISION, not a blind union — an alias another previous record
+        # already answers to binds to neither and is dropped here.
+        slot["aliases"] = [a for a in merged_aliases
+                           if not _alias_contested(a, prev, previous)]
+        slot.pop("maps_to_focus", None)
+        if not slot.get("focus") and not slot.get("folded_into"):
+            slot["focus"] = ir.focus_of(prev) or None
+            slot["folded_into"] = ir.folded_into_of(prev) or None
+        if not slot.get(ir.ROSTER_ALIAS_META_KEY) and prev.get(ir.ROSTER_ALIAS_META_KEY):
+            slot[ir.ROSTER_ALIAS_META_KEY] = dict(prev[ir.ROSTER_ALIAS_META_KEY])
         # Themes: curated keywords are settled work — carry them forward when
         # a refresh response drops them (harmless no-op for other types).
         if not slot.get("keywords") and prev.get("keywords"):
@@ -542,6 +556,19 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
     return out, forced
 
 
+def _alias_contested(alias: str, prev: dict, previous: list[dict]) -> bool:
+    """Would ``alias`` on ``prev`` collide with ANOTHER previous record under
+    `roster_relations.alias_decision`? A row folded into ``prev`` is the same
+    identity, never a rival."""
+    prev_slug = str(prev.get("slug") or "").strip()
+    rivals = [e for e in previous if isinstance(e, dict) and e is not prev
+              and not (prev_slug and ir.folded_into_of(e) == prev_slug)]
+    snapshot = {"entities": [prev, *rivals]}
+    decision = roster_relations.alias_decision(
+        "entity", roster_relations.entity_ref("entity", prev), alias, snapshot)
+    return decision.get("reason") == roster_relations.IDENTITY_UNCERTAIN_KIND
+
+
 def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, str],
                  excerpts: list[dict] | None = None,
                  previous_roster: dict | None = None) -> str:
@@ -564,13 +591,15 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
         for prev in previous_entities:
             aliases = ", ".join(prev.get("aliases") or []) or "(none)"
             line = f'- "{prev.get("name", "")}" (slug: {prev.get("slug", "")}) — aliases: {aliases}'
-            if prev.get("maps_to_focus"):
-                line += f'; maps_to_focus: {prev["maps_to_focus"]}'
+            if ir.focus_of(prev):
+                line += f"; focus: {ir.focus_of(prev)}"
+            if ir.folded_into_of(prev):
+                line += f"; folded into: {ir.folded_into_of(prev)}"
             lines.append(line)
         lines += [
             "These prior merges and mappings are settled identity decisions. Keep each "
             "previous entry as ONE entry, reusing its exact `name` and keeping (or "
-            f"extending) its aliases and `maps_to_focus`, unless the material below clearly "
+            f"extending) its aliases and `focus`, unless the material below clearly "
             f"shows two different {plural} were wrongly merged. Never re-split one "
             f"{entity_type} into multiple entries and never rename a previous entry to a "
             "different `name` — with ONE exception: if a previous entry's `name` is a bare "
@@ -584,7 +613,7 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
         f"- Merge aliases/variants of the same {entity_type} into ONE entry (e.g. "
         "'20s'/'My 20s'/'Twenties' → one; 'Mit' → 'MIT'). Put variants in `aliases`.",
         "- Pick the most natural `name` (for objects, a title like 'The Cleats').",
-        "- If it clearly refers to an existing Focus above, set `maps_to_focus` to that slug.",
+        "- If it clearly refers to an existing Focus above, set `focus` to that slug.",
         "- Set `qualifies` false for anything that doesn't meet the bar above (fragments, "
         "pronouns, wrong type, mundane objects). When unsure, set qualifies false.",
     ]
@@ -634,7 +663,7 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
         "",
         "Respond with ONLY a JSON object, no prose:",
         '{"entities": [{"name": "Name", "aliases": ["Variant"], "qualifies": true, '
-        '"maps_to_focus": null' + chrono_field + keywords_field + "}]}",
+        '"focus": null' + chrono_field + keywords_field + "}]}",
     ]
     return "\n".join(lines)
 
@@ -707,8 +736,7 @@ def recount(entity_type: str, *, stats: dict[str, dict] | None = None) -> dict:
     moved them to the survivor. ``stats`` overrides the vault read (tests)."""
     if entity_type not in ENTITY_TYPES:
         raise ValueError(f"unknown entity type: {entity_type!r}")
-    path = roster_file(entity_type)
-    data = read_json(path, default=None)
+    path, data = read_roster_payload(entity_type)
     entities = data.get("entities") if isinstance(data, dict) else None
     if not isinstance(entities, list):
         return {"changed": False, "updated": [], "entities": []}
@@ -727,13 +755,18 @@ def recount(entity_type: str, *, stats: dict[str, dict] | None = None) -> dict:
     return {"changed": bool(updated), "updated": updated, "entities": entities}
 
 
-def base_page_eligible(entity_type: str, qualifies: bool, maps_to: str | None,
+def base_page_eligible(entity_type: str, qualifies: bool, home: str | None,
                        score: float, answers: int, min_score: float, min_answers: int) -> bool:
     """The AI/deterministic-derived eligibility rule, BEFORE any owner_verdict
     override (contract: entity-owner-verdicts, Scope 1). Single authoritative
     definition (recurring-defect doctrine) — `normalize()` and
     `entity_verdict.py`'s `clear` both call this rather than each re-deriving
-    the per-type formula."""
+    the per-type formula.
+
+    ``home`` is `identity_resolution.roster_home(entry)` — v386 (ADR 0043):
+    eligible only when ``focus is None and folded_into is None``. A record a
+    Focus attends to has its page there; a folded duplicate has its survivor's."""
+    maps_to = home or None
     if entity_type == "person":
         # People are the noisiest detections → keep a score/answers bar.
         return qualifies and maps_to is None and score >= min_score and answers >= min_answers
@@ -749,8 +782,8 @@ def apply_owner_verdict(entity_type: str, entry: dict) -> dict:
     entry, in place, AFTER the base eligibility above is computed. An
     `owner_verdict` is a permanent fact the AI can never remove or override:
 
-      - `graduate`: `page_eligible` forced True — UNLESS the entity is
-        mapped to a Focus (`maps_to_focus` wins; `entity_verdict.py` refuses
+      - `graduate`: `page_eligible` forced True — UNLESS the entity has a
+        home (a `focus` or `folded_into`, v386 — the home wins; `entity_verdict.py` refuses
         to SET graduate on an already-mapped entity, and this guard also
         holds continuously if a later refresh maps an already-graduated
         entity — mapped always wins).
@@ -763,7 +796,7 @@ def apply_owner_verdict(entity_type: str, entry: dict) -> dict:
     verdict = entry.get("owner_verdict")
     if verdict == "never":
         entry["page_eligible"] = False
-    elif verdict == "graduate" and entry.get("maps_to_focus") is None:
+    elif verdict == "graduate" and not ir.has_home(entry):
         entry["page_eligible"] = True
     return entry
 
@@ -781,20 +814,31 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
         slug = slugify(name)
         aliases = [a.strip() for a in e.get("aliases", []) if isinstance(a, str) and a.strip()]
         qualifies = bool(e.get("qualifies", e.get("is_real_person", e.get("is_symbolic", False))))
-        maps_to = e.get("maps_to_focus") or None
-        if maps_to and maps_to not in focus_slugs:
-            maps_to = focus_map.get(slugify(str(maps_to)))
-        if maps_to is None and slug in focus_slugs:
-            maps_to = slug
+        # v386 (ADR 0043): `focus` and `folded_into` are two refs that never
+        # mean each other. A model response may still say `maps_to_focus`
+        # (one version): read as the Focus it names.
+        folded_into = str(e.get("folded_into") or "").strip() or None
+        focus = e.get("focus") or e.get("maps_to_focus") or None
+        if focus and focus not in focus_slugs:
+            focus = focus_map.get(slugify(str(focus))) or _focus_by_title(str(focus), focus_map)
+        if focus is None and not folded_into:
+            # By slug OR by a name/alias equal to a Focus title (v386 — the
+            # slug-only rule could never match `katie-taylor` to `katie`).
+            focus = slug if slug in focus_slugs else _focus_by_title(name, focus_map, aliases)
+        if folded_into:
+            focus = None
         score, answers = _best_stats(e, stats)
-        page_eligible = base_page_eligible(entity_type, qualifies, maps_to, score, answers,
-                                           min_score, min_answers)
+        page_eligible = base_page_eligible(entity_type, qualifies, folded_into or focus, score,
+                                           answers, min_score, min_answers)
         entry = {
             "name": name, "slug": slug, "aliases": aliases,
-            "qualifies": qualifies, "maps_to_focus": maps_to,
+            "qualifies": qualifies, "focus": focus, "folded_into": folded_into,
             "score": round(score, 2), "unique_answers": answers,
             "page_eligible": page_eligible,
         }
+        alias_meta = e.get(ir.ROSTER_ALIAS_META_KEY)
+        if isinstance(alias_meta, dict) and alias_meta:
+            entry[ir.ROSTER_ALIAS_META_KEY] = alias_meta
         if entity_type == "place" and e.get("_settled_place") is _SETTLED_PLACE:
             entry["slug"] = e["slug"]
             for field in roster_relations.PLACE_IDENTITY_FIELDS:
@@ -853,23 +897,23 @@ def deterministic(entity_type: str, candidates: list[dict], focus_map: dict[str,
         entity = c["entity"]
         slug = slugify(entity)
         if slug in focus_map:
-            raw.append({"name": entity, "qualifies": True, "maps_to_focus": slug})
+            raw.append({"name": entity, "qualifies": True, "focus": slug})
             continue
         if entity_type == "person" and entity.lower() in ROLE_WORDS:
-            raw.append({"name": entity, "qualifies": False, "maps_to_focus": None})
+            raw.append({"name": entity, "qualifies": False, "focus": None})
             continue
         if entity_type == "theme":
             # Conservative keyless fallback: only names already vouched for by
             # the classifier taxonomy or an existing theme page qualify; the
             # AI path is what curates keywords and merges abstraction levels.
             qualifies = entity.lower() in _known_theme_names()
-            raw.append({"name": entity, "qualifies": qualifies, "maps_to_focus": None,
+            raw.append({"name": entity, "qualifies": qualifies, "focus": None,
                         "keywords": [entity.lower()]})
             continue
         looks_named = entity[:1].isupper() and all(p.isalpha() for p in entity.split())
         # places/periods are less strict than person names.
         qualifies = looks_named or entity_type in ("place", "period")
-        raw.append({"name": entity, "qualifies": qualifies, "maps_to_focus": None})
+        raw.append({"name": entity, "qualifies": qualifies, "focus": None})
     raw, _ = apply_previous_decisions(raw, previous_roster)
     return normalize(entity_type, raw, candidates, focus_map, min_score, min_answers)
 
@@ -882,6 +926,13 @@ def write_roster(entity_type: str, entities: list[dict], *, source: str | None =
     payload = {
         "version": 1, "type": entity_type, "resolved_at": now_utc(), "entities": entities,
     }
+    # v386 (ADR 0043): the relation queries the converter retired placeholder
+    # rows into are durable — a refresh keeps them — and every write passes
+    # through the converter, so a refresh that re-mints "Son" re-retires it.
+    previous = read_json(roster_file(entity_type), default=None)
+    if isinstance(previous, dict) and previous.get(ir.RELATION_QUERIES_KEY):
+        payload[ir.RELATION_QUERIES_KEY] = previous[ir.RELATION_QUERIES_KEY]
+    payload, _report = roster_relations.convert_legacy_roster(payload, entity_type=entity_type)
     if source:
         payload["source"] = source
     if sampled_answer_ids is not None:
@@ -900,8 +951,69 @@ def load_roster(entity_type: str = "person", *, vault_root: object = None) -> di
         path = vault_data_path("entity_rosters", vault_root=vault_root) / f"{entity_type}.json"
     data = read_json(path, default=None)
     if data and "entities" in data:
-        return data
+        # v386 (ADR 0043): the one-version converter, in memory. A reader
+        # never sees `maps_to_focus` or a placeholder row; the next writer
+        # persists the converted shape.
+        converted, _report = roster_relations.convert_legacy_roster(data, entity_type=entity_type)
+        return converted
     return {"version": 1, "type": entity_type, "entities": []}
+
+
+def read_roster_payload(entity_type: str) -> tuple[Path, dict | None]:
+    """``(path, payload)`` — the raw roster file through the v386 converter, for
+    a WRITER that rewrites the whole file (every top-level key kept). ``None``
+    when there is no roster on disk."""
+    path = roster_file(entity_type)
+    data = read_json(path, default=None)
+    if not isinstance(data, dict) or not isinstance(data.get("entities"), list):
+        return path, None
+    converted, _report = roster_relations.convert_legacy_roster(data, entity_type=entity_type)
+    return path, converted
+
+
+def load_identity_roster(entity_type: str = "person", *, focus_map: dict | None = None) -> dict:
+    """The roster as identity readers need it (v386): converted, with every
+    Focus attached to the one record it attends to
+    (`roster_relations.attach_focuses`), in memory. Never writes."""
+    roster = load_roster(entity_type)
+    if entity_type != "person":
+        return roster
+    attached, _ = roster_relations.attach_focuses(
+        roster, _focus_map() if focus_map is None else focus_map)
+    return attached
+
+
+def convert_identity(*, dry_run: bool = False, focus_map: dict | None = None) -> dict:
+    """The v386 converter, persisted: every roster type through
+    `roster_relations.convert_legacy_roster`, and the person roster's Focuses
+    attached (`attach_focuses`). Writes a file only when it changed, so a
+    second run is byte-identical (P8). ``{type: report}``."""
+    focuses = _focus_map() if focus_map is None else focus_map
+    out: dict = {}
+    for entity_type in ENTITY_TYPES:
+        path = roster_file(entity_type)
+        raw = read_json(path, default=None)
+        if not isinstance(raw, dict) or not isinstance(raw.get("entities"), list):
+            continue
+        converted, report = roster_relations.convert_legacy_roster(raw, entity_type=entity_type)
+        if entity_type == "person":
+            converted, attached = roster_relations.attach_focuses(converted, focuses)
+            report["attached"] = attached
+        report["changed"] = converted != raw
+        if report["changed"] and not dry_run:
+            write_json(path, converted)
+        out[entity_type] = report
+    return out
+
+
+def _focus_by_title(name: str, focus_map: dict[str, str], aliases: object = ()) -> str | None:
+    """The Focus slug whose TITLE this name or one of its aliases is, or None."""
+    titles = {normalized_focus_key(title): slug for slug, title in (focus_map or {}).items()}
+    for spelling in (name, *(aliases or ())):
+        hit = titles.get(normalized_focus_key(str(spelling or "")))
+        if hit:
+            return hit
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -990,7 +1102,7 @@ def _identity_rows(roster: object) -> list[dict]:
     by_slug = {roster_relations.collapsed_text_of(e.get("slug")): e for e in rows}
     out: list[dict] = []
     for entity in rows:
-        target = roster_relations.collapsed_text_of(entity.get("maps_to_focus"))
+        target = ir.folded_into_of(entity)
         if target and target in by_slug and by_slug[target] is not entity:
             continue
         out.append(entity)
@@ -1008,7 +1120,7 @@ def _rows_answering_to(name: str, roster: object) -> tuple[list[dict], bool]:
     by_slug = {roster_relations.collapsed_text_of(e.get("slug")): e for e in rows}
 
     def resolved(entity: dict) -> dict:
-        target = roster_relations.collapsed_text_of(entity.get("maps_to_focus"))
+        target = ir.folded_into_of(entity)
         return by_slug.get(target, entity) if target else entity
 
     def unique(found) -> list[dict]:
@@ -1448,7 +1560,7 @@ def first_name_aliases(*, dry_run: bool = False) -> dict:
     for entity in entities:
         key = first_key(entity)
         slug = str(entity.get("slug") or "")
-        if not key or entity.get("maps_to_focus") or str(entity["name"]).split()[0].lower() in ROLE_WORDS:
+        if not key or ir.is_alias_row(entity) or str(entity["name"]).split()[0].lower() in ROLE_WORDS:
             continue
         token = str(entity["name"]).split()[0]
         if any(normalized_focus_key(str(a)) == key for a in entity.get("aliases") or ()):
@@ -1644,12 +1756,22 @@ def main() -> int:
                              "Deterministic, additive, idempotent — no AI.")
     parser.add_argument("--dry-run", action="store_true",
                         help="With --ensure-introduced: report the rows, write nothing.")
+    parser.add_argument("--convert-identity", action="store_true",
+                        help="v386 (ADR 0043): split every roster's maps_to_focus "
+                             "into focus/folded_into, retire placeholder rows into "
+                             "relation queries, attach each Focus to its person. "
+                             "Keyless, idempotent; writes only what changed.")
     parser.add_argument("--recount", action="store_true",
                         help="Recompute unique_answers/score for --type through the "
                              "deterministic roster-folded join (v383, ADR 0041). "
                              "Keyless — no AI; writes only when a count moved.")
     args = parser.parse_args()
     t = args.type
+
+    if args.convert_identity:
+        reports = convert_identity(dry_run=args.dry_run)
+        print(json.dumps(reports, indent=2, ensure_ascii=False, sort_keys=True))
+        return 0
 
     if args.recount:
         result = recount(t)
@@ -1715,7 +1837,7 @@ def main() -> int:
             "focus_map": focus_map,
             "min_score": min_score, "min_answers": min_answers,
             "response_format": {"entities": [dict({"name": "", "aliases": [], "qualifies": True,
-                                              "maps_to_focus": None},
+                                              "focus": None},
                                              **({"chrono": 1} if t == "period" else {}),
                                              **({"keywords": ["phrase"]} if t == "theme" else {}))]},
         }, indent=2, ensure_ascii=False) + "\n")

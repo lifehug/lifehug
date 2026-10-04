@@ -320,7 +320,13 @@ class AGenerationalSuffixIsOneGenerationTests(unittest.TestCase):
 class AnAliasRowIsNeverACandidateTests(unittest.TestCase):
 
     def test_the_predicate(self):
-        self.assertTrue(ir.is_alias_row(ALIAS_ROW))
+        # v386 (ADR 0043): the predicate reads `folded_into` only; a raw legacy
+        # row is a pointer once the one-version split reads it against its
+        # roster (the target is another row).
+        self.assertFalse(ir.is_alias_row(ALIAS_ROW))
+        self.assertTrue(ir.is_alias_row(ir.split_legacy_pointers([ALIAS_ROW, BROTHER])[0]))
+        self.assertTrue(ir.is_alias_row({"name": "x", "folded_into": "y"}))
+        self.assertFalse(ir.is_alias_row({"name": "x", "focus": "dad"}))
         for row in (FATHER, GRANDFATHER, SON, BROTHER, {"name": "x", "maps_to_focus": ""}):
             with self.subTest(row["name"]):
                 self.assertFalse(ir.is_alias_row(row))

@@ -406,9 +406,11 @@ real page on a real vault.
   whatever else it mentions, so *"Two dates are claimed for your birth"* is
   never asked about a child's birthday.
 - **The roster is the identity ledger** (v383, ADR 0041). A fold is a
-  pointer, never a deletion: `entity-verdict <type> <loser> clear --maps-to
-  <survivor>` keeps the loser's row with `maps_to_focus = <survivor>` and
-  unions its names onto the survivor. Every alias the verb writes is a
+  pointer, never a deletion: `entity-verdict <type> <loser> clear --fold-into
+  <survivor>` keeps the loser's row with `folded_into = <survivor>` and
+  unions its names onto the survivor (v386, ADR 0043: `focus` is the separate
+  field for "a Focus attends to this person" — the record stays live;
+  `--maps-to` is rewritten to one or the other for one version). Every alias the verb writes is a
   decision under the collision rule (`roster_relations.alias_decision`): an
   alias another row already answers to binds to NEITHER — the whole verdict
   is refused, nothing is written, the refusal (both claimants) is printed as

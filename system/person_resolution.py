@@ -4,29 +4,16 @@
 **A THIN ADAPTER, NOT A SECOND RESOLVER.** The identity-unification design
 (lifehug-platform#987, `docs/design/identity.md` §4.1.2) gives
 `identity_resolution` ONE typed resolver per entity type —
-``resolve_person(text, roster, *, context) -> Resolution`` with ``kind`` one
-of ``resolved`` / ``ambiguous`` / ``unknown`` — and a disambiguated
-``display_name(record, roster)``. That work (I-1) lands in a sibling release.
-Until it does, the two callers this release adds (the classifier's "People you
-already know" block and its post-processor, and the general listener's
-``person_identity`` list) are written against THAT signature, through this
-module:
+``resolve_person(text, roster, *, context) -> Resolution`` — and a
+disambiguated ``display_name(record, roster)`` (v388, ADR 0043). This module
+DELEGATES to them; the v387 fallback bodies were deleted at the v388 rebase,
+as promised. What stays here is what the two callers (the classifier's "People
+you already know" block and post-processor, the general listener's
+``person_identity`` list) need on top: the refs-only :class:`Resolution` view
+with a ``basis``, the explicit ``@handle`` path (I-4 replaces it with
+`identity_resolution.parse_handles`), and the block renderer.
 
-* when `identity_resolution` already exports ``resolve_person`` /
-  ``display_name`` / ``parse_handles``, this module DELEGATES to them;
-* otherwise it falls back to today's deterministic readings — the exact
-  name/alias/full-name/relationship-qualified rungs of
-  `identity_resolution.resolve_mention`, the owner's possessive read as his
-  "my" (`identity_resolution.owner_possessive_as_my`), and a relationship WORD
-  resolved against the roster's own ``relationship`` field ONLY when the word
-  has cardinality one (:data:`CARDINALITY_ONE_WORDS`).
-
-When I-1 lands, the rebase deletes the fallback bodies and leaves the
-delegations (or deletes this module and repoints its two importers).
-
-The adapter never guesses: two candidates are ``ambiguous``, a set-valued
-relationship word ("my son") with no name is ``ambiguous`` over the set (or
-``unknown`` when the set is empty), and a name nobody bears is ``unknown``.
+The adapter never guesses: ``ambiguous`` and ``unknown`` pass through.
 It is pure: it reads the roster snapshot it is handed and never the disk.
 """
 
@@ -53,19 +40,8 @@ RESOLUTION_KINDS = (RESOLVED, AMBIGUOUS, UNKNOWN)
 BASIS_HANDLE = "handle"
 BASIS_STATEMENT = "statement"
 
-#: Relationship words that name ONE person (design §3.1, "relations are sets,
-#: not aliases"): "my wife" can be resolved by the word alone when exactly one
-#: spouse is on record; "my son" never can, because a family may hold two.
-#: I-1 moves the cardinality table into `relation_words`; until then this is
-#: the narrow, conservative list — every other word is a SET.
-CARDINALITY_ONE_WORDS = frozenset({
-    "wife", "husband", "spouse", "dad", "father", "mom", "mother",
-})
-
 #: An explicit reference typed by the person: ``@mara-holt``.
 HANDLE_RE = re.compile(r"(?<![\w@])@(?P<handle>[a-z0-9][a-z0-9-]*)", re.IGNORECASE)
-
-_EVIDENCE_REF = "person_resolution:adapter"
 
 
 @dataclass(frozen=True)
@@ -104,7 +80,7 @@ def _is_person_row(entity: dict) -> bool:
 
 def person_rows(roster: object) -> list[dict]:
     """Every individual person record, roster order."""
-    return [row for row in _entities(roster) if _is_person_row(row)]
+    return [row for row in ir.split_legacy_pointers(_entities(roster)) if _is_person_row(row)]
 
 
 def ref_of(entity: dict) -> str:
@@ -116,7 +92,7 @@ def slug_of_ref(ref: object) -> str:
     return text.split("/", 1)[1] if "/" in text else text
 
 
-def _from_upstream(result: object) -> Resolution:
+def _from_upstream(result: ir.Resolution) -> Resolution:
     kind = str(getattr(result, "kind", "") or UNKNOWN)
     ref = str(getattr(result, "ref", "") or "")
     raw = getattr(result, "candidates", ()) or ()
@@ -158,117 +134,42 @@ def resolve_handle(handle: object, roster: object) -> Resolution:
 # resolve_person — the adapter
 # --------------------------------------------------------------------------
 
-def _relationship_set(word: str, roster: object) -> list[str]:
-    wanted = ir.RELATIONSHIP_MENTION_WORDS.get(word, frozenset())
-    out: list[str] = []
-    for entity in person_rows(roster):
-        rel = ir.normalized_mention_key(entity.get(ir.ROSTER_RELATIONSHIP_KEY))
-        if rel and rel in wanted:
-            ref = ref_of(entity)
-            if ref not in out:
-                out.append(ref)
-    return out
-
-
 def resolve_person(text: object, roster: object, *,
                    context: dict | None = None) -> Resolution:
-    """``resolved`` / ``ambiguous`` / ``unknown`` for one person mention.
+    """``resolved`` / ``ambiguous`` / ``unknown`` for one person mention —
+    `identity_resolution.resolve_person`, viewed as refs.
 
+    A mention that is exactly one ``@handle`` takes the handle path.
     ``context`` may carry ``relationship`` (a relationship WORD said in the
-    same clause), which narrows a shared name and — for a cardinality-one word
-    only — resolves a mention that is the word alone.
+    same clause); it reaches the resolver as that clause ("my <word>"), which
+    is how `identity_resolution.ResolveContext` reads a relationship.
     """
-    upstream = getattr(ir, "resolve_person", None)
-    if callable(upstream):
-        return _from_upstream(upstream(text, roster, context=context or {}))
     mention = ir.collapsed_text(text)
     handles = parse_handles(mention)
     if handles and mention.lstrip("@").casefold() == handles[0]:
         return resolve_handle(handles[0], roster)
-    mine = ir.owner_possessive_as_my(mention)
-    if mine:
-        mention = mine
-    ctx_word = ir.relation_word_stem((context or {}).get("relationship"))
-    names, relations = ir.mention_tokens(mention)
-    words = list(relations)
-    if ctx_word and ctx_word in ir.RELATIONSHIP_MENTION_WORDS and ctx_word not in words:
-        words.append(ctx_word)
-    if not mention and not words:
-        return Resolution(UNKNOWN, reason="empty")
-    rows = person_rows(roster)
-    if names:
-        record = ir.resolve_mention(mention, roster=rows,
-                                    evidence_ref=_EVIDENCE_REF)
-        found = tuple(str(c.get("ref") if isinstance(c, dict) else c)
-                      for c in (getattr(record, "candidates", ()) or ()))
-        if record.resolution == "same" and record.resolved_ref:
-            return Resolution(RESOLVED, record.resolved_ref, found,
-                              str(record.reason))
-        if found and words:
-            wanted: set[str] = set()
-            for word in words:
-                wanted |= ir.RELATIONSHIP_MENTION_WORDS.get(word, frozenset())
-            index = ir.roster_index(rows)
-            narrowed = tuple(ref for ref in found
-                             if index.relationship_of.get(ref, "") in wanted)
-            if len(narrowed) == 1:
-                return Resolution(RESOLVED, narrowed[0], found,
-                                  "relationship_narrowed")
-        if found:
-            return Resolution(AMBIGUOUS, candidates=found,
-                              reason=str(record.reason))
-        return Resolution(UNKNOWN, reason="no_candidate")
-    # A relationship word and no name.
-    word = words[0] if words else ""
-    members = _relationship_set(word, rows) if word else []
-    if not members:
-        return Resolution(UNKNOWN, reason="no_candidate")
-    if word in CARDINALITY_ONE_WORDS and len(members) == 1:
-        return Resolution(RESOLVED, members[0], tuple(members),
-                          "cardinality_one_relationship")
-    reason = ("relationship_is_a_set" if word not in CARDINALITY_ONE_WORDS
-              else "ambiguous_candidates")
-    return Resolution(AMBIGUOUS, candidates=tuple(members), reason=reason)
+    ctx = dict(context or {})
+    word = ir.collapsed_text(ctx.pop("relationship", ""))
+    if word and not ctx.get("clause"):
+        ctx["clause"] = f"my {word}"
+    return _from_upstream(ir.resolve_person(mention, roster, context=ctx or None))
 
 
 # --------------------------------------------------------------------------
 # display_name — D7, colliding names carry a disambiguator
 # --------------------------------------------------------------------------
 
-def _born_year(entity: dict) -> str:
-    born = entity.get("born")
-    if isinstance(born, dict):
-        born = born.get("edtf") or born.get("lower") or born.get("best") or born
-    match = re.search(r"(1[89]\d{2}|20\d{2})", str(born or ""))
-    return match.group(1) if match else ""
-
-
 def display_name(record: dict, roster: object) -> str:
-    """The bare name when unique; ``Name (relation[, b. YYYY])`` when another
-    person record shares its name or its given name (design D7)."""
-    upstream = getattr(ir, "display_name", None)
-    if callable(upstream):
-        return str(upstream(record, roster))
-    name = ir.collapsed_text(record.get("name")) or ir._entity_slug(record)
-    key = ir.normalized_mention_key(name)
-    given = key.split()[0] if key else ""
-    mine = ref_of(record)
-    collides = False
-    for other in person_rows(roster):
-        if ref_of(other) == mine:
-            continue
-        other_key = ir.normalized_mention_key(other.get("name"))
-        if other_key and (other_key == key or other_key.split()[0] == given):
-            collides = True
-            break
-    if not collides:
-        return name
-    bits = [ir.collapsed_text(record.get(ir.ROSTER_RELATIONSHIP_KEY))]
-    year = _born_year(record)
-    if year:
-        bits.append(f"b. {year}")
-    bits = [bit for bit in bits if bit]
-    return f"{name} ({', '.join(bits)})" if bits else name
+    """`identity_resolution.display_name` — the bare name when unique;
+    ``Name (relation[, b. YYYY])`` when another person record shares its name
+    or given name (design D7)."""
+    return ir.display_name(record, roster)
+
+
+def record_view(record: dict, roster: object) -> dict:
+    """`identity_resolution.record_view` — ref, name, display name and the
+    handle fields, never inline."""
+    return ir.record_view(record, roster)
 
 
 # --------------------------------------------------------------------------

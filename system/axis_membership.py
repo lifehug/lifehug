@@ -234,7 +234,7 @@ def roster_person_rows(roster_snapshot: object) -> list[dict]:
     sequence of such snapshots), because `temporal_publication.publish` passes
     the first and `lifehug.py`'s frame-display command passes the third.
 
-    v357: an ALIAS row — ``maps_to_focus`` set — is not a person and is not
+    v357: an ALIAS row — ``folded_into`` set (v386) — is not a person and is not
     returned (`identity_resolution.AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE`). Every
     reader of this function is a BINDING reader — the family-tier index here,
     the fold's person-key and birth indexes — and v343 had already taken the
@@ -245,16 +245,22 @@ def roster_person_rows(roster_snapshot: object) -> list[dict]:
     if isinstance(roster_snapshot, dict):
         if collapsed_text(roster_snapshot.get("type")) not in ("", "person"):
             return []
-        rows = roster_snapshot.get("entities")
+        rows = ir.split_legacy_pointers(roster_snapshot.get("entities"))
         return [row for row in rows or ()
                 if isinstance(row, dict) and not ir.is_alias_row(row)]
     rows: list[dict] = []
+    bare = [item for item in roster_snapshot or ()
+            if isinstance(item, dict) and item.get("entities") is None
+            and not collapsed_text(item.get("type"))]
+    bare_ids = {id(item): row for item, row in zip(bare, ir.split_legacy_pointers(bare), strict=True)}
     for item in roster_snapshot or ():
         if isinstance(item, dict) and (item.get("entities") is not None
                                        or collapsed_text(item.get("type"))):
             rows.extend(roster_person_rows(item))
-        elif isinstance(item, dict) and not ir.is_alias_row(item):
-            rows.append(item)
+        elif isinstance(item, dict):
+            row = bare_ids.get(id(item), item)
+            if not ir.is_alias_row(row):
+                rows.append(row)
     return rows
 
 

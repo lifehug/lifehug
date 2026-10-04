@@ -17,7 +17,8 @@ There is exactly one mode (`interaction.yaml`'s `modes: curate`).
   candidate ids needing a decision (already the residue of the door guards
   and the roster fold — see `prompt/behavior.md`'s "What you are handed").
 - `{roster_context}` — a JSON array of settled roster entries
-  (`{type, name, aliases, maps_to_focus}`) for identity signal.
+  (`{type, name, display_name, aliases, focus, folded_into}`) for identity
+  signal.
 - `{existing_focuses}` — a JSON object `{slug: label}` — the only valid
   `map_to_focus` targets.
 

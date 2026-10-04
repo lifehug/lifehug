@@ -345,16 +345,19 @@ def _focus_covered_aliases() -> set[str]:
     though that person is already a Focus."""
     covered: set[str] = set()
     try:
-        from entity_roster import ENTITY_TYPES, load_roster  # noqa: PLC0415
+        import identity_resolution as ir  # noqa: PLC0415
+        from entity_roster import ENTITY_TYPES, load_identity_roster  # noqa: PLC0415
     except Exception:
         return covered
     for etype in ENTITY_TYPES:
         try:
-            entities = load_roster(etype).get("entities", [])
+            entities = load_identity_roster(etype).get("entities", [])
         except Exception:
             continue
         for e in entities:
-            if not e.get("maps_to_focus"):
+            # v386 (ADR 0043): a record a Focus attends to (`focus`) is covered —
+            # and so is a pointer folded into one (its names are the survivor's).
+            if not ir.focus_of(e) and not ir.is_alias_row(e):
                 continue
             covered.add(str(e.get("name", "")).lower())
             for alias in e.get("aliases", []) or []:
@@ -572,6 +575,7 @@ def _roster_alias_fold_map(entity_type: str) -> dict[str, str]:
     (recurring-defect doctrine), never re-derived here. "" / {} when the
     roster module or file is unavailable (a vault with no rosters yet)."""
     try:
+        import identity_resolution as ir  # noqa: PLC0415
         from entity_roster import _entity_keys, load_roster  # noqa: PLC0415
     except Exception:
         return {}
@@ -588,7 +592,7 @@ def _roster_alias_fold_map(entity_type: str) -> dict[str, str]:
         """v383 (ADR 0041): a row folded into ANOTHER row of this roster
         (`entity-verdict --maps-to <row>`) is a pointer — its spellings count
         for the survivor, never for itself."""
-        target = str(entity.get("maps_to_focus") or "").strip()
+        target = ir.folded_into_of(entity)
         if target and target != str(entity.get("slug") or "").strip():
             return names_by_slug.get(target) or None
         return None
@@ -694,6 +698,35 @@ def _existing_wiki_page_slugs() -> set[str]:
     return slugs
 
 
+def _identity_people() -> dict:
+    """The person roster as resolution reads it (v386): converted, Focuses
+    attached. An empty roster when the module or file is unavailable."""
+    try:
+        from entity_roster import load_identity_roster  # noqa: PLC0415
+        return load_identity_roster("person")
+    except Exception:  # noqa: BLE001
+        return {"type": "person", "entities": []}
+
+
+def _resolved_person(entity: str, people: dict) -> dict | None:
+    """The record ``entity`` resolves to, as ``record_view`` plus ``focus``, or
+    None (ambiguous and unknown are not a record — callers never pick)."""
+    import identity_resolution as ir  # noqa: PLC0415
+
+    found = ir.resolve_person(entity, people)
+    if not found.resolved:
+        return None
+    for row in people.get("entities") or []:
+        if isinstance(row, dict) and ir.record_view(row, people).get("ref") == found.ref:
+            return {**ir.record_view(row, people), "focus": ir.focus_of(row)}
+    return None
+
+
+def _person_is_covered(resolved: dict, existing_pages: set[str]) -> bool:
+    """A resolved person already has a Focus or a wiki page (P1)."""
+    return bool(resolved.get("focus")) or resolved.get("slug") in existing_pages
+
+
 def recommend(
     min_score: float = 3.0,
     include_dismissed: bool = False,
@@ -712,6 +745,9 @@ def recommend(
 
     stats = _build_entity_stats(answers, source_texts, classifications)
     stats = _fold_stats_through_roster(stats)
+    # v386 (ADR 0043, design §4.1.2): a detector string is RESOLVED to a person
+    # record before it is scored. "Author's father" is the father's record.
+    people = _identity_people()
 
     # Load existing state
     existing = load_recommendation_state()
@@ -746,6 +782,10 @@ def recommend(
     for (entity_type, entity), s in stats.items():
         # Skip already-focused entities
         if entity.lower() in existing_focuses:
+            continue
+        resolved = _resolved_person(entity, people) if entity_type == "person" else None
+        if resolved is not None and _person_is_covered(resolved, existing_pages):
+            # P1/P2: the person already has a Focus or a page.
             continue
         # Skip entities the wiki already compiles a page for — they're covered,
         # not new territory.
@@ -792,6 +832,10 @@ def recommend(
                 status == "pending" and gate["open"] and score >= FOCUS_READY_SCORE_FLOOR
             ),
         }
+        if resolved is not None:
+            # D5: the resolved record beside the raw string, never a rewrite.
+            rec["resolved_ref"] = resolved["ref"]
+            rec["resolved_name"] = resolved["display_name"]
         new_recs.append(rec)
 
     new_recs.sort(key=lambda r: r["score"], reverse=True)
@@ -1045,11 +1089,25 @@ def approve_recommendation(rec_id: str, *, tier: str = "standard",
 
     entity = str(target["entity"])
     focus_type = str(target.get("type", "theme"))
+    person_ref = None
+    if focus_type == "person":
+        # v386 (ADR 0043): resolve first and ATTACH — "Author's father" is the
+        # father's record; a record a Focus already attends to is a twin.
+        resolved = _resolved_person(entity, _identity_people())
+        if resolved is not None:
+            if resolved.get("focus"):
+                print(f"✗ Not approved: {entity} is {resolved['display_name']} "
+                      f"({resolved['ref']}), already attended by Focus "
+                      f"{resolved['focus']!r} — refusing a twin (one person, one record)",
+                      file=sys.stderr)
+                return False
+            entity = resolved["name"]
+            person_ref = resolved["ref"]
     try:
         from roadmap import focus_new  # noqa: PLC0415
         result = focus_new(entity, focus_type, tier,
                            objective=str(target.get("reason", ""))[:120],
-                           deliverable=deliverable)
+                           deliverable=deliverable, person_ref=person_ref)
     except Exception as exc:  # noqa: BLE001
         print(f"✗ Focus creation failed for {entity}: {exc}", file=sys.stderr)
         return False
@@ -1059,6 +1117,8 @@ def approve_recommendation(rec_id: str, *, tier: str = "standard",
     target["approved_by"] = approved_by
     target["focus_id"] = result.get("focus_id")
     target["category"] = result.get("category")
+    if result.get("person_ref"):
+        target["person_ref"] = result["person_ref"]
 
     write_json(FOCUS_RECS_FILE, {
         "version": existing.get("version", 1),

@@ -62,7 +62,7 @@ card per person, kind :data:`RELATION_WORD_KIND`, on the Timeline's queue and
 never on a person page (the standing ruling: person pages do not ask). Only
 for a real named person whose relationship has a gendered pair — never a
 friend, a colleague, a bishop, a neighbour; never an alias row
-(``maps_to_focus``), a collective or role row ("Kids", "Son"), or the owner.
+(``folded_into``, v386), a collective or role row ("Kids", "Son"), or the owner.
 Ranked below every dating card. Answering files through the ordinary card
 answer path (`answer_placement.place_answers`, `landmark_recorder.file_claims`)
 into :func:`file_relation_answer`, and a card whose person has the field is
@@ -303,9 +303,15 @@ def _role_words() -> frozenset[str]:
     return frozenset(entity_roster.ROLE_WORDS)
 
 
-#: v357's one reading of a `maps_to_focus` pointer row
+#: v357's one reading of a pointer row (`folded_into` since v386)
 #: (`identity_resolution.AN_ALIAS_ROW_IS_NEVER_A_CANDIDATE`), used as is.
 is_alias_row = ir.is_alias_row
+
+#: v386 (ADR 0043, design 6a): how many people one relation word names — the
+#: one table, defined at the bottom of the import graph and re-exported here
+#: (the `IN_LAW_RE` precedent). A spouse or a father is one; a son is a set.
+RELATION_WORD_CARDINALITY = ir.RELATION_WORD_CARDINALITY
+relation_cardinality = ir.relation_cardinality
 
 
 def is_collective_row(entity: object) -> bool:
@@ -575,10 +581,10 @@ def given_name_census(roster: object) -> dict[str, frozenset]:
     """``{given name key: {identity refs}}`` — the first token of every identity
     row's own name, and every one-word spelling it answers to."""
     census: dict[str, set] = {}
-    for entity in rr.roster_entities(roster):
+    for entity in ir.split_legacy_pointers(rr.roster_entities(roster)):
         if is_alias_row(entity):
             target = ir.entity_ref(
-                "person", rr.collapsed_text_of(entity.get(ir.ROSTER_MAPS_TO_FOCUS_KEY)))
+                "person", ir.folded_into_of(entity))
         else:
             target = person_ref(entity)
         if not target:
@@ -642,10 +648,10 @@ def _shared_spelling_keys(roster: object) -> frozenset[str]:
     reading below never anchors on it (the v334/v335 shared-name rule).
     """
     census: dict[str, set[str]] = {}
-    for entity in rr.roster_entities(roster):
+    for entity in ir.split_legacy_pointers(rr.roster_entities(roster)):
         if is_alias_row(entity):
             target = ir.entity_ref(
-                "person", rr.collapsed_text_of(entity.get(ir.ROSTER_MAPS_TO_FOCUS_KEY)))
+                "person", ir.folded_into_of(entity))
         else:
             target = person_ref(entity)
         for spelling in _spellings(entity):
@@ -777,7 +783,7 @@ def relation_word_rows(roster: object, *, claims: object = (),
     skipped: their spellings are already their target's. ``relation_gender``
     is ``None`` when nothing the owner said decides it.
     """
-    entities = [entity for entity in rr.roster_entities(roster)
+    entities = [entity for entity in ir.split_legacy_pointers(rr.roster_entities(roster))
                 if not is_alias_row(entity)
                 and rr.collapsed_text_of(entity.get("relationship"))]
     if not entities:
@@ -1094,7 +1100,7 @@ def file_relation_answer(vault_root: object, *, session_ref: object, text: objec
               "relation_gender": "", "written": False, "refused": ""}
     if roster is None:
         roster = entity_roster.load_roster("person", vault_root=vault_root)
-    entity = next((row for row in rr.roster_entities(roster)
+    entity = next((row for row in ir.split_legacy_pointers(rr.roster_entities(roster))
                    if person_ref(row) == ref and not is_alias_row(row)), None)
     if entity is None:
         report["refused"] = REFUSED_PERSON_NOT_ON_ROSTER

@@ -558,7 +558,7 @@ def write_page(path: Path, text: str, dry_run: bool) -> bool:
 def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
                 summary, open_questions, open_questions_header="Open Questions",
                 seed_related=None, origin="focus", section="", chrono=None,
-                date_edtf="", born_edtf="", died_edtf=""):
+                date_edtf="", born_edtf="", died_edtf="", contains=None):
     if _RETRACTIONS:
         cited_items = [i for i in cited_items if not _is_retracted(i, slug)]
         supporting_items = [i for i in supporting_items if not _is_retracted(i, slug)]
@@ -582,6 +582,7 @@ def _descriptor(page_type, title, slug, sources, cited_items, supporting_items,
         "seed_related": seed_related or [],
         "origin": origin,
         "section": section,
+        "contains": list(contains or []),
     }
 
 
@@ -801,6 +802,13 @@ def _witness_items(manual_sources, names):
             and s.get("witness_slug") and s.get("witness_slug") in slugs]
 
 
+def _has_home(entity):
+    """v386: the record has a Focus or is a folded pointer — no page of its own."""
+    import identity_resolution as ir  # noqa: PLC0415
+
+    return ir.has_home(entity)
+
+
 def _focus_slugs(categories):
     return {
         slugify(clean_focus_name(info["name"]))
@@ -810,11 +818,17 @@ def _focus_slugs(categories):
 
 
 def _focus_alias_map(person_roster, focus_slugs=None):
-    """focus_slug -> alias names, from canonical person entities mapped to a Focus."""
+    """focus_slug -> alias names, from the person records a Focus attends to.
+
+    v386 (ADR 0043): reads the record's `focus` (`identity_resolution.focus_of`),
+    so the person a Focus is about — "Katie Taylor" under the Focus "Katie" —
+    brings every name she goes by to her page's mention scan."""
+    import identity_resolution as ir  # noqa: PLC0415
+
     alias_map = defaultdict(set)
     valid = set(focus_slugs or [])
     for p in (person_roster or {}).get("entities", []):
-        mf = p.get("maps_to_focus")
+        mf = ir.focus_of(p)
         if not mf:
             continue
         focus_slug = slugify(clean_focus_name(str(mf)))
@@ -920,11 +934,16 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs,
     that aren't already Focuses — graduated purely from mentions across the corpus.
     Generalizes the old person-only path to every entity type (the life graph
     builds itself). `taken_slugs` accumulates so we never double-build a slug."""
+    import identity_resolution as ir  # noqa: PLC0415
+    import roster_relations as rr  # noqa: PLC0415
+
     descs = []
     noun = _ENTITY_NOUN.get(entity_type, entity_type)
     entities = (roster or {}).get("entities") or []
     for ent in entities:
-        if not ent.get("page_eligible"):
+        # v386 (ADR 0043): eligible only when `focus is None and folded_into is
+        # None` — a Focus owns the page, or the survivor of a fold does.
+        if not ent.get("page_eligible") or ir.has_home(ent):
             continue
         slug = ent.get("slug") or slugify(ent.get("name", ""))
         if not slug or slug in taken_slugs:
@@ -962,6 +981,8 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs,
         required_mentions = 1 if ent.get("owner_verdict") == "graduate" else _ENTITY_MIN_MENTIONS.get(entity_type, 1)
         if len(a_hits) < required_mentions and not m_hits and not research_items:
             continue  # needs a few real mentions to be worth a page
+        contains = (contained_place_lines(ent, roster, rr=rr)
+                    if entity_type == "place" else [])
         primary, supporting = split_primary_supporting(m_hits)
         cited_items = a_hits + research_items + primary
         sources = [x["source"] for x in cited_items + supporting]
@@ -984,8 +1005,34 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs,
             date_edtf=(_period_date_edtf(ent) if entity_type == "period" else ""),
             born_edtf=(_person_date_edtf(ent, "born") if entity_type == "person" else ""),
             died_edtf=(_person_date_edtf(ent, "died") if entity_type == "person" else ""),
+            contains=contains,
         ))
     return descs
+
+
+#: v386 (ADR 0043, design 6c): a place page lists the places INSIDE it — the
+#: California page, its cities, and each city's places — read from the
+#: roster's `located_in`, nested. Containment is never read upward.
+A_PLACE_PAGE_LISTS_WHAT_IS_INSIDE_IT = (
+    "a place page lists the places located in it, nested by containment; a "
+    "mention of the outer place never counts for the places inside it"
+)
+
+
+def contained_place_lines(entity, roster, *, rr=None, depth=0, seen=None):
+    """Markdown list lines for every place ``located_in`` this one, nested."""
+    if rr is None:
+        import roster_relations as rr  # noqa: PLC0415
+    seen = set() if seen is None else seen
+    ref = rr.entity_ref("place", entity)
+    if ref in seen or depth > 6:
+        return []
+    seen.add(ref)
+    lines = []
+    for child in rr.contained_places(ref, roster):
+        lines.append(f"{'  ' * depth}- {child.get('name') or child.get('slug')}")
+        lines.extend(contained_place_lines(child, roster, rr=rr, depth=depth + 1, seen=seen))
+    return lines
 
 
 def _person_date_edtf(entity: dict, field: str) -> str:
@@ -1066,7 +1113,7 @@ def theme_keyword_map(theme_roster=None):
         merged[slug] = {"title": slug.replace("-", " ").title(),
                         "keywords": list(words), "origin": "focus"}
     for ent in (theme_roster or {}).get("entities") or []:
-        if not ent.get("page_eligible") or ent.get("maps_to_focus"):
+        if not ent.get("page_eligible") or _has_home(ent):
             continue
         slug = ent.get("slug") or slugify(ent.get("name", ""))
         if not slug:
@@ -1101,7 +1148,7 @@ def plan_themes(answers, manual_sources, theme_roster=None, author_slug=None):
         eligible_theme_slugs = {
             (entry.get("slug") or slugify(entry.get("name", "")))
             for entry in (theme_roster or {}).get("entities", [])
-            if entry.get("page_eligible") is True and not entry.get("maps_to_focus")
+            if entry.get("page_eligible") is True and not _has_home(entry)
         }
         research_items = (
             matching_candidate_research(
@@ -1555,6 +1602,9 @@ def render_page(desc, synth, related, backlinks, slug_title):
     if desc["supporting_items"]:
         body.extend(["", "## Supporting Story Sources"])
         body.extend(cited_blocks(desc["supporting_items"]))
+    if desc.get("contains"):
+        body.extend(["", "## Places Within"])
+        body.extend(desc["contains"])
 
     body.extend(["", "## Related Pages"])
     if related:
@@ -1767,7 +1817,7 @@ def cleanup_orphan_entity_pages(planned_slugs: set[str], dry_run: bool = False) 
             continue  # no roster signal → never delete
         keep_slugs = set(planned_slugs)
         for ent in roster_entities:
-            if ent.get("page_eligible") and not ent.get("maps_to_focus"):
+            if ent.get("page_eligible") and not _has_home(ent):
                 slug = ent.get("slug") or slugify(ent.get("name", ""))
                 if slug:
                     keep_slugs.add(slug)

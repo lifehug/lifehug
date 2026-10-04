@@ -419,8 +419,10 @@ class OneCardWhereTheWordHasAPairTests(unittest.TestCase):
     def test_an_alias_row_never_gets_a_card(self):
         self.assertNotIn("person/james", self.cards)
         self.assertNotIn("person/james", rows_by_ref())
+        # v386 (ADR 0043): a pointer is `folded_into`; a dangling legacy
+        # `maps_to_focus` is read as a Focus, which is a live person.
         alias_only = {"entities": [row("James", "james", "child",
-                                       maps_to="james-everett-taylor")]}
+                                       folded_into="james-everett-taylor")]}
         self.assertEqual(cards_by_ref(alias_only, []), {})
 
     def test_a_collective_a_role_row_and_the_owner_get_no_card(self):
