@@ -271,7 +271,7 @@ class PartnershipFoldsThroughTheDailyStep(unittest.TestCase):
         result = self._run([_katie()], [_partnership()])
         rows = {r["slug"]: r for r in result["roster"]["entities"]}
         self.assertEqual(set(rows), {"katie-taylor"}, "nothing is minted")
-        self.assertEqual(rows["katie-taylor"]["aliases"], ["wife", "my wife", "Katie Ann Merrill"])
+        self.assertEqual(rows["katie-taylor"]["aliases"], ["wife", "my wife", "Katie Ann Merrill", "Katie"])  # v384 adds the unique first name
         self.assertEqual(rows["katie-taylor"]["source"], "landmark:family")
         self.assertEqual([f["slug"] for f in result["folded"]], ["katie-taylor"])
         self.assertEqual(result["filed"], 0)

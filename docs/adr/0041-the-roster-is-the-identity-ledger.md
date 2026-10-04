@@ -88,3 +88,18 @@ irreversible); folding on first token without a relationship check (a father
 - Delete-when: a durable, source-backed identity-decision record replaces the
   roster JSON as the authority (`roster_relations`' module docstring names that
   gap).
+
+## Amendment 2026-10-04 (D4): a unique first name is an alias
+
+Answers say "Katie", never "Katie Taylor", and a bare first name keys to
+nothing in the roster-folded detector join, so `Katie Taylor` counted 0 unique
+answers. Rule: for every person row whose name has two or more tokens, its
+first token becomes an alias of that row — through `entity_verdict.apply_verdict`,
+so `roster_relations.alias_decision` still governs — if and only if no other
+person row answers to it by name, alias or first token. A first name is
+unique-or-nothing: a shared one (three Jameses) is never added and the
+collision is reported (`first_name_collisions`), never guessed, because binding
+it to one claimant would misfile the others' answers. Role-word first tokens
+("Grandma") are not names and are skipped. Runs inside
+`entity-roster --ensure-introduced`, before the recount, so the count moves on
+the same run. Idempotent; no model call.
