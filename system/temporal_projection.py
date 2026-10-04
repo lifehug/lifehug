@@ -306,6 +306,11 @@ WORK_ITEM_KINDS = (
     # daughter, father or mother. About a person, never a moment, so it
     # carries no node and requests `relation_gender`.
     "relation_word",
+    # v391 (lifehug#459, identity §4.2.5/D3): a name nobody on record answers
+    # to — "New person?". About a person who does not exist yet, so no node and
+    # no claim; the owner's explicit choice files it (`--ensure`), never a
+    # conversation.
+    "new_person",
 )
 
 #: ``offered`` is "shown to the person and not yet answered"; ``obsolete`` is

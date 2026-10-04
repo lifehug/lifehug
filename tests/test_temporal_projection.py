@@ -114,7 +114,7 @@ class VocabularyTests(unittest.TestCase):
             tp.WORK_ITEM_KINDS,
             ("missing_anchor", "precision_gap", "contradiction", "identity_uncertain",
              "place_ambiguous", "tenure_ambiguous", "residence_overlap", "chain_gap",
-             "same_event", "possible_overmerge", "relation_word"),
+             "same_event", "possible_overmerge", "relation_word", "new_person"),
         )
         self.assertEqual(
             tp.WORK_ITEM_STATES,

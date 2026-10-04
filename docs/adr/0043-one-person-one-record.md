@@ -182,3 +182,19 @@ given pages (D2). Delete-when: the stubs go one version after v389.
    listener's known-people list print each person as `Name @handle` (the short
    handle when set, else `@slug`); the prompts tell the model the name is
    written without it, and that an `@handle` in `refers_to` is copied exactly.
+
+## Work items (v391)
+
+A `person_identity` record that is not `resolved` is work for the person, not a
+filing. `general_listener.identity_work_items(records, roster)` (CLI:
+`lifehug.py identity-work-items`, listener JSON on stdin) mints one row per
+mention: `ambiguous` becomes an `identity_uncertain` row naming every candidate
+("Which James?"), `unknown_person` / `unknown_handle` becomes a `new_person` row
+("New person?") quoting the basis. A `resolved` record mints nothing. The id is
+`derive_work_item_id(kind, unresolved mention, "identity")` — the derivation
+Mirror's own `identity_uncertain` rows use — so the listener, the host's
+recording job and Mirror converge on one row. D3 holds: the `new_person` row
+only NAMES the `entity-verdict person <slug> clear --ensure --name <name>` argv
+(`owner_choice_argv`); a host runs it only on the owner's explicit choice, and
+a conversation never mints a person. `entity-roster --convert-identity` is now
+reachable through `lifehug.py`.

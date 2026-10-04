@@ -488,6 +488,8 @@ SURFACES_BY_KIND = {
     # daily question, never a whisper, never Mirror — and never a person page,
     # which asks nothing (owner ruling).
     "relation_word": ("timeline",),
+    # v391 (#459): a new name is Mirror's and Timeline's, like identity_uncertain.
+    "new_person": tuple(ident.IDENTITY_WORK_SURFACES),
 }
 
 #: Surfaces a loss-discovery item may use. Timeline only: the system may OFFER
@@ -531,6 +533,9 @@ WORK_ITEM_VALUE_DEFAULTS = {
     # v358 (`relation_words`): cheap to answer and worth knowing, but it places
     # no moment, so it is priced below every dating card and never crowds one.
     "relation_word": {"person_value": 0.3, "interaction_cost": 0.1, "context_fit": 0.3},
+    # v391 (#459): minting a person is the owner's call; priced like the
+    # identity question it sits beside.
+    "new_person": {"person_value": 0.4, "interaction_cost": 0.4, "context_fit": 0.4},
 }
 
 #: How sensitive asking about this event is, before any per-person signal. A

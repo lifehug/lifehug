@@ -686,7 +686,7 @@ def precision_so_far(session: object) -> object:
 WORK_ITEM_KINDS = ("contradiction", "identity_uncertain",
                    "missing_anchor", "place_ambiguous", "precision_gap",
                    "residence_overlap", "tenure_ambiguous", "chain_gap",
-                   "same_event", "possible_overmerge", "relation_word")
+                   "same_event", "possible_overmerge", "relation_word", "new_person")
 
 #: How many quoted spans a work-item context block carries. The same number as
 #: `mirror_work.MAX_PLAY_EVIDENCE` and pinned equal to it
@@ -814,6 +814,14 @@ WORK_ITEM_PROBES = {
         "step": "content", "cost": 1,
         "text": "When you talk about {label}, which word is right \u2014 "
                 "{candidates}?",
+    },
+    # v391 (#459, identity D3). A name nobody on record answers to. The probe
+    # only ASKS who they are; nothing is filed until the owner chooses to add
+    # the person (`entity-verdict ... --ensure`), never by this conversation.
+    "new_person": {
+        "step": "content", "cost": 1,
+        "text": "Who is {label} \u2014 somebody to add to your story, or "
+                "somebody I already know under another name?",
     },
 }
 
