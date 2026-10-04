@@ -235,9 +235,9 @@ class ThreeWalters(unittest.TestCase):
         self.assertEqual(resolve("Walter", year=2012).ref, "person/walter-finch-pell")
         # No surface prints a bare "Walter …" for any of them.
         shown = {r["slug"]: ir.display_name(r, roster) for r in roster["entities"]}
-        self.assertEqual(shown["walter-pell"], "Walter Pell (father)")
-        self.assertEqual(shown["walter-finch-pell"], "Walter Finch Pell (son)")
-        self.assertEqual(shown["walter-ames-pell-sr"], "Walter Ames Pell Sr (grandfather)")
+        self.assertEqual(shown["walter-pell"], "Walter Pell (father, b. 1956)")
+        self.assertEqual(shown["walter-finch-pell"], "Walter Finch Pell (son, b. 2012)")
+        self.assertEqual(shown["walter-ames-pell-sr"], "Walter Ames Pell Sr (grandfather, b. 1931)")
         self.assertEqual(shown["mara-quill"], "Mara Quill")
 
     def test_focus_category_splits_a_collision(self):

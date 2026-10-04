@@ -1712,10 +1712,15 @@ def identity_reminder(verdict: object = None) -> str:
 
 
 def _identity_term_consumed(term: str, person_roster: object) -> bool:
-    """A name the roster ALREADY resolves is a restatement, not a lesson."""
+    """A name the roster ALREADY resolves is a restatement, not a lesson.
+
+    v388: a resolution reached only by the FIRST-NAME rung ("Rosalind Ann
+    Quill" sharing "Rosalind" with one record) is not a restatement — the
+    full name is exactly the lesson the listener exists to hear."""
     import person_resolution as pr  # noqa: PLC0415
 
-    return pr.resolve_person(term, person_roster).resolved
+    found = pr.resolve_person(term, person_roster)
+    return found.resolved and found.reason != "first_name"
 
 
 def _heard_tokens(heard: object) -> frozenset[str]:

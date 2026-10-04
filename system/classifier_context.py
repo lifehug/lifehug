@@ -2253,7 +2253,10 @@ def resolve_classification_people(classification: dict,
         found = pr.resolve_person(mention, person_roster, context=context)
         note: dict = {"field": field_name, "index": index,
                       "mention": mention, "kind": found.kind}
-        if found.resolved and names.get(found.ref):
+        # v388: the first-name rung alone never rewrites a name — the block
+        # promises "never match a stranger to a listed person because a first
+        # name is shared".
+        if found.resolved and found.reason != "first_name" and names.get(found.ref):
             note["ref"] = found.ref
             note["name"] = names[found.ref]
             note["rewritten"] = names[found.ref] != mention

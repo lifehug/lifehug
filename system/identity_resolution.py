@@ -2914,7 +2914,7 @@ def display_name(record: object, roster: object) -> str:
     label = relation_label(record)
     parts = [label] if label else []
     born = _born_year(record)
-    if born and (not label or any(relation_label(row) == label for row in colliders)):
+    if born:
         parts.append(f"b. {born}")
     return f"{name} ({', '.join(parts)})" if parts else name
 
