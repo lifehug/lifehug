@@ -654,6 +654,79 @@ def _best_stats(entity: dict, stats: dict[str, dict]) -> tuple[float, int]:
     return float(score), int(answers)
 
 
+# --------------------------------------------------------------------------
+# v383 (ADR 0041) — counts are a deterministic join, not a model call
+# --------------------------------------------------------------------------
+#
+# A roster row's `unique_answers`/`score` used to move only when the monthly
+# `rosters` step ran its model call — so a fold or an alias filed on the 3rd
+# was invisible until the 1st, and a budget-exhausted month left every count
+# where it was. The join itself never needed a model: it is
+# `recommend_focuses._build_entity_stats` (the detectors over answers,
+# manual sources and current classifications) folded through the roster's
+# own aliases (`recommend_focuses._fold_stats_through_roster`) and read per
+# row by :func:`_best_stats`. `recount` runs exactly that, keyless, and
+# rewrites only the two count fields — never `qualifies`, `page_eligible`,
+# an owner verdict or an identity fact (those stay the verdict's and the
+# monthly curation's). It writes only when a count moved, so a second run is
+# byte-identical.
+
+RECOUNT_FIELDS = ("score", "unique_answers")
+
+
+def recount_stats() -> dict[str, dict[str, dict]]:
+    """``{entity_type: {lowercased name: {"score", "unique_answers"}}}`` — the
+    roster-folded detector stats, in the same index shape :func:`_best_stats`
+    already reads. No model call anywhere on this path."""
+    import recommend_focuses as rf  # noqa: PLC0415
+
+    stats = rf._fold_stats_through_roster(rf._build_entity_stats(  # noqa: SLF001
+        rf._load_answer_texts(), rf._load_source_texts(), rf._load_classifications()))  # noqa: SLF001
+    out: dict[str, dict[str, dict]] = {}
+    for (entity_type, name), s in sorted(stats.items()):
+        key = str(name or "").lower()
+        if not key:
+            continue
+        row = {"score": float(rf._score(s)), "unique_answers": len(s["answers"])}  # noqa: SLF001
+        bucket = out.setdefault(entity_type, {})
+        prev = bucket.get(key)
+        if prev is not None:
+            row = {"score": max(prev["score"], row["score"]),
+                   "unique_answers": max(prev["unique_answers"], row["unique_answers"])}
+        bucket[key] = row
+    return out
+
+
+def recount(entity_type: str, *, stats: dict[str, dict] | None = None) -> dict:
+    """Recompute every row's `unique_answers`/`score` for ``entity_type``
+    through the deterministic join and write the roster atomically IF a count
+    moved. ``{"changed": bool, "updated": [slug, ...], "entities": [...]}``.
+
+    A pointer row (folded into another row) re-counts to whatever its own
+    spellings still carry after the fold — normally nothing, because the fold
+    moved them to the survivor. ``stats`` overrides the vault read (tests)."""
+    if entity_type not in ENTITY_TYPES:
+        raise ValueError(f"unknown entity type: {entity_type!r}")
+    path = roster_file(entity_type)
+    data = read_json(path, default=None)
+    entities = data.get("entities") if isinstance(data, dict) else None
+    if not isinstance(entities, list):
+        return {"changed": False, "updated": [], "entities": []}
+    index = stats if stats is not None else recount_stats().get(entity_type, {})
+    updated: list[str] = []
+    for entity in entities:
+        if not isinstance(entity, dict):
+            continue
+        score, answers = _best_stats(entity, index)
+        counts = {"score": round(score, 2), "unique_answers": answers}
+        if any(entity.get(field) != counts[field] for field in RECOUNT_FIELDS):
+            entity.update(counts)
+            updated.append(str(entity.get("slug") or entity.get("name") or ""))
+    if updated:
+        write_json(path, data)
+    return {"changed": bool(updated), "updated": updated, "entities": entities}
+
+
 def base_page_eligible(entity_type: str, qualifies: bool, maps_to: str | None,
                        score: float, answers: int, min_score: float, min_answers: int) -> bool:
     """The AI/deterministic-derived eligibility rule, BEFORE any owner_verdict
@@ -872,7 +945,25 @@ def load_roster(entity_type: str = "person", *, vault_root: object = None) -> di
 # relationship WORD to parse and nothing to misread.
 
 CHILDREN_RELATION_DOMAIN = "children"
-LANDMARK_RELATION_DOMAINS = (roster_relations.FAMILY_RELATION_DOMAIN, CHILDREN_RELATION_DOMAIN)
+#: v383 (ADR 0041): `partnerships` reaches the roster too. The owner's wedding
+#: ("I married Katie Ann Merrill January 11th, 2007") filed a `partnerships`
+#: entry naming his wife in full, and nothing read it — so the name joined no
+#: row and a candidate question narrated it back to him as a stranger.
+PARTNERSHIPS_RELATION_DOMAIN = "partnerships"
+LANDMARK_RELATION_DOMAINS = (roster_relations.FAMILY_RELATION_DOMAIN, CHILDREN_RELATION_DOMAIN,
+                             PARTNERSHIPS_RELATION_DOMAIN)
+
+#: The relation a domain states by itself (no `relation` field to read).
+DOMAIN_RELATIONSHIPS = {CHILDREN_RELATION_DOMAIN: "child",
+                        PARTNERSHIPS_RELATION_DOMAIN: "spouse"}
+
+#: Domains whose entry `date` is the person's BIRTH. A partnership's date is
+#: the wedding — never a birthday.
+DOMAINS_DATED_BY_BIRTH = (roster_relations.FAMILY_RELATION_DOMAIN, CHILDREN_RELATION_DOMAIN)
+
+#: Relationships that name the same seat: a `partnerships` entry says
+#: "spouse", a row may already say "partner".
+_SAME_SEAT = {"partner": "spouse"}
 
 
 def _looks_like_a_full_name(text: str) -> bool:
@@ -887,48 +978,84 @@ def _first_token(text: str) -> str:
     return parts[0].casefold() if parts else ""
 
 
-def _roster_first_tokens(roster: object) -> set[str]:
-    """Every first token any existing person row already answers to, by name
-    or by alias — the guard that keeps "Harvey Rex Taylor" from becoming a
-    second row beside the roster's existing "Harvey"."""
-    out: set[str] = set()
-    for entity in roster_relations.roster_entities(roster):
-        for spelling in (entity.get("name"), *(entity.get("aliases") or ())):
-            body = roster_relations.collapsed_text_of(spelling)
-            if body:
-                out.add(_first_token(body))
-    out.discard("")
+def _seat(relationship: object) -> str:
+    text = roster_relations.collapsed_text_of(relationship)
+    return _SAME_SEAT.get(text, text)
+
+
+def _identity_rows(roster: object) -> list[dict]:
+    """The rows that are their own identity — a pointer row (folded into
+    another row of this roster) answers through its survivor instead."""
+    rows = roster_relations.roster_entities(roster)
+    by_slug = {roster_relations.collapsed_text_of(e.get("slug")): e for e in rows}
+    out: list[dict] = []
+    for entity in rows:
+        target = roster_relations.collapsed_text_of(entity.get("maps_to_focus"))
+        if target and target in by_slug and by_slug[target] is not entity:
+            continue
+        out.append(entity)
     return out
 
 
-def landmark_relationship_introductions(landmark_entries: object, *,
-                                        roster: object = ()) -> tuple[dict, ...]:
-    """Every person a `children`/`family` LANDMARK ENTRY introduces and the
-    roster lacks, one row per slug — the landmark-sourced half of
-    :func:`ensure_introduced_relatives`. Pure: entries and a roster snapshot
-    in, rows out. Deterministic (sorted by slug), so two runs propose the
-    same rows in the same order; when more than one entry names the same
-    slug (Charlee's two `children` entries), the one carrying a birth date
-    wins over the one that does not, and the row never regresses from dated
-    to undated.
+def _rows_answering_to(name: str, roster: object) -> tuple[list[dict], bool]:
+    """``(rows, exact)`` — the identity rows ``name`` already answers to.
+
+    Exact first (name or alias, typography-insensitive, a pointer row read as
+    its survivor); only when nothing matches exactly, every row sharing the
+    name's FIRST token by name or alias — the v360 rule ("Harvey Rex Taylor"
+    is the roster's "Harvey"), now a fold instead of a skip."""
+    rows = roster_relations.roster_entities(roster)
+    by_slug = {roster_relations.collapsed_text_of(e.get("slug")): e for e in rows}
+
+    def resolved(entity: dict) -> dict:
+        target = roster_relations.collapsed_text_of(entity.get("maps_to_focus"))
+        return by_slug.get(target, entity) if target else entity
+
+    def unique(found) -> list[dict]:
+        out: list[dict] = []
+        for entity in found:
+            entity = resolved(entity)
+            if all(entity is not seen for seen in out):
+                out.append(entity)
+        return out
+
+    exact = unique(roster_relations.find_by_alias(roster, name))
+    if exact:
+        return exact, True
+    token = _first_token(name)
+    if not token:
+        return [], False
+    shared = [entity for entity in _identity_rows(roster)
+              if any(_first_token(roster_relations.collapsed_text_of(spelling)) == token
+                     for spelling in (entity.get("name"), *(entity.get("aliases") or ())))]
+    return unique(shared), False
+
+
+def landmark_introduction_plan(landmark_entries: object, *, roster: object = ()) -> dict:
+    """Every person a `family`/`children`/`partnerships` LANDMARK ENTRY names,
+    decided against the roster — the ONE reading both
+    :func:`landmark_relationship_introductions` (the mints) and
+    :func:`ensure_introduced_relatives` (the folds) take. Pure and
+    deterministic (sorted by slug).
+
+    ``{"mint": [...], "fold": [...], "contested": [...]}``:
+
+    * ``mint`` — nobody on the roster answers to the name, by spelling or by
+      first token: a new row (the v360 behaviour). Its `label` and `who` ride
+      as aliases when they differ.
+    * ``fold`` — exactly one row answers to it (exactly, or by sharing the
+      first token): every spelling the entry gives that the row does not yet
+      answer to is filed as an ALIAS of that row (v383, ADR 0041 — "Katie Ann
+      Merrill" joins `katie-taylor` instead of being skipped). Nothing minted.
+    * ``contested`` — more than one row answers to it, or the one row states a
+      DIFFERENT relationship (a father "James Taylor" is not the son "James
+      Everett Taylor"). Reported, never guessed; nothing written.
     """
     import identity_resolution as ir  # noqa: PLC0415
 
-    known_tokens = _roster_first_tokens(roster)
-    index = None
-    try:
-        index = ir.roster_index(roster, entity_type="person")
-    except Exception:  # noqa: BLE001 — a roster we cannot read knows nobody
-        index = None
-
-    def known(name: str) -> bool:
-        key = ir.normalized_mention_key(name)
-        if index is not None and (index.by_name_key.get(key) or index.by_alias_key.get(key)
-                                   or index.has_ref(name)):
-            return True
-        return _first_token(name) in known_tokens
-
-    by_slug: dict[str, dict] = {}
+    mints: dict[str, dict] = {}
+    folds: dict[tuple[str, str], dict] = {}
+    contested: dict[str, dict] = {}
     for row in sorted(landmark_entries or (),
                       key=lambda r: (r.get("ordinal", 0) if isinstance(r, dict) else 0,
                                      r.get("source_id", "") if isinstance(r, dict) else "")):
@@ -938,37 +1065,95 @@ def landmark_relationship_introductions(landmark_entries: object, *,
         if domain not in LANDMARK_RELATION_DOMAINS:
             continue
         record = row.get("record")
-        if not isinstance(record, dict):
+        if not isinstance(record, dict) or record.get("none"):
             continue
-        if domain == CHILDREN_RELATION_DOMAIN:
-            relationship = "child"
-        else:
-            relationship = roster_relations.collapsed_text_of(record.get("relation"))
+        relationship = DOMAIN_RELATIONSHIPS.get(domain) or roster_relations.collapsed_text_of(
+            record.get("relation"))
         if not relationship:
             continue
         name = roster_relations.collapsed_text_of(
             record.get("who") or record.get("label") or record.get("subject"))
         if not name or not _looks_like_a_full_name(name):
             continue
-        if known(name):
+        spellings = []
+        for raw in (name, record.get("label"), record.get("who")):
+            text = roster_relations.collapsed_text_of(raw)
+            if text and _looks_like_a_full_name(text) and all(
+                    ir.normalized_mention_key(text) != ir.normalized_mention_key(s)
+                    for s in spellings):
+                spellings.append(text)
+
+        matched, exact = _rows_answering_to(name, roster)
+        if matched:
+            if len(matched) > 1:
+                contested[name] = {
+                    "name": name, "domain": domain, "relationship": relationship,
+                    "reason": roster_relations.IDENTITY_UNCERTAIN_KIND,
+                    "source_id": row.get("source_id"),
+                    "candidates": [{"slug": e.get("slug"), "name": e.get("name")}
+                                   for e in sorted(matched, key=lambda e: str(e.get("slug")))]}
+                continue
+            entity = matched[0]
+            stated = _seat(entity.get("relationship"))
+            if stated and stated != _seat(relationship):
+                contested[name] = {
+                    "name": name, "domain": domain, "relationship": relationship,
+                    "reason": "relationship_differs", "source_id": row.get("source_id"),
+                    "candidates": [{"slug": entity.get("slug"), "name": entity.get("name"),
+                                    "relationship": entity.get("relationship")}]}
+                continue
+            missing = [text for text in spellings
+                       if entity not in roster_relations.find_by_alias(roster, text)]
+            if not missing:
+                continue
+            slug = roster_relations.collapsed_text_of(entity.get("slug"))
+            key = (slug, name)
+            if key not in folds:
+                folds[key] = {"slug": slug, "name": entity.get("name"), "mention": name,
+                              "aliases": missing, "relationship": relationship,
+                              "relationship_word": f"landmark:{domain}",
+                              "match": "exact" if exact else "first_token",
+                              "source_id": row.get("source_id")}
             continue
+
         slug = ir.normalized_mention_key(name).replace(" ", "-")
         if not slug:
             continue
-        date = record.get("date") if isinstance(record.get("date"), dict) else None
-        born = roster_relations.collapsed_text_of(date.get("best")) if date else ""
-        born_basis = roster_relations.collapsed_text_of(date.get("basis")) if date else ""
+        born = born_basis = ""
+        if domain in DOMAINS_DATED_BY_BIRTH:
+            date = record.get("date") if isinstance(record.get("date"), dict) else None
+            born = roster_relations.collapsed_text_of(date.get("best")) if date else ""
+            born_basis = roster_relations.collapsed_text_of(date.get("basis")) if date else ""
         candidate = {
             "name": name, "slug": slug, "relationship": relationship,
-            "relationship_word": f"landmark:{domain}", "aliases": (),
+            "relationship_word": f"landmark:{domain}",
+            "aliases": tuple(s for s in spellings
+                             if ir.normalized_mention_key(s) != ir.normalized_mention_key(name)),
             "source_id": row.get("source_id"), "mention": name,
         }
         if born:
             candidate["born"], candidate["born_basis"] = born, born_basis or "stated"
-        existing = by_slug.get(slug)
+        existing = mints.get(slug)
         if existing is None or (candidate.get("born") and not existing.get("born")):
-            by_slug[slug] = candidate
-    return tuple(by_slug[key] for key in sorted(by_slug))
+            mints[slug] = candidate
+    return {"mint": [mints[key] for key in sorted(mints)],
+            "fold": [folds[key] for key in sorted(folds)],
+            "contested": [contested[key] for key in sorted(contested)]}
+
+
+def landmark_relationship_introductions(landmark_entries: object, *,
+                                        roster: object = ()) -> tuple[dict, ...]:
+    """Every person a `children`/`family`/`partnerships` LANDMARK ENTRY
+    introduces and the roster lacks, one row per slug — the landmark-sourced
+    half of :func:`ensure_introduced_relatives`. Pure: entries and a roster
+    snapshot in, rows out. Deterministic (sorted by slug), so two runs propose
+    the same rows in the same order; when more than one entry names the same
+    slug (Charlee's two `children` entries), the one carrying a birth date
+    wins over the one that does not, and the row never regresses from dated
+    to undated. A name the roster already answers to is never a new row —
+    since v383 it is a FOLD (:func:`landmark_introduction_plan`).
+    """
+    return tuple(landmark_introduction_plan(landmark_entries, roster=roster)["mint"])
 
 
 # --------------------------------------------------------------------------
@@ -1294,7 +1479,8 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
     )
     rows = list(batch["rows"])
     have_slugs = {row["slug"] for row in rows}
-    for row in landmark_relationship_introductions(landmark_entries, roster=roster):
+    plan = landmark_introduction_plan(landmark_entries, roster=roster)
+    for row in plan["mint"]:
         if row["slug"] not in have_slugs:
             rows.append(row)
             have_slugs.add(row["slug"])
@@ -1322,9 +1508,40 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
             name=row["name"],
         )
         filed += 1
+    # v383 (ADR 0041): a landmark name the roster already answers to is
+    # FOLDED in as an alias of that row — through the same one writer, whose
+    # alias collision rule refuses (and reports) rather than guesses.
+    folded: list[dict] = []
+    contested = list(plan["contested"])
+    for row in plan["fold"]:
+        if dry_run:
+            folded.append(row)
+            continue
+        current = next((e for e in roster_relations.roster_entities(roster)
+                        if e.get("slug") == row["slug"]), {})
+        # An alias is an identity fact, not a page verdict: the row's own
+        # settled verdict rides through unchanged (never cleared by a fold).
+        verdict = current.get("owner_verdict")
+        if verdict not in ("graduate", "never"):
+            verdict = "clear"
+        try:
+            entity_verdict.apply_verdict("person", row["slug"], verdict, aliases=row["aliases"])
+        except entity_verdict.EntityAliasContested as exc:
+            contested.append({**row, "reason": exc.result.get("reason"),
+                              "alias": exc.result.get("alias"),
+                              "candidates": exc.result.get("candidates")})
+            continue
+        except entity_verdict.EntityVerdictError as exc:
+            contested.append({**row, "reason": "verdict_refused", "refusal": type(exc).__name__,
+                              "candidates": []})
+            continue
+        folded.append(row)
     own_name = relationship_from_own_name(roster, dry_run=dry_run)
+    if not dry_run and (filed or folded):
+        recount("person")
     return {"introduced": list(rows), "filed": filed, "skipped_aliases": skipped,
-            "findings": list(batch["findings"]), "own_name": own_name["updated"]}
+            "findings": list(batch["findings"]), "own_name": own_name["updated"],
+            "folded": folded, "contested": contested}
 
 
 def _thresholds(entity_type: str, args) -> tuple[float, int]:
@@ -1355,8 +1572,21 @@ def main() -> int:
                              "Deterministic, additive, idempotent — no AI.")
     parser.add_argument("--dry-run", action="store_true",
                         help="With --ensure-introduced: report the rows, write nothing.")
+    parser.add_argument("--recount", action="store_true",
+                        help="Recompute unique_answers/score for --type through the "
+                             "deterministic roster-folded join (v383, ADR 0041). "
+                             "Keyless — no AI; writes only when a count moved.")
     args = parser.parse_args()
     t = args.type
+
+    if args.recount:
+        result = recount(t)
+        if result["changed"]:
+            print(f"✓ {t} roster recounted: {len(result['updated'])} row(s) moved "
+                  f"({', '.join(result['updated'])})")
+        else:
+            print(f"✓ {t} roster recounted: no count moved")
+        return 0
 
     if args.ensure_introduced:
         result = ensure_introduced_relatives(dry_run=args.dry_run)
@@ -1381,6 +1611,15 @@ def main() -> int:
         for row in result.get("own_name") or ():
             print(f"  {row['slug']}: {row['name']} — {row['relationship']} "
                   f"(from its own name's “{row['relationship_word']}”)")
+        for row in result.get("folded") or ():
+            verb = "would fold" if args.dry_run else "folded"
+            print(f"  {row['slug']}: {verb} “{row['mention']}” in as an alias "
+                  f"(from {row['relationship_word']}, {row['match']} match): "
+                  f"{', '.join(row['aliases'])}")
+        for row in result.get("contested") or ():
+            names = ", ".join(str(c.get("slug")) for c in row.get("candidates") or ())
+            print(f"    ↯ “{row.get('mention') or row.get('name')}” — {row['reason']} "
+                  f"({names or '—'}); left alone")
         return 0
 
     if args.show:

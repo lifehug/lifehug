@@ -405,6 +405,21 @@ real page on a real vault.
   birth group naming exactly one non-owner person is that person's birth
   whatever else it mentions, so *"Two dates are claimed for your birth"* is
   never asked about a child's birthday.
+- **The roster is the identity ledger** (v383, ADR 0041). A fold is a
+  pointer, never a deletion: `entity-verdict <type> <loser> clear --maps-to
+  <survivor>` keeps the loser's row with `maps_to_focus = <survivor>` and
+  unions its names onto the survivor. Every alias the verb writes is a
+  decision under the collision rule (`roster_relations.alias_decision`): an
+  alias another row already answers to binds to NEITHER — the whole verdict
+  is refused, nothing is written, the refusal (both claimants) is printed as
+  JSON and the command exits 2. `entity-roster --ensure-introduced` now reads
+  `partnerships` landmark entries too (relationship `spouse`), and a landmark
+  name the roster already answers to — by spelling or by sharing its first
+  token with exactly one row — joins that row as an alias instead of being
+  skipped (*Katie Ann Merrill* → `katie-taylor`); two such rows, or one that
+  states a different relationship, are reported and never guessed. Counts are
+  a deterministic join (`entity-roster --recount`), never only the monthly
+  model call.
 - **An introduction names one person in one clause** (v347,
   `AN_INTRODUCTION_NAMES_ONE_PERSON_IN_ONE_CLAUSE`). A relationship phrase the
   owner used — *"Dave's mom"*, *"my mother"*, *"(wife)"* — introduces a person
@@ -483,6 +498,7 @@ would do.
 | `resolve --execute` | dated claims on nodes (extractor `resolver/rule:3`), supersession corrections for the raw handles they replace, and `state/resolver/resolutions.json`. The two legs for hosts: `resolve --plan --out <path>` writes exactly the prompts it would buy and touches **nothing** in the vault (an `--out` inside the vault root is refused), and `resolve --from-response <envelope>` files what came back, re-verifying every citation against the vault *as it is now* — so a stale story, an already-placed moment or a replayed envelope is refused rather than filed. | **yes** — the bare verb plans, `--execute` files |
 | `entity-roster [--type <t>]` | the AI-curated roster under `state/entity_rosters/<type>.json`. | no |
 | `entity-roster --ensure-introduced [--dry-run]` | one person row per relative a source introduces with a relationship phrase, through `entity_verdict.apply_verdict(..., ensure=True)`. Deterministic, no AI, additive, one atomic per-row write, never a rewrite of the file. | no — pass `--dry-run` |
+| `entity-roster --type <t> --recount` | recompute every row's `unique_answers`/`score` through the roster-folded detector join (v383, ADR 0041). Keyless, no AI; writes only when a count moved, so a second run is byte-identical. `entity-verdict --maps-to`/`--alias` runs it for the touched type. | yes (counts only) |
 | `landmark-record <domain> …` | one filed landmark source under `sources/landmarks/entry-*.md`, the redrawn `state/landmarks.json`, and the entry's claims as receipts. Refuses at filing what cannot improve the spine: an unnamed organization, and a `birth` record that names somebody who is not the owner. | no |
 | `landmark-reinstate --domain <d> [--since <ts>] --apply` | **one** `retract` correction under `sources/corrections/`, naming every supersession that stops standing, plus `state/`. Nothing writes an entry — the entries come back because `state/landmarks.json` is a *drawing* and the sources behind it were never touched. Deterministic and idempotent twice over. You need it when a landmark answer wrongly retired a domain's standing entries — the v349 incident, where one bare `residences` answer superseded thirty stays and every moment they had placed by containment fell to unplaced. `--since` is what keeps the repair surgical. | **yes** — bare prints the plan |
 | `migrate-classifier-moments [--dry-run]` | a source-backed temporal claim for every current classifier moment — the bridge from `state/classifications/` into the receipts. `--source PATH` restricts it. | no — pass `--dry-run` |
