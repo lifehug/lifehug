@@ -20,6 +20,11 @@ sides now read, so they cannot drift again:
 * ``A_RELATIONSHIP_HAS_TWO_ENDS`` — a relationship page is the edge between
   the owner (the hub) and the person its Focus category names, written at
   ``wiki/relationships/<slug(name)>-and-<slug(person)>.md``.
+* ``A_PERSON_PAGE_IS_THE_RECORDS_VIEW`` (v389, ADR 0043) — when a person record
+  carries the Focus (`focus`), the person page is written at the RECORD's slug
+  (``wiki/people/katie-taylor.md``), not the Focus's (``katie``). The Focus's
+  old path keeps a one-line redirect stub for one version
+  (:func:`redirect_stub_fields`), so nothing that linked to it breaks.
 
 Pure: no vault paths are bound here. Callers pass the parsed categories and
 the owner's ``name`` / ``full_name`` from config.
@@ -35,6 +40,14 @@ from lifehug_core import slugify
 A_FOCUS_KNOWS_ITS_OWN_PAGE = "A_FOCUS_KNOWS_ITS_OWN_PAGE"
 A_PRIMARY_FOCUS_IS_THE_HUB = "A_PRIMARY_FOCUS_IS_THE_HUB"
 A_RELATIONSHIP_HAS_TWO_ENDS = "A_RELATIONSHIP_HAS_TWO_ENDS"
+A_PERSON_PAGE_IS_THE_RECORDS_VIEW = "A_PERSON_PAGE_IS_THE_RECORDS_VIEW"
+
+#: The frontmatter key a redirect stub carries (wiki-relative target path, no
+#: extension: ``people/katie-taylor``) and the ``origin`` such a stub is
+#: written with. Both sides — the compiler that writes it and every reader
+#: that must not list it as a page — read these two names.
+REDIRECT_KEY = "redirect_to"
+REDIRECT_ORIGIN = "redirect"
 
 OLD_FOCUS_TERM = "Spot" "light"
 
@@ -77,6 +90,54 @@ def focus_category_slug(category_name: str) -> str:
     return slugify(clean_focus_name(category_name))
 
 
+def record_for_focus(focus_slug: str, person_roster: object) -> dict | None:
+    """The live person record a Focus attends to, or ``None``.
+
+    Reads the record's ``focus`` (`identity_resolution.focus_of`, v386) and
+    compares it to the Focus's slug the way the compiler slugs a category. A
+    folded row (a pointer) is never the record. Deterministic: the first match
+    by slug, so two records naming one Focus cannot make the page flip."""
+    import identity_resolution as ir  # noqa: PLC0415
+
+    matches = []
+    for entity in (person_roster or {}).get("entities", []) or []:
+        if not isinstance(entity, dict) or ir.is_alias_row(entity):
+            continue
+        named = ir.focus_of(entity)
+        if named and slugify(clean_focus_name(str(named))) == focus_slug:
+            slug = str(entity.get("slug") or slugify(str(entity.get("name", ""))))
+            if slug:
+                matches.append((slug, entity))
+    return sorted(matches, key=lambda pair: pair[0])[0][1] if matches else None
+
+
+def focus_person_slug(category_name: str, person_roster: object = None) -> str:
+    """Slug of the person page a ``## Focuses`` category compiles to — the
+    record's slug when a record carries the Focus
+    (:data:`A_PERSON_PAGE_IS_THE_RECORDS_VIEW`), else the category's own."""
+    own = focus_category_slug(category_name)
+    record = record_for_focus(own, person_roster)
+    if record is None:
+        return own
+    return str(record.get("slug") or slugify(str(record.get("name", "")))) or own
+
+
+def redirect_stub_fields(text: str) -> dict:
+    """``{"redirect_to": ..., "origin": ...}`` read off a page's frontmatter —
+    ``redirect_to`` is ``""`` for any page that is not a redirect stub."""
+    head = text[:1024] if text.startswith("---") else ""
+    out = {}
+    for key in (REDIRECT_KEY, "origin"):
+        match = re.search(rf'^{key}:\s*"?([^"\n]*?)"?\s*$', head, re.MULTILINE)
+        out[key] = match.group(1).strip() if match else ""
+    return out
+
+
+def is_redirect_stub(text: str) -> bool:
+    """Is this page a one-line redirect stub (never a page to list or link)?"""
+    return bool(redirect_stub_fields(text)[REDIRECT_KEY])
+
+
 def project_category_slug(category_name: str) -> str:
     """Slug of the project page a ``## Project Categories`` category compiles to."""
     return slugify(category_name)
@@ -108,7 +169,8 @@ def hub_page(author_full: str) -> str:
     return page_path("life", hub_slug(author_full))
 
 
-def category_page(cat_id: str, categories: dict, author: str) -> dict | None:
+def category_page(cat_id: str, categories: dict, author: str,
+                  person_roster: object = None) -> dict | None:
     """The page(s) one bank category compiles to.
 
     Returns ``{"page": path, "relationship": path|None, "person": title|None}``
@@ -122,7 +184,7 @@ def category_page(cat_id: str, categories: dict, author: str) -> dict | None:
     if group == "focus":
         person = clean_focus_name(name)
         return {
-            "page": page_path("person", slugify(person)),
+            "page": page_path("person", focus_person_slug(name, person_roster)),
             "relationship": page_path("relationship", relationship_slug(author, person)),
             "person": person,
         }
@@ -135,7 +197,8 @@ def category_page(cat_id: str, categories: dict, author: str) -> dict | None:
     return None
 
 
-def focus_pages(focus: dict, categories: dict, author: str, author_full: str) -> dict:
+def focus_pages(focus: dict, categories: dict, author: str, author_full: str,
+                person_roster: object = None) -> dict:
     """Resolve one roadmap Focus to the pages the compiler writes for it.
 
     ``pages`` are the node pages the Focus's target applies to (a grouped
@@ -153,7 +216,7 @@ def focus_pages(focus: dict, categories: dict, author: str, author_full: str) ->
         # plan_self writes self Focuses from the roadmap, not from the bank group.
         pages.append(page_path("self", slugify(focus.get("label") or focus.get("id") or "self")))
     for cat_id in sorted(str(c) for c in focus.get("categories") or []):
-        hit = category_page(cat_id, categories, author)
+        hit = category_page(cat_id, categories, author, person_roster)
         if hit is None:
             continue
         if ftype != "self" and hit["page"] not in pages:
@@ -171,18 +234,20 @@ def focus_pages(focus: dict, categories: dict, author: str, author_full: str) ->
     return {"pages": [], "relationships": [], "rule": "none"}
 
 
-def primary_page(focus: dict, categories: dict, author: str, author_full: str) -> str | None:
+def primary_page(focus: dict, categories: dict, author: str, author_full: str,
+                 person_roster: object = None) -> str | None:
     """The single page a Focus's ``wiki_node`` should hold (first resolved page)."""
-    hit = focus_pages(focus, categories, author, author_full)
+    hit = focus_pages(focus, categories, author, author_full, person_roster)
     return (hit["pages"] or hit["relationships"] or [None])[0]
 
 
 def resolve_roadmap(focuses: list[dict], categories: dict, author: str,
-                    author_full: str, vault_root: Path) -> list[dict]:
+                    author_full: str, vault_root: Path,
+                    person_roster: object = None) -> list[dict]:
     """Every Focus, its resolved pages, and which of them are missing on disk."""
     out = []
     for focus in focuses or []:
-        hit = focus_pages(focus, categories, author, author_full)
+        hit = focus_pages(focus, categories, author, author_full, person_roster)
         present = [p for p in hit["pages"] if (vault_root / p).is_file()]
         missing = [p for p in hit["pages"] if p not in present]
         rel_present = [p for p in hit["relationships"] if (vault_root / p).is_file()]

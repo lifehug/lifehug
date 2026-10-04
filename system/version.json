@@ -1,7 +1,7 @@
 {
-  "version": 388,
+  "version": 390,
   "released": "2026-10-04",
-  "changelog": "v388: one person, one record (ADR 0043, lifehug-platform#987). The Review page recommended \"Dottie\", \"Harvey\" and \"Author's father\" as new Focuses for people who already had a Focus and a page, because a roster row's `maps_to_focus` meant two things — \"this person has a Focus\" and \"this row was folded into another\" — and the Timeline dropped any mapped row as a pointer. The overload is split: a record carries `focus` (the Focus that attends to it; it stays a live person) and `folded_into` (a duplicate pointer); a one-version converter rewrites every roster on load and on the next write (`entity-roster --convert-identity` persists it, idempotent), and attaches each Focus to the record its slug, title or alias names. `identity_resolution.resolve_person(text, roster, context=...)` answers resolved / ambiguous / unknown — ambiguous is an answer, never a guess — using the owner's possessive (\"Author's father\" is his father), the first name, and context (a relationship word in the clause, Sr/Jr, a year against `born`, the Focus the text was filed under); recommendations resolve first, skip a person who already has a Focus or page, and show `resolved_name` beside the raw string; approving one attaches the Focus to the person (`person_ref`) and refuses a twin. Role words are sets: rows named Son, Kids, Parents, Friend become `relation_queries` (their counts kept), and \"my son\" with two sons is ambiguous while \"my son Otto\" resolves. Colliding names display with a disambiguator (`display_name`: \"Walter Pell (father)\"). Places nest: `entity-verdict place <slug> clear --located-in <place>`; a place fold is refused unless the two are true duplicates; a place page lists the places inside it. `entity-verdict` gains `--fold-into`, `--focus`, `--retract-alias` (every type), `--share-alias A --with WHO` (a nickname shared with somebody who has no record is held, never attributed; \"X's house\" is a place) and `--handle` (an exclusive short @handle); `--maps-to` is rewritten with a deprecation line for one version. The focus-merge and monthly-refresh alias unions now go through the collision rule.",
+  "changelog": "v390: pages are views of records (ADR 0043, lifehug-platform#987, stacked on v388). A person page is written at its RECORD's slug, so a Focus whose record has another slug (`katie` on `katie-taylor`) compiles to `wiki/people/katie-taylor.md` and its old path keeps a one-line redirect stub (`origin: redirect`, `redirect_to`) for one version; the record's aliases reach the page's mention scan; page frontmatter gains `person_ref`/`record_ref`, `handle`, `aliases`, `relationship`, `answers`; a relationship page keeps its path and names the record; a folded record's page leaves by the orphan rule and links to it follow the pointer. The viewer's person page opens with an identity header read from the record, Review rows gain \"add a name\" and \"this is that record\", the Focus-idea lane gains \"fold into a person\", and the People index lists records with no page under \"Known, no page yet\". The entity-verdict job accepts fold_into, focus, retract_aliases, located_in and handle.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -659,6 +659,7 @@
     "tests/test_question_bank.py",
     "docs/adr/0042-a-question-passes-or-it-is-not-a-question.md",
     "docs/adr/0043-one-person-one-record.md",
-    "tests/test_v386_one_record.py"
+    "tests/test_v386_one_record.py",
+    "tests/test_v390_compile_by_record.py"
   ]
 }

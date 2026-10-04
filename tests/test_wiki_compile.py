@@ -640,7 +640,9 @@ class FocusEnrichmentTests(unittest.TestCase):
 
         descs = self.wc.plan_focuses(categories, [], answers, {}, roster)
 
-        dad = next(d for d in descs if d["slug"] == "dad")
+        # v389: the page is the RECORD's (james-taylor); "dad" is its old path.
+        dad = next(d for d in descs if d["slug"] == "james-taylor")
+        self.assertEqual(dad["legacy_slug"], "dad")
         self.assertEqual({c["id"] for c in dad["cited_items"]}, {"A1"})
 
 

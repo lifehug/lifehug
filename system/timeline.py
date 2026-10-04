@@ -51,6 +51,7 @@ if str(_SYSTEM_DIR) not in sys.path:
 import chronology as chrono  # noqa: E402
 import classify_story  # noqa: E402
 import cross_dating  # noqa: E402
+import focus_pages  # noqa: E402
 import landmark_identity  # noqa: E402
 import landmark_projection  # noqa: E402
 import landmarks_interaction  # noqa: E402
@@ -453,6 +454,8 @@ def load_entities() -> list[dict]:
             if page.name == ".gitkeep":
                 continue
             text = page.read_text(encoding="utf-8", errors="replace")
+            if focus_pages.is_redirect_stub(text):
+                continue  # v389: a pointer to the record's page, not an entity
             out.append({
                 "slug": page.stem,
                 "title": _frontmatter_value(text, "title", page.stem.replace("-", " ").title()),

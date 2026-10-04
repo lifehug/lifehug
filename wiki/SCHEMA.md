@@ -77,6 +77,27 @@ related:
 ---
 ```
 
+### Pages are views of records (v390, ADR 0043)
+
+A page that is the compiled view of an identity record also carries that
+record's identity, so a viewer reads it without opening the roster:
+
+```yaml
+person_ref: "person/katie-taylor"   # record_ref: "place/yucaipa" for any other type
+handle: "@katie-taylor"             # the record's slug handle
+short_handle: "@katie"              # only when the owner chose one
+aliases:                            # every other name the record answers to
+  - "Katie Ann Merrill"
+relationship: "spouse"              # people only
+answers: 12                         # the record's answer count
+```
+
+A person page lives at the RECORD's slug. The path a Focus page used to have
+keeps a redirect stub for one version — `origin: redirect`, `redirect_to:
+people/katie-taylor` (wiki-relative, no extension), body one line. A stub is a
+pointer: it is never indexed, linked or graphed. A relationship page keeps its
+path and carries `person_ref` for the person it is about.
+
 ## Page Structure
 
 Use only sections supported by source material. Do not add placeholder filler.
