@@ -1941,6 +1941,112 @@ def identity_invocations(records: object) -> list[list[str]]:
     return argvs
 
 
+#: The second work-item kind the identity listener mints (v391). Not a
+#: `temporal_projection.WORK_ITEM_KINDS` member on purpose: it is about a NAME
+#: nobody on the roster answers to, carries no claim and no node, and a person
+#: it names does not exist yet. A host renders it as "New person?".
+NEW_PERSON_KIND = "new_person"
+IDENTITY_UNCERTAIN_KIND = "identity_uncertain"
+
+
+def identity_work_items(records: object, roster: object = ()) -> list[dict]:
+    """The Mirror / Play rows a ``person_identity`` list deserves (v391, #459).
+
+    ``ambiguous`` -> one ``identity_uncertain`` row naming every candidate
+    ("Which James?" — the shape `roster_relations.alias_decision` refuses
+    with: ``candidates: [{ref, name}]`` plus a ``headline``);
+    ``unknown_person`` / ``unknown_handle`` -> one ``new_person`` row
+    ("New person?") quoting the basis. ``resolved`` mints nothing. Pure and
+    deterministic: no clock, no model, idempotent — the same records give the
+    same rows in the same order, and a repeated record is one row.
+
+    ``work_item_id`` is `temporal_projection.derive_work_item_id` over
+    (kind, the unresolved mention, ``identity``) — the SAME derivation Mirror's
+    own ``identity_uncertain`` rows use, so the listener, the host's recording
+    job and Mirror converge on one row per mention (§5.4, answer once).
+    ``candidates_digest`` moves when the candidate set does, without moving the
+    row's identity. D3: nothing here files anything — a ``new_person`` row only
+    NAMES ``owner_choice_argv`` (``entity-verdict person <slug> clear --ensure
+    --name <name>``), which a host runs ONLY on the owner's explicit choice;
+    a conversation never mints a person.
+
+    CLI: ``lifehug.py identity-work-items`` reads the listener's JSON
+    (``{"person_identity": [...], "person_roster": {...}}``) on stdin and
+    prints ``{"work_items": [...]}``. ADR 0021: the package names the argv,
+    the host writes it.
+    """
+    import hashlib  # noqa: PLC0415
+
+    import person_resolution as pr  # noqa: PLC0415
+    import temporal_projection as tp  # noqa: PLC0415
+
+    names = {pr.ref_of(row): tc.collapsed_text(row.get("name"))
+             for row in pr.person_rows(roster)}
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for record in records or ():
+        if not isinstance(record, dict):
+            continue
+        resolution = record.get("resolution")
+        name = tc.collapsed_text(record.get("name"))
+        if resolution not in (IDENTITY_AMBIGUOUS, UNKNOWN_PERSON, UNKNOWN_HANDLE) or not name:
+            continue
+        subject_ref = ir.unresolved_subject_ref(name)
+        evidence = tc.collapsed_text(record.get("evidence")) or None
+        if resolution == IDENTITY_AMBIGUOUS:
+            refs = sorted({str(c) for c in record.get("candidates") or () if c})
+            if len(refs) < 2:
+                continue
+            candidates = [{"ref": ref, "name": names.get(ref) or pr.slug_of_ref(ref)}
+                          for ref in refs]
+            first = candidates[0]["name"].split()[0]
+            row = {
+                "kind": IDENTITY_UNCERTAIN_KIND,
+                "state": "open",
+                "subject_ref": subject_ref,
+                "requested_field": ir.IDENTITY_REQUESTED_FIELD,
+                "prompt_intent": f"Which {first}?",
+                "headline": (f"“{name}” could be "
+                             + " or ".join(c["name"] for c in candidates)),
+                "candidates": candidates,
+                "candidates_digest": hashlib.sha1(
+                    "\n".join(refs).encode("utf-8")).hexdigest()[:24],
+                "evidence": evidence,
+                "allowed_surfaces": list(ir.IDENTITY_WORK_SURFACES),
+            }
+        else:
+            slug = li.person_slug(name)
+            if not slug:
+                continue
+            row = {
+                "kind": NEW_PERSON_KIND,
+                "state": "open",
+                "subject_ref": subject_ref,
+                "requested_field": ir.IDENTITY_REQUESTED_FIELD,
+                "prompt_intent": "New person?",
+                "headline": f"“{name}” is nobody on record yet",
+                "name": name,
+                "relationship": record.get("relationship"),
+                "basis": record.get("basis"),
+                "candidates": [],
+                "evidence": evidence,
+                "allowed_surfaces": list(ir.IDENTITY_WORK_SURFACES),
+                # D3: the owner's explicit choice files this — never the host.
+                "owner_choice_argv": ["entity-verdict", "person", slug, "clear",
+                                      "--ensure", "--name", name],
+            }
+            if record.get("handle"):
+                row["handle"] = record["handle"]
+        row["work_item_id"] = tp.derive_work_item_id(
+            kind=row["kind"], subject_ref=subject_ref,
+            requested_field=ir.IDENTITY_REQUESTED_FIELD)
+        if row["work_item_id"] in seen:
+            continue
+        seen.add(row["work_item_id"])
+        rows.append(row)
+    return rows
+
+
 def handle_statement_records(answer: object, entity_rosters: object, *,
                              subject: str = "", subject_ref: str = ""
                              ) -> tuple[dict, ...]:
@@ -2061,6 +2167,8 @@ def main(argv: list[str] | None = None) -> int:
         # `identity_record`.
         "person_identity": list(outcome.person_identity),
         "identity_invocations": identity_invocations(outcome.person_identity),
+        "identity_work_items": identity_work_items(
+            outcome.person_identity, payload.get("person_roster") or {}),
         "attempts": outcome.attempts,
         "lint_ids": list(outcome.lint_ids),
         "findings": list(outcome.findings),

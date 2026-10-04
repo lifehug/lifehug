@@ -68,6 +68,9 @@ QUEUED_MUTATION_COMMANDS = frozenset({
 })
 READ_ONLY_COMMANDS = frozenset({
     "ai-status", "answer-ack-prompt", "answer-ack-status",
+    # v391 (#459): the listener's person_identity JSON on stdin -> the
+    # Mirror/Play rows on stdout. Pure; writes nothing (D3: never mints).
+    "identity-work-items",
     # one place, one landmark (2026-09-25): lists repeated messages, writes nothing.
     "repeated-messages",
     # Issue #118: the daily attach is a PURE READ of state/arc_cards.json —
@@ -3058,6 +3061,13 @@ def cmd_question_retire(args: argparse.Namespace) -> int:
 
 def cmd_entity_roster(args: argparse.Namespace) -> int:
     flags = ["--type", args.type]
+    if getattr(args, "convert_identity", False):
+        # v391 (#459): the module's own flag, reached through the front door —
+        # same exit codes, same JSON report.
+        flags.append("--convert-identity")
+        if getattr(args, "dry_run", False):
+            flags.append("--dry-run")
+        return run_python("entity_roster.py", flags)
     if getattr(args, "ensure_introduced", False):
         flags.append("--ensure-introduced")
         if getattr(args, "dry_run", False):
@@ -3083,6 +3093,26 @@ def cmd_entity_roster(args: argparse.Namespace) -> int:
     if args.force_empty:
         flags.append("--force-empty")
     return run_python("entity_roster.py", flags)
+
+
+def cmd_identity_work_items(args: argparse.Namespace) -> int:
+    """`identity-work-items` — v391 (#459). Reads the general listener's JSON
+    (``person_identity`` + optional ``person_roster``) on stdin, prints
+    ``{"work_items": [...]}``. See `general_listener.identity_work_items`."""
+    import general_listener as gl  # noqa: PLC0415
+
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+    except ValueError as exc:
+        print(json.dumps({"error": f"unreadable payload: {exc}"}))
+        return 1
+    if not isinstance(payload, dict):
+        print(json.dumps({"error": "payload must be a JSON object"}))
+        return 1
+    items = gl.identity_work_items(payload.get("person_identity") or (),
+                                   payload.get("person_roster") or {})
+    print(json.dumps({"work_items": items}, indent=2, sort_keys=True, ensure_ascii=False))
+    return 0
 
 
 def cmd_entity_verdict(args: argparse.Namespace) -> int:
@@ -4032,12 +4062,21 @@ def build_parser() -> argparse.ArgumentParser:
                         "relationship phrase — \"Dave's mom\", \"(wife)\" (v344). "
                         "Deterministic and additive; no AI, no roster rewrite")
     p.add_argument("--dry-run", action="store_true",
-                   help="With --ensure-introduced: report the rows, write nothing")
+                   help="With --ensure-introduced or --convert-identity: report, write nothing")
     p.add_argument("--recount", action="store_true",
                    help="Recompute --type's answer counts/scores through the roster-folded "
                         "join (v383, ADR 0041). Deterministic; no AI")
+    p.add_argument("--convert-identity", action="store_true",
+                   help="v386/v391 (ADR 0043): split every roster's maps_to_focus into "
+                        "focus/folded_into, retire placeholder rows into relation queries, "
+                        "attach each Focus to its person. Keyless, idempotent; takes the "
+                        "writer lock. With --dry-run: report, write nothing")
     p.set_defaults(func=cmd_entity_roster)
 
+    p = sub.add_parser("identity-work-items",
+                       help="Turn the listener's ambiguous/unknown person_identity records "
+                            "(JSON on stdin) into Mirror/Play rows (v391); writes nothing")
+    p.set_defaults(func=cmd_identity_work_items)
     p = sub.add_parser("entity-verdict",
                        help="Owner override for one roster entity's graduation — "
                             "graduate now, never a page, or clear back to automatic (ADR 0013)")

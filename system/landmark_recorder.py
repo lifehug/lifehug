@@ -175,6 +175,10 @@ class RecorderOutcome:
     #: ``unknown_handle`` / ``ambiguous`` one files nothing. Last, for the
     #: same reason as the fields above.
     handle_statements: tuple[dict, ...] = ()
+    #: v391 (#459): the Mirror / Play rows an ambiguous or unknown
+    #: `person_identity` record deserves (`general_listener.identity_work_items`
+    #: — "Which James?", "New person?"). Minted by `listen_to_answer` only.
+    identity_work_items: tuple[dict, ...] = ()
 
     @property
     def record(self) -> dict | None:
@@ -1015,7 +1019,10 @@ def listen_to_answer(*, answer: str, call, reply: str = "",
     statements = gl.handle_statement_records(
         answer, entity_rosters if entity_rosters is not None
         else {"person": person_roster}, subject=handle_subject)
-    return replace(outcome, handle_statements=statements) if statements else outcome
+    work_items = tuple(gl.identity_work_items(outcome.person_identity, person_roster))
+    if not statements and not work_items:
+        return outcome
+    return replace(outcome, handle_statements=statements, identity_work_items=work_items)
 
 
 # --------------------------------------------------------------------------
