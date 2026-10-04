@@ -379,9 +379,8 @@ class WikiViewsTests(unittest.TestCase):
         self.assertIn("Sarah", body)
         # Emma (page_eligible) and Dad (maps_to_focus) already have wiki pages,
         # so they are excluded — you can see them in the wiki itself.
-        # (v389: they may be offered as a "this is that record" TARGET, never as a row.)
-        self.assertNotIn("<td>Emma</td>", body)
-        self.assertNotIn("<td>Dad</td>", body)
+        self.assertNotIn("Emma", body)
+        self.assertNotIn("Dad", body)
         # The graduation column is gone now that only candidates are shown.
         self.assertNotIn("Graduates", body)
         # And the lane renders unchanged inside the full Review page too.

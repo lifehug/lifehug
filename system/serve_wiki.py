@@ -1278,6 +1278,14 @@ def _entity_candidate_actions(entity_type: str, slug: str) -> str:
             + " " + _entity_verdict_form(entity_type, slug, "never", "Not a page", quiet=True))
 
 
+def _is_lane_candidate(entity: dict) -> bool:
+    """THE Review entity-lane predicate: still pending graduation, no Focus or
+    page, not folded, not vetoed. Rows AND fold targets both use it, so a
+    `never` record cannot reappear in the lane as a target."""
+    return (isinstance(entity, dict) and not entity.get("page_eligible")
+            and not _ir.has_home(entity) and entity.get("owner_verdict") != "never")
+
+
 def _entity_identity_actions(entity_type: str, record: dict, entities: list[dict]) -> str:
     """v389 (§4.1.8): the two association doors on a Review row — add another
     name ("--alias"), and "this is that record" (`--fold-into`). A place is
@@ -1285,7 +1293,7 @@ def _entity_identity_actions(entity_type: str, record: dict, entities: list[dict
     the survivors listed are every OTHER live record of the type."""
     if not _record_slug(record):
         return ""
-    live = [r for r in entities if isinstance(r, dict) and not _ir.is_alias_row(r)]
+    live = [r for r in entities if _is_lane_candidate(r)]
     fold = _fold_form(entity_type, record, live, live)
     return f'<div class="idrow">{_alias_add_form(entity_type, record)}{fold}</div>'
 
@@ -1317,11 +1325,7 @@ def _entities_section_html() -> str:
         # so it's visible in the wiki itself and shouldn't be repeated here.
         # A `never` owner verdict is likewise excluded — it is settled, not
         # pending (Scope 3), and disappears from the lane entirely.
-        cands = [
-            e for e in entities
-            if not e.get("page_eligible") and not _ir.has_home(e)
-            and e.get("owner_verdict") != "never"
-        ]
+        cands = [e for e in entities if _is_lane_candidate(e)]
         decided = [e for e in entities if e.get("owner_verdict") == "graduate"]
         parts.append(f"<h3>{html.escape(etype.title())} ({len(cands)})</h3>")
         if not cands:
