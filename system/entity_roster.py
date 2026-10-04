@@ -1532,7 +1532,7 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
                               "candidates": exc.result.get("candidates")})
             continue
         except entity_verdict.EntityVerdictError as exc:
-            contested.append({**row, "reason": "verdict_refused", "detail": str(exc),
+            contested.append({**row, "reason": "verdict_refused", "refusal": type(exc).__name__,
                               "candidates": []})
             continue
         folded.append(row)
