@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import candidate_promotion
+import question_bank
+import question_craft
 from lifehug_core import (
     PERENNIALS_FILE,
     QUESTION_CANDIDATES_FILE,
@@ -27,6 +29,16 @@ from lifehug_core import (
     record_learning_failure,
     write_json,
     write_text,
+)
+from question_craft import (  # noqa: F401 — re-exported (ADR 0042)
+    _DEDUP_STOPWORDS,
+    NARRATES_RECORDS_PATTERN,
+    NARRATES_RECORDS_PHRASES,
+    NEAR_DUPLICATE_JACCARD,
+    YES_NO_PATTERNS,
+    _question_tokens,
+    near_duplicate_of,
+    normalize_question,
 )
 
 VALID_STATUSES = {"candidate", "accepted", "rejected", "deferred", "promoted", "auto_promoted",
@@ -70,9 +82,8 @@ CANDIDATE_MAX_AGE_DAYS = 45
 # with reason `stale_premise` for the owner to decide (roster-identity §4.4).
 CANDIDATE_STALE_PREMISE_DAYS = 21
 
-# Two questions whose normalized token sets overlap at/above this Jaccard
-# ratio are treated as the same question (semantic dedup, no AI needed).
-NEAR_DUPLICATE_JACCARD = 0.75
+# NEAR_DUPLICATE_JACCARD and the duplicate helpers (normalize_question,
+# near_duplicate_of) live in `question_craft` (ADR 0042) and are re-exported.
 
 # Max auto-promotions per week: the bank band sets a floor, but a large
 # promotable backlog raises the cap so inflow (~20/month from research +
@@ -111,11 +122,8 @@ TOPIC_TYPE_CATEGORY: dict[str, str] = {
 # Quality checker — operationalizes system/research.md
 # ---------------------------------------------------------------------------
 
-YES_NO_PATTERNS = re.compile(
-    r"^(did you|do you|have you|were you|was it|is it|are you|can you|could you|would you|should you)\b",
-    re.IGNORECASE,
-)
-
+# YES_NO_PATTERNS and the narrates-records table live in `question_craft`
+# (ADR 0042: one evaluation) and are re-exported here for the score path.
 # "Why do you feel/keep/always…" aimed at the author's own recurring emotions
 # produces confabulation and fuels brooding (Eurich; rumination literature).
 # Ask "what"/"when"/"tell me about a time" instead. "Why" about events and
@@ -138,27 +146,6 @@ SCENE_MARKERS = [
     "specific day", "specific moment", "what was the room",
     "what were you wearing", "what did they say",
 ]
-
-# A question that narrates the vault's own records ("appears in your records
-# only as a name") is the system talking about itself, not asking the person
-# anything. Whole-phrase, case-insensitive (roster-identity §4.4, P6).
-NARRATES_RECORDS_PHRASES = (
-    "in your records",
-    "your records only",
-    "your archive",
-    "appears only as",
-    "no story behind",
-    "no story yet",
-    "nothing written about",
-    "nothing recorded about",
-    "your vault",
-    "your wiki",
-    "your files",
-)
-NARRATES_RECORDS_PATTERN = re.compile(
-    "|".join(r"\b" + re.escape(p) + r"\b" for p in NARRATES_RECORDS_PHRASES),
-    re.IGNORECASE,
-)
 
 EMOTION_MARKERS = [
     "scared", "proud", "angry", "sad", "happy", "afraid",
@@ -288,47 +275,6 @@ def find_candidate(data: dict, candidate_id: str) -> dict:
     raise ValueError(f"candidate not found: {candidate_id}")
 
 
-def normalize_question(text: str) -> str:
-    text = text.strip().lower()
-    text = re.sub(r"[^a-z0-9]+", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-_DEDUP_STOPWORDS = {
-    "a", "an", "the", "you", "your", "yours", "me", "my", "i", "we", "us",
-    "of", "in", "on", "at", "to", "for", "and", "or", "is", "are", "was",
-    "were", "do", "did", "does", "what", "when", "where", "how", "that",
-    "this", "it", "about", "with", "have", "has", "had", "be", "been",
-    "as", "would", "could", "should", "will", "can",
-    # contraction fragments left by normalization ("you'd" → "you d")
-    "d", "s", "ll", "re", "ve", "t", "m",
-}
-
-
-def _question_tokens(text: str) -> set[str]:
-    return {t for t in normalize_question(text).split()
-            if len(t) > 1 and t not in _DEDUP_STOPWORDS}
-
-
-def near_duplicate_of(text: str, other_texts: list[tuple[str, str]],
-                      threshold: float = NEAR_DUPLICATE_JACCARD) -> str | None:
-    """Return the label of the first near-duplicate of `text` among
-    (label, text) pairs, judged by content-token Jaccard overlap. Catches
-    reworded duplicates that exact normalization misses (e.g. three
-    'what did you promise yourself you'd do differently' variants)."""
-    tokens = _question_tokens(text)
-    if len(tokens) < 3:
-        return None  # too short to judge similarity meaningfully
-    for label, other in other_texts:
-        other_tokens = _question_tokens(other)
-        if len(other_tokens) < 3:
-            continue
-        union = tokens | other_tokens
-        if union and len(tokens & other_tokens) / len(union) >= threshold:
-            return label
-    return None
-
-
 def _candidate_age_days(candidate: dict) -> float | None:
     raw = str(candidate.get("created_at") or "")
     if not raw:
@@ -371,17 +317,8 @@ def expire_stale_candidates(data: dict, *, max_age_days: float = CANDIDATE_MAX_A
 
 
 def next_question_id(question_bank_text: str, category: str) -> str:
-    category = category.upper()
-    questions = parse_questions(question_bank_text)
-    numbers = []
-    for question in questions:
-        qid = str(question["id"])
-        match = re.match(rf"^{re.escape(category)}(\d+)", qid)
-        if match:
-            numbers.append(int(match.group(1)))
-    if not numbers:
-        return f"{category}1"
-    return f"{category}{max(numbers) + 1}"
+    """The bank's one allocator — retired rows count, so ids only grow."""
+    return question_bank.next_bank_id(question_bank_text, category)
 
 
 def ensure_category_exists(question_bank_text: str, category: str) -> None:
@@ -407,23 +344,18 @@ def insert_question(
 ) -> str:
     category = category.upper()
     ensure_category_exists(question_bank_text, category)
-
-    pattern = re.compile(
-        rf"^(## {re.escape(category)}:.+?)(?=\n## |\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    match = pattern.search(question_bank_text)
-    if not match:
-        raise ValueError(f"category section not found: {category}")
-
     source = candidate.get("source_path") or "unknown"
     provenance = (
         f"  <!-- candidate: {candidate.get('id')}; "
         f"source: {source}; promoted: {promoted_at} -->"
     )
-    line = f"- [ ] {question_id}: {question_text.strip()}\n{provenance}"
-    section = match.group(1).rstrip() + "\n" + line + "\n"
-    return question_bank_text[:match.start()] + section + question_bank_text[match.end():]
+    updated, _filed, refused = question_bank.append_questions(question_bank_text, [{
+        "id": question_id, "text": question_text.strip(), "category": category,
+        "provenance": provenance,
+    }])
+    if refused:
+        raise ValueError(f"question refused (ADR 0042): {', '.join(refused[0]['reasons'])}")
+    return updated
 
 
 def promote_candidate_record(data: dict, question_bank_text: str, candidate_id: str, category: str) -> tuple[str, str]:
@@ -1098,6 +1030,17 @@ def auto_promote_candidates(
         defer_age = _candidate_age_days({"created_at": candidate.get("defer_until", "")})
         if candidate.get("defer_until") and defer_age is not None and defer_age < 0:
             skipped.append((cid, f"deferred until {str(candidate['defer_until'])[:10]}"))
+            continue
+
+        # ADR 0042: the craft verdict gates before anything else can rank it.
+        # A FAIL never promotes, whatever its priority; a REVIEW waits for a
+        # person. The score below only ranks among passes.
+        craft = question_craft.evaluate(text, with_score=False)
+        if craft["verdict"] == question_craft.FAIL:
+            skipped.append((cid, f"craft_fail: {', '.join(craft['reasons'])}"))
+            continue
+        if craft["verdict"] == question_craft.REVIEW:
+            park(candidate, score, f"craft_review: {', '.join(craft['reasons'])}")
             continue
 
         # Exact duplicate check

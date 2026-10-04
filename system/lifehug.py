@@ -105,6 +105,8 @@ READ_ONLY_COMMANDS = frozenset({
     # deterministic, zero AI, zero writes — pure reads of roadmap.json and
     # focus_recommendations.json.
     "focus-dupes",
+    # ADR 0042: every bank entry with its craft verdict — evaluates, writes nothing.
+    "question-bank-lint",
     # v368 never-resend: "is this question already sent/answered?" — reads
     # the bank, rotation, queue and answers/, writes nothing.
     "delivery-check",
@@ -184,6 +186,9 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # as focus-autopilot/focus-curate).
     "focus-merge",
     "focus-new", "focus-set",
+    # ADR 0042: rewrites one bank row to the retired grammar `- [-]` — a
+    # single-file bank mutation, the same family as candidates-promote.
+    "question-retire",
     "ingest", "ingest-story",
     # decisions-feed-the-loop (ADR 0009): the weekly RUBRIC-EDIT runtime
     # writes state/question_judgment/learned.md and last_edit.json directly
@@ -3033,6 +3038,24 @@ def cmd_focus_merge(args: argparse.Namespace) -> int:
     return run_python("focus_merge.py", flags)
 
 
+def cmd_question_bank_lint(args: argparse.Namespace) -> int:
+    flags = ["lint"]
+    if getattr(args, "json", False):
+        flags.append("--json")
+    if getattr(args, "verdict", None):
+        flags.extend(["--verdict", args.verdict])
+    return run_python("question_bank.py", flags)
+
+
+def cmd_question_retire(args: argparse.Namespace) -> int:
+    flags = ["retire", args.question_id]
+    if getattr(args, "reason", None):
+        flags.extend(["--reason", args.reason])
+    if getattr(args, "json", False):
+        flags.append("--json")
+    return run_python("question_bank.py", flags)
+
+
 def cmd_entity_roster(args: argparse.Namespace) -> int:
     flags = ["--type", args.type]
     if getattr(args, "ensure_introduced", False):
@@ -3974,6 +3997,22 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Raise the survivor's target_depth to max(survivor, loser)")
     p.add_argument("--json", action="store_true", help="Print the result as JSON")
     p.set_defaults(func=cmd_focus_merge)
+
+    p = sub.add_parser("question-bank-lint",
+                       help="Print every question-bank entry with its craft verdict "
+                            "(pass/review/fail) and reasons — read-only (ADR 0042)")
+    p.add_argument("--json", action="store_true", help="Print the entries as JSON")
+    p.add_argument("--verdict", choices=["pass", "review", "fail"],
+                   help="Only print entries with this verdict")
+    p.set_defaults(func=cmd_question_bank_lint)
+
+    p = sub.add_parser("question-retire",
+                       help="Retire one question-bank entry: `- [-] ID: text *(retired DATE: "
+                            "reason)*` — keeps the id and history, never deletes (ADR 0042)")
+    p.add_argument("question_id", help="The bank id to retire (e.g. A17a)")
+    p.add_argument("--reason", help="Why (default: the craft evaluation's fail reasons)")
+    p.add_argument("--json", action="store_true", help="Print the receipt as JSON")
+    p.set_defaults(func=cmd_question_retire)
 
     p = sub.add_parser("entity-roster",
                        help="Resolve mentioned entities (person/place/period/object/theme) into a canonical roster")

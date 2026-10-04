@@ -18,6 +18,7 @@ from datetime import date
 from pathlib import Path
 
 import exact_file_git
+import question_bank
 import question_candidate
 from lifehug_core import now_utc, parse_categories, parse_questions
 from vault_paths import (
@@ -96,6 +97,12 @@ MARKER_RE = re.compile(
 )
 UNCHECKED_QUESTION_LINE_RE = re.compile(r"^- \[ \] ([A-Z][0-9]+): (.+)$")
 CHECKED_QUESTION_LINE_RE = re.compile(r"^- \[x\] ([A-Z][0-9]+): (.+)$")
+#: ADR 0042: a retired row keeps its id, its text and its promotion marker;
+#: the retirement note is stripped before the revision check, exactly as an
+#: answered row's date is.
+RETIRED_QUESTION_LINE_RE = re.compile(
+    r"^- \[-\] ([A-Z][0-9]+): (.+?) \*\(retired [^\n]*\)\*$"
+)
 ANSWER_ANNOTATION_RE = re.compile(r"^(.+) \*\((\d{4}-[^)\n]*)\)\*$")
 SOURCE_FIELDS = (
     "source_path",
@@ -488,6 +495,10 @@ def _marker_question_facts(line: str) -> tuple[str, str, bool]:
     if checked:
         question_id, question_text = checked.groups()
         return question_id, question_text, True
+    retired = RETIRED_QUESTION_LINE_RE.fullmatch(line)
+    if retired:
+        question_id, question_text = retired.groups()
+        return question_id, question_text, False
     raise CandidatePromotionError(
         "promotion marker must immediately follow a canonical unchecked or "
         "checked question"
@@ -578,14 +589,8 @@ def _normalize_question(text: str) -> str:
 
 
 def _next_question_id(question_bank_text: str, category_id: str) -> str:
-    numbers = []
-    for question in parse_questions(question_bank_text):
-        match = re.fullmatch(
-            rf"{re.escape(category_id)}(\d+)[a-z]*", str(question["id"])
-        )
-        if match:
-            numbers.append(int(match.group(1)))
-    return f"{category_id}{max(numbers, default=0) + 1}"
+    """The bank's one allocator — retired rows count, so ids only grow."""
+    return question_bank.next_bank_id(question_bank_text, category_id)
 
 
 def _ensure_not_duplicate(question_bank_text: str, question_text: str) -> None:
@@ -620,19 +625,19 @@ def _insert_question(
         "candidate_provenance": _candidate_provenance(request),
     }
     marker = _encode_marker(payload)
-    pattern = re.compile(
-        rf"^(## {re.escape(request['category_id'])}:.+?)(?=\n## |\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    match = pattern.search(question_bank_text)
-    if not match:
+    # The bank's one door (ADR 0042): a craft FAIL is refused, never filed —
+    # whatever the candidate's priority, and whoever asked for the promotion.
+    try:
+        updated, _filed, refused = question_bank.append_questions(question_bank_text, [{
+            "id": question_id, "text": question_text,
+            "category": request["category_id"], "provenance": marker,
+        }])
+    except ValueError as exc:
+        raise CandidatePromotionError(str(exc)) from exc
+    if refused:
         raise CandidatePromotionError(
-            f"category section not found: {request['category_id']}"
+            f"question refused (ADR 0042): {', '.join(refused[0]['reasons'])}"
         )
-    line = f"- [ ] {question_id}: {question_text}\n{marker}"
-    prefix = question_bank_text[: match.end()]
-    seam = "" if prefix.endswith("\n") else "\n"
-    updated = prefix + seam + line + "\n" + question_bank_text[match.end() :]
     return updated, payload, marker
 
 

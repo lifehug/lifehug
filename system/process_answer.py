@@ -37,6 +37,7 @@ from source_integrity import (
     payload_sha256,
     register_source,
 )
+import question_bank
 from update_readme import update_readme
 from vault_paths import vault_relative_path
 
@@ -87,53 +88,42 @@ def refresh_neighborhood_readiness_safely() -> None:
 
 
 def next_followup_id(md_text: str, source_id: str) -> str:
-    existing = re.findall(
-        rf"^- \[[ xX]\] ({re.escape(source_id)}[a-z]+):",
-        md_text,
-        re.MULTILINE,
-    )
-    if not existing:
-        return f"{source_id}a"
-    suffixes = [qid[len(source_id):] for qid in existing]
-    single_letters = [s for s in suffixes if len(s) == 1 and "a" <= s <= "z"]
-    if not single_letters:
-        return f"{source_id}a"
-    next_ord = ord(max(single_letters)) + 1
-    if next_ord > ord("z"):
-        raise ValueError(f"too many follow-ups for {source_id}")
-    return f"{source_id}{chr(next_ord)}"
+    """Delegates to the bank's one allocator (retired rows count, ADR 0042)."""
+    return question_bank.next_followup_id(md_text, source_id)
 
 
 def append_followups(question_id: str, followups: list[str]) -> list[tuple[str, str]]:
+    """File follow-ups through the bank's one door (ADR 0042).
+
+    A follow-up that FAILS the craft evaluation ("update", "gist") is refused
+    and its id is not consumed; the refusal is printed
+    on stderr so it is visible rather than silent.
+    """
     if not followups:
         return []
-    md = QUESTIONS_FILE.read_text()
-    additions = []
-    for text in followups:
-        clean = text.strip().strip('"')
+    fresh = QUESTIONS_FILE.read_text()
+    text = fresh
+    additions: list[tuple[str, str]] = []
+    refused: list[dict] = []
+    for raw in followups:
+        clean = str(raw).strip().strip('"')
         if not clean:
             continue
-        new_id = next_followup_id(md, question_id)
-        additions.append((new_id, clean))
-        md += f"\n- [ ] {new_id}: {clean}"
-
+        new_id = next_followup_id(text, question_id)
+        text, filed, rejected = question_bank.append_questions(text, [{
+            "id": new_id,
+            "text": clean,
+            "category": question_id[0],
+            "new_section": f"\n\n## {question_id[0]}: Generated\n",
+        }])
+        additions.extend((row["id"], row["text"]) for row in filed)
+        refused.extend(rejected)
+    for row in refused:
+        print(f"follow-up refused for {question_id} (ADR 0042): {row['text']!r} — "
+              f"{', '.join(row['reasons'])}", file=sys.stderr)
     if not additions:
         return []
-
-    fresh = QUESTIONS_FILE.read_text()
-    pattern = re.compile(
-        rf"^(## {re.escape(question_id[0])}:.+?(?=\n## |\Z))",
-        re.MULTILINE | re.DOTALL,
-    )
-    match = pattern.search(fresh)
-    lines = [f"- [ ] {qid}: {text}" for qid, text in additions]
-    if match:
-        section = match.group(1).rstrip()
-        new_section = section + "\n" + "\n".join(lines) + "\n"
-        fresh = fresh[:match.start()] + new_section + fresh[match.end():]
-    else:
-        fresh = fresh.rstrip() + f"\n\n## {question_id[0]}: Generated\n" + "\n".join(lines) + "\n"
-    write_text(QUESTIONS_FILE, fresh)
+    write_text(QUESTIONS_FILE, text)
     return additions
 
 

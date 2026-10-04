@@ -322,7 +322,9 @@ class AutoPromoteLadderTests(unittest.TestCase):
         # consulted, and the reason names the structural cause, not a score.
         self._write_store([{
             "id": "cand-nocat", "status": "candidate", "priority": 0.99,
-            "text": "A completely unique scene question about a specific childhood afternoon spent alone.",
+            # ADR 0042: a question, not a statement — a statement now FAILS
+            # the craft verdict before the category is ever consulted.
+            "text": "What do you remember about one specific childhood afternoon spent alone?",
             "created_at": "2026-08-01T00:00:00Z",
         }])
         result = qc.auto_promote_candidates(dry_run=False)

@@ -2337,6 +2337,71 @@ def category_from_anchor(anchor: object) -> str:
     return TIMELINE_CATEGORY_ID
 
 
+#: ADR 0042. A keystone label with no domain still names its own kind often
+#: enough to be said in the person's words: ``wedding`` -> "When did you get
+#: married?", ``move to Springfield`` -> "When did you move to Springfield?".
+#: Anything this table cannot phrase is REFUSED, never templated.
+_KEYSTONE_LABEL_PHRASINGS = (
+    (re.compile(r"^(?:my |the |our )?(?:wedding|marriage|getting married|married|got married)$",
+                re.IGNORECASE), "When did you get married?"),
+    (re.compile(r"^(?:my |the |our )?(?:move|moving|moved) to (?P<x>.+)$", re.IGNORECASE),
+     "When did you move to {x}?"),
+    (re.compile(r"^(?:my |the )?graduation from (?P<x>.+)$", re.IGNORECASE),
+     "When did you graduate from {x}?"),
+    (re.compile(r"^(?:my |the )?(?P<x>.+?) graduation$", re.IGNORECASE),
+     "When did you graduate from {x}?"),
+    (re.compile(r"^(?:my |the )?(?:mission|missionary service)$", re.IGNORECASE),
+     "When did you leave for your mission?"),
+    (re.compile(r"^(?:my |the )?(?P<x>.+? mission)$", re.IGNORECASE),
+     "When did you leave for the {x}?"),
+)
+
+
+def keystone_question_text(text: object, keystone: object = None) -> str | None:
+    """The keystone's question as the bank should hold it, or ``None``.
+
+    ADR 0042: a probe that passes the craft evaluation is kept verbatim. A
+    probe that FAILS is re-said in the domain's own words, the person as the
+    subject — `landmark_opportunities.SPAN_START_TEXTS` when the keystone names
+    a landmark domain, otherwise the label's own kind word
+    (:data:`_KEYSTONE_LABEL_PHRASINGS`). A label neither can phrase is refused.
+    """
+    import question_craft  # noqa: PLC0415
+
+    body = " ".join(str(text or "").split())
+    row = keystone if isinstance(keystone, dict) else {}
+    if body and question_craft.evaluate(body, with_score=False)["verdict"] != question_craft.FAIL:
+        return body
+    label = " ".join(str(row.get("label") or "").split()).strip(" .?")
+    if not label:
+        match = re.match(r"^when\s+(?:was|did)\s+(?P<x>[^?]+?)\s*\?$", body, re.IGNORECASE)
+        label = match.group("x").strip() if match else ""
+    if not label:
+        return None
+    phrased = None
+    domain = str(row.get("domain") or "").strip()
+    if domain:
+        try:
+            import landmark_opportunities  # noqa: PLC0415
+
+            template = landmark_opportunities.SPAN_START_TEXTS.get(domain)
+        except Exception:  # noqa: BLE001 — no table, no phrasing
+            template = None
+        if template:
+            phrased = template.format(label=label)
+    if phrased is None:
+        for pattern, template in _KEYSTONE_LABEL_PHRASINGS:
+            match = pattern.match(label)
+            if match:
+                phrased = template.format(**match.groupdict())
+                break
+    if not phrased:
+        return None
+    if question_craft.evaluate(phrased, with_score=False)["verdict"] == question_craft.FAIL:
+        return None
+    return phrased
+
+
 def mint_keystone_question(keystone: object, *, next_question_id: object,
                            category_from_anchor: object = category_from_anchor,
                            minted_at: str | None = None) -> dict | None:
@@ -2353,6 +2418,14 @@ def mint_keystone_question(keystone: object, *, next_question_id: object,
     text = " ".join(str(probe.get("text") or "").split())
     if not anchor or not text:
         return None
+    # ADR 0042: a probe that is a label dropped into a template ("When was
+    # wedding?") is re-said in the domain's own words with the person as the
+    # subject, or it is not minted at all — never templated.
+    text = keystone_question_text(text, row)
+    if not text:
+        return None
+    import question_bank  # noqa: PLC0415
+
     category = str(category_from_anchor(anchor) if callable(category_from_anchor)
                    else category_from_anchor).upper()
     qid = str(next_question_id(category) if callable(next_question_id) else next_question_id)
@@ -2373,33 +2446,42 @@ def mint_keystone_question(keystone: object, *, next_question_id: object,
         "unknown_keys": list(row.get("unknown_keys") or row.get("resolves") or []),
         "anchors": list(row.get("anchors") or []),
         "minted_at": stamp,
-        "line": (f"- [ ] {qid}: {text}\n"
-                 f"  <!-- {TIMELINE_BANK_TAG}: {keystone_id}; anchor: {anchor}; "
-                 f"leverage: {leverage}; minted: {stamp} -->"),
+        "line": question_bank.format_row(
+            qid, text,
+            f"  <!-- {TIMELINE_BANK_TAG}: {keystone_id}; anchor: {anchor}; "
+            f"leverage: {leverage}; minted: {stamp} -->"),
     }
 
 
 def insert_keystone_question(question_bank_text: str, row: object) -> str:
-    """Append a minted row to the bank text, creating `## Timeline` once.
+    """File a minted row through the bank's one door, creating `## Timeline`
+    once (ADR 0042).
 
-    Pure string work, mirroring `question_candidates.insert_question` — the
-    section header is what gives the category its `timeline` group, exactly as
-    `## Focus` and `## Project` give theirs.
+    The section header is what gives the category its `timeline` group,
+    exactly as `## Focus` and `## Project` give theirs. A row whose question
+    FAILS the craft evaluation is refused: the text comes back unchanged and
+    the caller can tell, because nothing was added.
     """
     if not isinstance(row, dict) or not row.get("line"):
         return question_bank_text
+    import question_bank  # noqa: PLC0415
+
     text = question_bank_text or ""
     header = f"## {TIMELINE_CATEGORY_ID}: {TIMELINE_CATEGORY_NAME}"
-    if header not in text:
-        section = (f"\n## Timeline\n\n{header}\n\n"
-                   "<!-- Minted by the weekly planner from the timeline's own "
-                   "keystones; asked once, answered once. -->\n")
-        text = text.rstrip("\n") + "\n" + section
-    index = text.index(header)
-    tail = text.find("\n## ", index + len(header))
-    end = len(text) if tail == -1 else tail
-    body = text[index:end].rstrip("\n") + "\n" + str(row["line"]) + "\n"
-    return text[:index] + body + text[end:]
+    first, _sep, provenance = str(row["line"]).partition("\n")
+    match = _BANK_ROW_RE.match(first)
+    qid = str(row.get("id") or (match.group("qid") if match else ""))
+    body = str(row.get("text") or (match.group("text") if match else "")).strip()
+    updated, _filed, _refused = question_bank.append_questions(text, [{
+        "id": qid,
+        "text": body,
+        "category": TIMELINE_CATEGORY_ID,
+        "provenance": provenance,
+        "new_section": (f"\n\n## Timeline\n\n{header}\n\n"
+                        "<!-- Minted by the weekly planner from the timeline's own "
+                        "keystones; asked once, answered once. -->\n"),
+    }])
+    return updated
 
 
 def timeline_probe_index(question_bank_text: str) -> dict:

@@ -1335,6 +1335,26 @@ The master list of all questions. Format:
 
 Questions are added over time (follow-ups, new categories, Focuses). This file only grows.
 
+**One door (v385, ADR 0042).** Every writer files through
+`question_bank.append_questions`, which runs `question_craft.evaluate`: a
+**fail** (under five words, not a question or an imperative prompt, a raw label
+in a `When was {label}?` template, an internal id or slug, narrating the
+vault's records or the system's leverage, a bare yes/no) is refused and never
+written; a **review** (a short question naming nothing concrete, a duplicate)
+is written with a `<!-- craft: review: … -->` comment. The weekly
+`planner-queue` skips a fail already in the bank (`skipped_craft_fail`) and
+auto-promotion requires a pass. A question is retired, never deleted:
+
+```markdown
+- [-] A17a: update *(retired 2026-10-04: too_short, not_a_question)*
+```
+
+`[-]` is neither open nor answered — selection, planning, coverage and rotation
+never see it, and its id is never reused. `python3 system/lifehug.py
+question-bank-lint [--json] [--verdict fail]` lists every entry with its
+verdict (read-only); `python3 system/lifehug.py question-retire <id> [--reason
+…]` retires one.
+
 ### `system/rotation.json`
 ```json
 {
