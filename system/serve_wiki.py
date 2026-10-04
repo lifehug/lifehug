@@ -1278,12 +1278,19 @@ def _entity_candidate_actions(entity_type: str, slug: str) -> str:
             + " " + _entity_verdict_form(entity_type, slug, "never", "Not a page", quiet=True))
 
 
-def _is_lane_candidate(entity: dict) -> bool:
-    """THE Review entity-lane predicate: still pending graduation, no Focus or
-    page, not folded, not vetoed. Rows AND fold targets both use it, so a
-    `never` record cannot reappear in the lane as a target."""
+def _is_lane_row(entity: dict) -> bool:
+    """A ROW of the Review entity lane: pending graduation, no Focus or page,
+    not folded, not vetoed."""
     return (isinstance(entity, dict) and not entity.get("page_eligible")
             and not _ir.has_home(entity) and entity.get("owner_verdict") != "never")
+
+
+def _is_fold_target(entity: dict) -> bool:
+    """A record a row may be folded INTO: every live record of the type — one
+    that already has a page or a Focus included (the owner's primary case) —
+    except a vetoed (`never`) record and a `folded_into` pointer."""
+    return (isinstance(entity, dict) and not _ir.is_alias_row(entity)
+            and entity.get("owner_verdict") != "never")
 
 
 def _entity_identity_actions(entity_type: str, record: dict, entities: list[dict]) -> str:
@@ -1293,7 +1300,7 @@ def _entity_identity_actions(entity_type: str, record: dict, entities: list[dict
     the survivors listed are every OTHER live record of the type."""
     if not _record_slug(record):
         return ""
-    live = [r for r in entities if _is_lane_candidate(r)]
+    live = [r for r in entities if _is_fold_target(r)]
     fold = _fold_form(entity_type, record, live, live)
     return f'<div class="idrow">{_alias_add_form(entity_type, record)}{fold}</div>'
 
@@ -1325,7 +1332,7 @@ def _entities_section_html() -> str:
         # so it's visible in the wiki itself and shouldn't be repeated here.
         # A `never` owner verdict is likewise excluded — it is settled, not
         # pending (Scope 3), and disappears from the lane entirely.
-        cands = [e for e in entities if _is_lane_candidate(e)]
+        cands = [e for e in entities if _is_lane_row(e)]
         decided = [e for e in entities if e.get("owner_verdict") == "graduate"]
         parts.append(f"<h3>{html.escape(etype.title())} ({len(cands)})</h3>")
         if not cands:

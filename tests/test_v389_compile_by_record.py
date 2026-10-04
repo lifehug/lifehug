@@ -305,6 +305,20 @@ class Viewer(unittest.TestCase):
         self.assertIn('name="fold_into"', out)
         self.assertIn("This is that record", out)
 
+    def test_fold_targets_include_page_holders_but_never_a_vetoed_record(self):
+        people = [person("Dottie Strand stray", "dottie-stray"),
+                  person("Dottie Strand", "dottie-strand", page_eligible=True),
+                  person("Vera Hale", "vera-hale", focus="vera"),
+                  person("Junk Name", "junk-name", owner_verdict="never"),
+                  person("Old Dup", "old-dup", folded_into="dottie-strand")]
+        vault = mara_vault(self, people=people)
+        out = vault.serve("print(sw._entities_section_html())")
+        self.assertIn('<option value="dottie-strand">', out)   # has a page
+        self.assertIn('<option value="vera-hale">', out)       # has a Focus
+        self.assertNotIn("junk-name", out)                      # vetoed: nowhere
+        self.assertNotIn("old-dup", out)                        # a pointer
+        self.assertNotIn("<td>Dottie Strand</td>", out)         # a target, not a row
+
     def test_a_graduate_verdict_survives_an_alias_edit(self):
         vault = mara_vault(self)
         out = vault.serve("print(sw._verdict_keeping({'owner_verdict': 'graduate'}), "
