@@ -1419,6 +1419,73 @@ def with_grandparent_side_cards(payloads: dict, *, roster: object, now: object =
 # --------------------------------------------------------------------------
 
 
+def first_name_aliases(*, dry_run: bool = False) -> dict:
+    """v384 (ADR 0041 amendment D4): a UNIQUE first name is an alias.
+
+    Answers say "Katie", never "Katie Taylor", and a bare first name keys to
+    nothing. For every person row whose name has two or more tokens, the first
+    token becomes an alias of the row through `entity_verdict.apply_verdict`
+    (the one writer, whose `alias_decision` collision rule applies) IF no other
+    person row answers to it by name, alias or first token. A shared first
+    token (the Jameses) is never added; it is reported, never guessed. A
+    role word ("Grandma Betty Jo") is not a name and is skipped. Pointer rows
+    take no alias but still count in the uniqueness scan. Idempotent; no model.
+
+    ``{"added": [{"slug", "alias"}], "collisions": [{"slug", "alias",
+    "candidates": [slug, ...]}]}``.
+    """
+    import entity_verdict  # noqa: PLC0415
+
+    entities = [e for e in roster_relations.roster_entities(load_roster("person"))
+                if isinstance(e.get("name"), str)]
+
+    def first_key(entity: dict) -> str:
+        tokens = str(entity.get("name") or "").split()
+        return normalized_focus_key(tokens[0]) if len(tokens) >= 2 else ""
+
+    added: list[dict] = []
+    collisions: list[dict] = []
+    for entity in entities:
+        key = first_key(entity)
+        slug = str(entity.get("slug") or "")
+        if not key or entity.get("maps_to_focus") or str(entity["name"]).split()[0].lower() in ROLE_WORDS:
+            continue
+        token = str(entity["name"]).split()[0]
+        if any(normalized_focus_key(str(a)) == key for a in entity.get("aliases") or ()):
+            continue
+        rivals = []
+        for other in entities:
+            if other is entity:
+                continue
+            tokens = str(other.get("name") or "").split()
+            keys = {normalized_focus_key(str(other.get("name") or "")), first_key(other),
+                    *(normalized_focus_key(str(a)) for a in other.get("aliases") or ())}
+            if len(tokens) == 1:
+                keys.add(normalized_focus_key(tokens[0]))
+            if key in keys:
+                rivals.append(str(other.get("slug") or ""))
+        if rivals:
+            collisions.append({"slug": slug, "alias": token, "candidates": [slug, *rivals]})
+            continue
+        if not dry_run:
+            verdict = entity.get("owner_verdict")
+            if verdict not in ("graduate", "never"):
+                verdict = "clear"
+            try:
+                entity_verdict.apply_verdict("person", slug, verdict, aliases=[token])
+            except entity_verdict.EntityAliasContested as exc:
+                collisions.append({"slug": slug, "alias": token,
+                                   "candidates": [slug, *[str(c.get("ref")) for c in
+                                                          exc.result.get("candidates") or ()]]})
+                continue
+            except entity_verdict.EntityVerdictError as exc:
+                collisions.append({"slug": slug, "alias": token, "refusal": type(exc).__name__,
+                                   "candidates": [slug]})
+                continue
+        added.append({"slug": slug, "alias": token})
+    return {"added": added, "collisions": collisions}
+
+
 def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
     """File a roster row for every person the claim substrate INTRODUCES.
 
@@ -1537,11 +1604,16 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
             continue
         folded.append(row)
     own_name = relationship_from_own_name(roster, dry_run=dry_run)
-    if not dry_run and (filed or folded):
+    # v384 (ADR 0041, D4): the name people actually say. Runs on the roster as
+    # the passes above left it, BEFORE the recount, so the alias counts at once.
+    first_names = first_name_aliases(dry_run=dry_run)
+    if not dry_run and (filed or folded or first_names["added"]):
         recount("person")
     return {"introduced": list(rows), "filed": filed, "skipped_aliases": skipped,
             "findings": list(batch["findings"]), "own_name": own_name["updated"],
-            "folded": folded, "contested": contested}
+            "folded": folded, "contested": contested,
+            "first_names": first_names["added"],
+            "first_name_collisions": first_names["collisions"]}
 
 
 def _thresholds(entity_type: str, args) -> tuple[float, int]:
