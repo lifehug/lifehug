@@ -19,6 +19,9 @@ the question comes back anyway.
 ALREADY FILED — these entries are already in the store:
 {known_entries}
 
+PEOPLE YOU ALREADY KNOW — the people on file, with the other names they go by:
+{known_people}
+
 {how_words_arrive}
 
 WHAT THEY SAID:
@@ -31,11 +34,13 @@ EPISODES YOU MIGHT BE ASKED ABOUT — this turn's candidates, if any:
 {identity_candidates}
 
 Emit exactly one JSON object and nothing else — no prose, no fence, no
-explanation. It has FOUR lists and all four are always present:
+explanation. It has FIVE lists and all five are always present:
 
   {"landmarks": [{"domain": "...", ...}], "people": [{"name": "...", ...}],
-   "claims": [{...}], "identity_assertions": [{...}]}
-  {"landmarks": [], "people": [], "claims": [], "identity_assertions": []}
+   "claims": [{...}], "identity_assertions": [{...}],
+   "person_identity": [{...}]}
+  {"landmarks": [], "people": [], "claims": [], "identity_assertions": [],
+   "person_identity": []}
 
 `claims` is the widest of the three and the one to fill first: every datable
 fact in what they said goes there, whether or not it belongs to a domain and
@@ -199,11 +204,39 @@ a real thing they said, and it goes here.
 - Never invent a comparison they did not make. Two things merely being
   mentioned in the same message is not an assertion that they are the same.
 
+## `person_identity` — who somebody is, said in passing
+
+Sometimes a person tells you another name for somebody — "Mara Ellis Dunn
+is my wife, the Mara Holt I talk about", "Grandma Betty Lou, also known as
+BL", "Wren goes by Birdie", "this is @mara-holt". That teaches who a person
+is, and it goes here.
+
+  THEY SAID: "Rosalind Vane is my wife — Roz, the one I always talk about."
+  YOU EMIT: {"person_identity": [
+    {"name": "Rosalind Vane", "refers_to": "Roz", "relationship": "wife",
+     "evidence": "Rosalind Vane is my wife"}]}
+
+- `name` is the NAME BEING TAUGHT — the new or other name, exactly as they
+  wrote it.
+- `refers_to` is who that name belongs to, in THEIR words: another name they
+  used for the same person ("Roz", "the Mara Holt I talk about"), or an
+  `@handle` copied exactly ("@mara-holt"). Leave it out when they only gave
+  a relationship ("Rosalind Vane is my wife").
+- `relationship` is the relationship WORD they used ("wife", "dad", "sister"),
+  or leave it out. Never guess one, and never put a friend, a colleague or a
+  neighbour here: this list is for FAMILY, and anyone else is left out of it.
+- `evidence` is a short quotation of the words that say it.
+- Copy their words; never resolve them yourself. Something else matches them
+  against the people listed above afterwards, and asks when it cannot tell.
+- Never invent an identity. Two names in one sentence are not one person
+  unless they SAID so, and a name already listed above teaches nothing new.
+
 ## When there is nothing
 
 If they truly said nothing datable — no year, no age, no month, nothing fixed
-against anything else, and no comparison between two things — emit
-`{"landmarks": [], "people": [], "claims": [], "identity_assertions": []}`.
+against anything else, no comparison between two things, and no other name
+for anybody — emit `{"landmarks": [], "people": [], "claims": [],
+"identity_assertions": [], "person_identity": []}`.
 Recording nothing is correct exactly there and nowhere else.
 
 Never invent a place, a date, a name, a relation, or a domain.{reminder}

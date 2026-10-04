@@ -579,6 +579,15 @@ def order_targets(
 
 # ── prompt construction ───────────────────────────────────────────────────────
 
+def load_person_roster() -> dict:
+    """v387: the vault's person roster snapshot — the classifier's "People You
+    Already Know" block and its post-processor read the same one."""
+    try:
+        return classifier_ctx.entity_roster.load_roster("person", vault_root=REPO_DIR)
+    except (OSError, ValueError):
+        return {"version": 1, "type": "person", "entities": []}
+
+
 def load_question_categories() -> str:
     """Return a compact list of question-bank categories for the prompt."""
     if not QUESTIONS_FILE.exists():
@@ -1082,8 +1091,13 @@ def build_prompt(
     context_snapshot: dict | None = None,
     mode: str = "full",
     include_candidates: bool = True,
+    person_roster: dict | None = None,
 ) -> str:
-    """Construct the mode-bound AI classification prompt for one source."""
+    """Construct the mode-bound AI classification prompt for one source.
+
+    v387: ``person_roster`` is the person roster snapshot the "People You
+    Already Know" block is rendered from; ``None`` reads the vault's own
+    (`entity_roster.load_roster("person")`)."""
     if mode not in CLASSIFICATION_MODES:
         raise ValueError(f"unsupported classification mode: {mode}")
     if context_snapshot is None:
@@ -1105,6 +1119,10 @@ def build_prompt(
         categories_block = load_question_categories()
     themes_block = ", ".join(THEME_TAXONOMY)
     timeline_context = _timeline_prompt_context(context_snapshot)
+    if person_roster is None:
+        person_roster = load_person_roster()
+    known_people = classifier_ctx.render_known_people(
+        person_roster, story_text=story_text)
 
     relative_path = _relative_path(source_path)
     question_schema = ""
@@ -1167,6 +1185,18 @@ visibly unfinished; follow the shared Timeline Candidate Eligibility rules.
 Do not infer candidates that are not supplied.
 {timeline_context}
 
+## People You Already Know
+The vault already holds a record for each person below: their name, the other
+names they go by, how they stand to the author, and their Focus if they have
+one. When the story names one of them — by any listed name, or by a
+relationship word that can only mean them ("my wife" when one spouse is
+listed) — write their listed name exactly as shown, without the part in
+parentheses, in `people[].name` and `focus_opportunities[].entity`. Never write
+"the author's father" or "my wife" for someone listed here. A person who is not
+listed is written as the story names them; never match a stranger to a listed
+person because a first name is shared.
+{known_people}
+
 ---
 
 ## Your Task
@@ -1180,7 +1210,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   "_classification_mode": "full",
   "_classification_snapshot": {json.dumps(classifier_ctx.snapshot_metadata(context_snapshot), sort_keys=True)},
   "people": [
-    {{ "name": "string", "relationship": "string", "role": "string", "mention_count": 1 }}
+    {{ "name": "string — the listed name when they are a person you already know", "relationship": "string — how they stand to the author ('unknown' when the story does not say)", "role": "string", "mention_count": 1 }}
   ],
   "places": [
     {{ "name": "string", "type": "city|region|country|building|neighborhood|other", "time_period": "string or null" }}
@@ -1224,7 +1254,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
 {_TIMELINE_CANDIDATE_ELIGIBILITY}
 
 ### Guidelines
-- `people`: include every named or described person; estimate mention_count from how prominent they are
+- `people`: include every named or described person; estimate mention_count from how prominent they are. Use the listed name for a person you already know. If the story does not say how someone stands to the author, write `"unknown"` as their relationship — never invent one
 - `themes`: prefer taxonomy terms when a close one exists; if the story's CENTRAL theme is genuinely absent from the taxonomy, name it (one or two words, lowercase) — the monthly theme roster curates and merges what you surface
 - `suggested_sensitivity`: the most-open audience tier this source could EVER be rendered for.
   Taxonomy (default private when in doubt — the owner reviews before anything opens):
@@ -1264,7 +1294,7 @@ Return ONLY the raw JSON (no markdown fences, no commentary).
   extract no event for the correction itself, name the people it names in
   `people`, and leave `events` empty unless it also tells a moment of its own.
 {question_guidelines}
-- `focus_opportunities`: entities rich enough to anchor a dedicated wiki page or chapter section
+- `focus_opportunities`: entities rich enough to anchor a dedicated wiki page or chapter section; a person you already know is named by their listed name
 - `contradictions`: tensions or paradoxes in values, beliefs, or events — leave them unresolved, do not explain them away
 - `possible_outputs`: concrete deliverables this story could contribute to
 
@@ -1850,6 +1880,9 @@ def prepare_classification(
         classification["classification_snapshot"] = classifier_ctx.snapshot_metadata_for_events(
             snapshot, classification["events"]
         )
+        # v387 (identity §4.1.3): roster names where resolution is certain.
+        classifier_ctx.resolve_classification_people(
+            classification, load_person_roster())
         classification[CLASSIFICATION_SKIP_CANDIDATES_FIELD] = bool(skip_candidates)
         classification["validation_downgrades"] = downgrades
         if new_candidates:

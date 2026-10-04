@@ -1,7 +1,7 @@
 {
-  "version": 385,
+  "version": 387,
   "released": "2026-10-04",
-  "changelog": "v385: a question passes or it is not a question (ADR 0042, lifehug-platform#984). The daily question read \"update\" and the next card \"gist\" — one-word follow-ups the follow-up planner filed in July, plus `When was wedding?` keystone templates and probes that narrated the vault (\"appears in your records only as a name\") or the system (\"your answer places 8 timeline moments\"). The quality score never saw them, and where it ran it could not fail anything. Now `question_craft.evaluate` gives every question a verdict — pass / review / fail with reasons — and `question_bank.append_questions` is the one door into the bank: follow-ups, keystone probes and candidate promotion all file through it, a fail is refused (never written) and a review is filed with a `craft: review` comment. Keystone probes are said in the domain's own words (\"When did you get married?\") or not minted. The weekly queue skips a fail already in the bank (`skipped_craft_fail`), auto-promotion requires a pass, and two new verbs clean up: `question-bank-lint` lists every entry's verdict (read-only) and `question-retire <id>` retires one as `- [-] ID: text *(retired DATE: reason)*` — kept, never deleted, never asked, its id never reused.",
+  "changelog": "v387: the classifier knows the people; a conversation can teach identity (identity design §4.1.3–4, lifehug-platform#987). The classifier prompt had no person roster at all, so \"Mara Ellis Dunn\" was a stranger and \"the author's father\" was recommended as a new Focus. Now `classify_story` shows a \"People You Already Know\" block (each person record's name — disambiguated when two share it — other names, relationship and Focus; people the story names first, then family, capped at 30) and asks for the listed name; a deterministic post-processor rewrites `people[].name` and person `focus_opportunities[].entity` to the roster name only when resolution is certain, recording what it did on the additive `identity_resolution` field (the context snapshot and prompt version are unchanged, so nothing re-classifies). And an answer can now teach who somebody is: the general listener hears a fifth typed list, `person_identity` (\"X is my wife\", \"also known as\", \"goes by\", \"this is @handle\"), gated by a new deterministic prescreen `may_contain_identity` and backstopped like `listener_heard_nothing`. Each record is resolved against the roster: exactly one person files `entity-verdict person <slug> clear --alias <name>` (and `--relationship` only when the record had none); two candidates file nothing and become a \"which one?\" question; a name nobody on the roster bears mints NOTHING — a conversation never creates a person. Family-only by the deterministic guard; the reply may acknowledge only after the host has filed it; the cost is its own purpose, `identity_record`.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -641,6 +641,7 @@
     "docs/adr/0039-a-re-key-is-not-a-change-to-a-life.md",
     "tests/test_v375_a_re_key_is_not_a_change_to_a_life.py",
     "system/focus_pages.py",
+    "system/person_resolution.py",
     "system/portrait_targets.py",
     "system/portrait_targets.json",
     "docs/handbook/graph.md",

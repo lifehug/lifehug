@@ -2177,12 +2177,110 @@ def _settle(source: Path, snapshot: dict, record: object, reason: str) -> str:
         return timeline_settlement.SETTLE_MODEL
     return timeline_settlement.settle_mode(snapshot, record, story_text, reason=reason)
 
+# ---------------------------------------------------------------------------
+# v387 — the classifier knows the people (identity design §4.1.3, P3)
+# ---------------------------------------------------------------------------
+#
+# Before v387 the classifier prompt carried NO person-roster block: roster
+# terms reached it only attached to timeline candidates ("retrieval, never
+# binding"), so a full name it had never been shown was a stranger, and the
+# person it calls "the author's father" was recommended as a new Focus. The
+# block below is the people the vault already holds; the post-processor after
+# it rewrites a classifier name to the roster's own name when — and only when —
+# person resolution says ``resolved``.
+#
+# Neither is part of the context SNAPSHOT: the snapshot's digest decides when a
+# classification is stale, and putting the roster into it would make every
+# alias added anywhere re-classify every source. The block is retrieval for
+# the model; the post-processor is deterministic and re-runnable.
+
+#: How many people the block lists. The recorder's known-entries block caps
+#: at 21 lines because its whole prompt is a few hundred haiku-class tokens;
+#: the classifier is one sonnet-class call of ~17k tokens (the E-C3 backfill's
+#: measured mean), so 30 lines of ~70 characters (~500 tokens, ~3%) buys the
+#: whole of a typical family plus the people this story actually names. The
+#: ORDER is what makes the cap safe: people the story names first, then
+#: family, then everyone else, so what is cut is never someone the story is
+#: about.
+KNOWN_PEOPLE_LIMIT = 30
+
+#: The additive field on a classification record that says what the
+#: post-processor did to each person name: ``resolved`` (rewritten to the
+#: roster's name when it differed), ``ambiguous`` or ``unknown`` (left as the
+#: classifier wrote it).
+IDENTITY_RESOLUTION_FIELD = "identity_resolution"
+
+_PERSON_FOCUS_TYPES = frozenset({"", "person"})
+
+
+def render_known_people(person_roster: object, *, story_text: str = "",
+                        limit: int = KNOWN_PEOPLE_LIMIT) -> str:
+    """The "People you already know" block — `person_resolution
+    .render_known_people`, the ONE renderer the classifier and the general
+    listener share, at the classifier's cap (:data:`KNOWN_PEOPLE_LIMIT`)."""
+    import person_resolution as pr  # noqa: PLC0415
+
+    return pr.render_known_people(person_roster, story_text=story_text,
+                                  limit=limit)
+
+
+def resolve_classification_people(classification: dict,
+                                  person_roster: object) -> dict:
+    """Rewrite ``people[].name`` / person ``focus_opportunities[].entity`` to
+    the roster's own name when person resolution is ``resolved``.
+
+    ``ambiguous`` and ``unknown`` leave the classifier's words untouched. What
+    was done to each name is recorded on :data:`IDENTITY_RESOLUTION_FIELD`
+    (additive; omitted when the roster holds no person at all, so a vault with
+    no roster keeps its classification bytes). Mutates and returns
+    ``classification``.
+    """
+    import person_resolution as pr  # noqa: PLC0415
+
+    rows = pr.person_rows(person_roster)
+    if not isinstance(classification, dict) or not rows:
+        return classification
+    names = {pr.ref_of(entity): str(entity.get("name") or "").strip()
+             for entity in rows}
+    notes: list[dict] = []
+
+    def visit(field_name: str, key: str, item: dict, index: int,
+              relationship: object = None) -> None:
+        mention = str(item.get(key) or "").strip()
+        if not mention:
+            return
+        context = {"relationship": relationship} if relationship else None
+        found = pr.resolve_person(mention, person_roster, context=context)
+        note: dict = {"field": field_name, "index": index,
+                      "mention": mention, "kind": found.kind}
+        if found.resolved and names.get(found.ref):
+            note["ref"] = found.ref
+            note["name"] = names[found.ref]
+            note["rewritten"] = names[found.ref] != mention
+            item[key] = names[found.ref]
+        elif found.candidates:
+            note["candidates"] = list(found.candidates)
+        notes.append(note)
+
+    for index, person in enumerate(classification.get("people") or ()):
+        if isinstance(person, dict):
+            visit("people", "name", person, index,
+                  relationship=person.get("relationship"))
+    for index, focus in enumerate(classification.get("focus_opportunities") or ()):
+        if isinstance(focus, dict) and normalized_mention_key(
+                focus.get("type")) in _PERSON_FOCUS_TYPES:
+            visit("focus_opportunities", "entity", focus, index)
+    classification[IDENTITY_RESOLUTION_FIELD] = notes
+    return classification
+
 
 __all__ = [
     "ClassifierContextError",
     "ContextFailureCode",
     "CONTEXT_SCHEMA_VERSION",
     "EXTRACTOR_VERSION",
+    "IDENTITY_RESOLUTION_FIELD",
+    "KNOWN_PEOPLE_LIMIT",
     "A_RE_KEY_IS_NOT_A_CHANGE_TO_A_LIFE",
     "LINK_ORPHANED",
     "LINK_ORPHANED_FIELD",
@@ -2197,6 +2295,8 @@ __all__ = [
     "effective_source_revision",
     "load_context_catalog",
     "refresh_reason",
+    "render_known_people",
+    "resolve_classification_people",
     "select_refresh_targets",
     "snapshot_metadata",
     "source_revision",

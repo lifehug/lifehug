@@ -391,7 +391,11 @@ class ListenerPromptTests(unittest.TestCase):
         """
         # 2026-09-25 (v360): 12200 → 13700, the shared `{how_words_arrive}`
         # block (~1300 characters; measured 13498).
-        self.assertLess(len(self._prompt()), 13700)
+        # 2026-10-04 (v387, identity §4.1.4): 13700 → 15400, the fifth list —
+        # the `person_identity` section with its worked example, the FIVE-list
+        # envelope and the (empty-roster) `{known_people}` block; measured
+        # 15345 with an empty store and an empty roster.
+        self.assertLess(len(self._prompt()), 15400)
 
     def test_the_digest_is_nine_lines_and_not_nine_ladders(self):
         digest = gl.render_domain_digest()
