@@ -1,7 +1,7 @@
 {
-  "version": 394,
+  "version": 395,
   "released": "2026-10-04",
-  "changelog": "v394: a Focus at 100% is a milestone, not an end (ADR 0044, OSS half of lifehug-platform#995). Before, finishing a Focus changed nothing: it kept its slot in the autopilot's keep-3-developing count and no surface said it was done. Now the weekly `focus-complete-sweep` (after `quality`/`judgment`, before `promote`; `lifehug.py focus-complete-sweep [--dry-run]`) sets `phase = \"complete\"` automatically on a Focus whose category has zero open questions and at least one answered, whatever its tier, and records `completion` (completed_at, answered/total, the Mirror row's state). A complete Focus is never queued, leaves the autopilot's developing count so a new Focus can be promoted, keeps its page and category, and returns to `developing` as soon as a new question for its category is approved into the bank (`roadmap.is_complete` reads the live fill; `roadmap.reopen_completed` persists it on the next rebuild). On the transition only, for that Focus's person, the Timeline gaps the weekly run already computed (landmark opportunities, keystones, open date gaps) are filed as Review candidates with `source: focus_complete:<slug>`, through `question_craft.evaluate`, parked at `needs_review` (the auto-promoter never takes them), capped at three, no model call. One Mirror row kind `focus_complete` (\"<Focus> is complete \\u2014 N of N answered\", id `fc:<slug>:<completed_at>`, minted once per completion) carries three Plays a host binds: `keep_going` (the candidates get Review attention), `rest` (closes the row, nothing else), `make` (records a `studio_card` hint for the platform's later Studio card): `focus-complete-play <focus> keep_going|rest|make`, `mirror.load_focus_complete_rows`. `focus-finish` is unchanged and stays the manual accelerator. Foundation shows a quiet \\u2713 complete mark.",
+  "changelog": "v395: fix the Focus-complete CLI on Python 3.14. v394's argparse help strings in `system/focus_complete.py` carried a bare `100%`, which Python 3.14 rejects with `ValueError: badly formed help string` before the verb runs, so `focus-complete-sweep` and `focus-complete-play` both exited 1; escaped as `100%%`, with a regression test that builds both parsers' help under the running interpreter.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -670,6 +670,7 @@
     "tests/test_v393_design_palette.py",
     "system/focus_complete.py",
     "tests/test_v394_focus_complete.py",
-    "docs/adr/0044-a-focus-at-100-is-a-milestone.md"
+    "docs/adr/0044-a-focus-at-100-is-a-milestone.md",
+    "tests/test_v395_focus_complete_cli_help.py"
   ]
 }

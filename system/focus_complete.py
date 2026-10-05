@@ -454,9 +454,9 @@ def play(focus_id: str, which: str, *, roadmap: dict | None = None,
 
 
 def cli(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Complete a Focus at 100% (ADR 0044)")
+    parser = argparse.ArgumentParser(description="Complete a Focus at 100%% (ADR 0044)")
     sub = parser.add_subparsers(dest="cmd")
-    p = sub.add_parser("sweep", help="Mark every Focus at 100% complete; file its second pass")
+    p = sub.add_parser("sweep", help="Mark every Focus at 100%% complete; file its second pass")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("rows", help="The open focus_complete Mirror rows")
