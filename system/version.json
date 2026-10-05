@@ -1,7 +1,7 @@
 {
-  "version": 395,
-  "released": "2026-10-04",
-  "changelog": "v395: fix the Focus-complete CLI on Python 3.14. v394's argparse help strings in `system/focus_complete.py` carried a bare `100%`, which Python 3.14 rejects with `ValueError: badly formed help string` before the verb runs, so `focus-complete-sweep` and `focus-complete-play` both exited 1; escaped as `100%%`, with a regression test that builds both parsers' help under the running interpreter.",
+  "version": 396,
+  "released": "2026-10-05",
+  "changelog": "v396: the I-1 identity flags reach the package's one CLI door. v387 added `--handle`, `--clear-handle`, `--retract-alias`, `--share-alias`/`--with`, `--located-in`, `--fold-into` (and `--focus`) to `entity_verdict.py`'s own parser only, so `lifehug.py entity-verdict … --handle aj` exited 2 `unrecognized arguments`; the flags are now ONE definition (`entity_verdict.add_identity_flags`) called by both parsers, `cmd_entity_verdict` forwards them, and a door test plus a two-parser option-set guard keep a later flag from reaching only one door.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -671,6 +671,7 @@
     "system/focus_complete.py",
     "tests/test_v394_focus_complete.py",
     "docs/adr/0044-a-focus-at-100-is-a-milestone.md",
-    "tests/test_v395_focus_complete_cli_help.py"
+    "tests/test_v395_focus_complete_cli_help.py",
+    "tests/test_v396_entity_verdict_door.py"
   ]
 }
