@@ -3130,6 +3130,12 @@ def cmd_identity_work_items(args: argparse.Namespace) -> int:
     return 0
 
 
+_ENTITY_VERDICT_FLAG = {
+    "fold_into": "--fold-into", "focus": "--focus", "share_alias": "--share-alias",
+    "shared_with": "--with", "located_in": "--located-in", "handle": "--handle",
+}
+
+
 def cmd_entity_verdict(args: argparse.Namespace) -> int:
     flags = [args.type, args.slug, args.verdict]
     # entity-identity-context (v190): graduation and the identity the Play
@@ -3162,6 +3168,15 @@ def cmd_entity_verdict(args: argparse.Namespace) -> int:
         value = getattr(args, flag, None)
         if value is not None:
             flags.extend([f"--{flag.replace('_', '-')}", str(value)])
+    # v396: identity flags (I-1) — declared once by entity_verdict.add_identity_flags.
+    for dest in ("fold_into", "focus", "share_alias", "shared_with", "located_in", "handle"):
+        value = getattr(args, dest, None)
+        if value:
+            flags.extend([_ENTITY_VERDICT_FLAG[dest], str(value)])
+    for name in getattr(args, "retract_alias", None) or []:
+        flags.extend(["--retract-alias", name])
+    if getattr(args, "clear_handle", False):
+        flags.append("--clear-handle")
     if args.json:
         flags.append("--json")
     return run_python("entity_verdict.py", flags)
@@ -4118,6 +4133,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="How the death date was arrived at (chronology.BASES; default stated)")
     p.add_argument("--maps-to", dest="maps_to", metavar="SLUG",
                    help="This entity is really that existing page — wins over graduate")
+    # v396: the I-1 identity flags are ONE definition in entity_verdict.py.
+    import entity_verdict as _entity_verdict  # noqa: PLC0415
+    _entity_verdict.add_identity_flags(p)
     p.add_argument("--ensure", action="store_true",
                    help="Create the roster entry when the slug is unknown, rather "
                         "than refusing — for a person a LANDMARK named (v202). "

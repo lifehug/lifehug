@@ -670,6 +670,44 @@ def attach_focus(slug: str, focus_slug: str) -> dict:
     return target
 
 
+IDENTITY_FLAG_DESTS = ("fold_into", "focus", "retract_alias", "share_alias",
+                       "shared_with", "located_in", "handle", "clear_handle")
+
+
+def add_identity_flags(parser: argparse.ArgumentParser) -> None:
+    """The identity-edit flags (I-1, v387) — ONE definition for BOTH doors:
+    this module's own CLI and `lifehug.py entity-verdict` (v396). A flag added
+    here reaches both; `cmd_entity_verdict` forwards by `IDENTITY_FLAG_DESTS`."""
+    parser.add_argument("--fold-into", dest="fold_into", metavar="ROW",
+                        help="This record is a duplicate of that row: keep it as a "
+                             "pointer, union its names onto the survivor (ADR 0041). "
+                             "Wins over graduate. Refused for a place unless both "
+                             "are true duplicates (use --located-in).")
+    parser.add_argument("--focus", metavar="FOCUS",
+                        help="Attach this record to that Focus (the Focus attends to "
+                             "this person; the record stays live). Refused when "
+                             "another record already holds the Focus.")
+    parser.add_argument("--retract-alias", dest="retract_alias", action="append",
+                        default=[], metavar="NAME",
+                        help="Take a name back off this record (repeatable)")
+    parser.add_argument("--share-alias", dest="share_alias", metavar="NAME",
+                        help="Mark a name as shared with somebody who has no record "
+                             "(needs --with): a bare mention of it is held, never "
+                             "attributed; nobody is minted (D9)")
+    parser.add_argument("--with", dest="shared_with", metavar="WHO",
+                        help="With --share-alias: who else answers to it, free text "
+                             "(\"a friend (no record)\")")
+    parser.add_argument("--located-in", dest="located_in", metavar="PLACE",
+                        help="place only: this place is inside that place "
+                             "(containment, never a fold — D8)")
+    parser.add_argument("--handle", metavar="HANDLE",
+                        help="The record's short @handle: lowercase letters, digits and "
+                             "hyphens, unique across every record's name, alias, slug and "
+                             "handle in the vault (refused, exit 2, naming the claimant)")
+    parser.add_argument("--clear-handle", dest="clear_handle", action="store_true",
+                        help="Remove the short @handle (the @<slug> handle stays)")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Owner override for one roster entity's graduation — "
@@ -702,34 +740,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--maps-to", metavar="SLUG",
                         help="DEPRECATED (v386, one version): rewritten to "
                              "--fold-into when SLUG is a row, else --focus.")
-    parser.add_argument("--fold-into", dest="fold_into", metavar="ROW",
-                        help="This record is a duplicate of that row: keep it as a "
-                             "pointer, union its names onto the survivor (ADR 0041). "
-                             "Wins over graduate. Refused for a place unless both "
-                             "are true duplicates (use --located-in).")
-    parser.add_argument("--focus", metavar="FOCUS",
-                        help="Attach this record to that Focus (the Focus attends to "
-                             "this person; the record stays live). Refused when "
-                             "another record already holds the Focus.")
-    parser.add_argument("--retract-alias", dest="retract_alias", action="append",
-                        default=[], metavar="NAME",
-                        help="Take a name back off this record (repeatable)")
-    parser.add_argument("--share-alias", dest="share_alias", metavar="NAME",
-                        help="Mark a name as shared with somebody who has no record "
-                             "(needs --with): a bare mention of it is held, never "
-                             "attributed; nobody is minted (D9)")
-    parser.add_argument("--with", dest="shared_with", metavar="WHO",
-                        help="With --share-alias: who else answers to it, free text "
-                             "(\"a friend (no record)\")")
-    parser.add_argument("--located-in", dest="located_in", metavar="PLACE",
-                        help="place only: this place is inside that place "
-                             "(containment, never a fold — D8)")
-    parser.add_argument("--handle", metavar="HANDLE",
-                        help="The record's short @handle: lowercase letters, digits and "
-                             "hyphens, unique across every record's name, alias, slug and "
-                             "handle in the vault (refused, exit 2, naming the claimant)")
-    parser.add_argument("--clear-handle", dest="clear_handle", action="store_true",
-                        help="Remove the short @handle (the @<slug> handle stays)")
+    add_identity_flags(parser)
     parser.add_argument("--ensure", action="store_true",
                         help="Create the roster entry when the slug is unknown, "
                              "rather than refusing — for a person a LANDMARK "
