@@ -2059,9 +2059,15 @@ class SourceBodyRead:
     manifest_record: dict
 
 
-def _manifest_source_record(ref: str) -> dict | None:
-    """Manifest membership is the approval boundary for raw body reads."""
-    manifest = (read_json(SOURCE_MANIFEST_FILE, default={}) or {}).get("sources", {})
+def _manifest_source_record(ref: str, manifest: dict | None = None) -> dict | None:
+    """Manifest membership is the approval boundary for raw body reads.
+
+    ``manifest`` is the ``sources`` mapping a caller listing many rows has
+    ALREADY read from the manifest file this request (the Sources view);
+    omitted, the file is read here. Either way membership is decided from the
+    manifest on disk, never from anything a request supplies."""
+    if manifest is None:
+        manifest = (read_json(SOURCE_MANIFEST_FILE, default={}) or {}).get("sources", {})
     if not isinstance(manifest, dict):
         return None
     direct = manifest.get(ref)
@@ -2072,7 +2078,9 @@ def _manifest_source_record(ref: str) -> dict | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def read_source_ref(ref: str, *, include_body: bool = False) -> SourceBodyRead | None:
+def read_source_ref(
+    ref: str, *, include_body: bool = False, manifest: dict | None = None,
+) -> SourceBodyRead | None:
     """Validate and read one exact manifested source through the vault's
     no-follow I/O authority (vault_paths.open_vault_fd / read_vault_bytes).
 
@@ -2108,7 +2116,7 @@ def read_source_ref(ref: str, *, include_body: bool = False) -> SourceBodyRead |
         return None
     if not tail:
         return None
-    record = _manifest_source_record(raw)
+    record = _manifest_source_record(raw, manifest)
     if record is None:
         return None
 
@@ -2126,9 +2134,13 @@ def read_source_ref(ref: str, *, include_body: bool = False) -> SourceBodyRead |
     return SourceBodyRead(raw, text, dict(record))
 
 
-def source_href(ref: str) -> str | None:
-    """Return the canonical viewer URL only for a manifested file readable now."""
-    return f"/source/{quote(ref, safe='/')}" if read_source_ref(ref) else None
+def source_href(ref: str, *, manifest: dict | None = None) -> str | None:
+    """Return the canonical viewer URL only for a manifested file readable now.
+
+    A view linking many rows passes the manifest it already read (lifehug#471:
+    re-reading a multi-megabyte manifest per row made the Sources view take
+    most of a minute on a vault with letters)."""
+    return f"/source/{quote(ref, safe='/')}" if read_source_ref(ref, manifest=manifest) else None
 
 
 _SAFE_SOURCE_METADATA = (
@@ -2148,6 +2160,75 @@ _SAFE_SOURCE_METADATA = (
 )
 
 
+#: The letter fields (lifehug#471) the reader shows for a `type: letter`
+#: record, in reading order. Lists render as comma-joined refs; `origin`
+#: renders as its repository, commit and id plus a link to the scan.
+_LETTER_SOURCE_METADATA = (
+    ("author_label", "Writer"),
+    ("author_refs", "Writer refs"),
+    ("recipient_label", "Recipient"),
+    ("recipient_refs", "Recipient refs"),
+    ("subject_refs", "About"),
+    ("written_date", "Written"),
+    ("written_date_precision", "Date precision"),
+    ("written_date_evidence", "Date evidence"),
+    ("document_type", "Document type"),
+    ("collection", "Collection"),
+    ("sensitivity", "Sensitivity"),
+    ("supersedes", "Supersedes"),
+)
+
+
+def _letter_body_html(body_text: str) -> str:
+    """A letter record's body: the transcript rendered, its page markers
+    (``<!-- scan page 2; confidence 0.85 -->``) shown as quiet labels, and the
+    letters project's own header (the record's trailing section) as a
+    collapsed, verbatim block rather than as Markdown it is not."""
+    from documents import TRAILER_MARKER  # noqa: PLC0415
+
+    cut = body_text.rfind(f"\n{TRAILER_MARKER}\n")
+    transcript, tail = (body_text, "") if cut == -1 else (body_text[:cut], body_text[cut:])
+    transcript = re.sub(r"(?m)^<!--\s*(.*?)\s*-->\s*$", lambda m: f"*[{m.group(1)}]*", transcript)
+    out = render_markdown(transcript)
+    header = re.search(r"\n(`{3,})yaml\n(.*)\n\1\n?\Z", tail, re.S)
+    if header:
+        out += (
+            '<details class="transcript-header"><summary>Transcript header '
+            "(the letters project's own, verbatim)</summary>"
+            f"<pre>{html.escape(header.group(2))}</pre></details>"
+        )
+    return out
+
+
+def _letter_metadata_rows(metadata: dict) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for name, label in _LETTER_SOURCE_METADATA:
+        value = metadata.get(name)
+        if value in (None, "", []):
+            if name == "written_date":
+                rows.append([label, "undated"])
+            continue
+        if isinstance(value, list):
+            value = ", ".join(str(item) for item in value)
+        rows.append([html.escape(label), html.escape(str(value))])
+    origin = metadata.get("origin")
+    if isinstance(origin, dict):
+        commit = str(origin.get("commit") or "")
+        where = " · ".join(
+            part for part in (
+                str(origin.get("repo") or ""),
+                commit[:12],
+                str(origin.get("id") or ""),
+                str(origin.get("source_file") or ""),
+            ) if part
+        )
+        rows.append(["Origin", html.escape(where)])
+        scan = str(origin.get("scan_url") or "")
+        if scan.startswith("https://"):
+            rows.append(["Scan", f'<a href="{html.escape(scan, quote=True)}" rel="noreferrer">scan.pdf</a>'])
+    return rows
+
+
 def source_document_html(ref: str) -> tuple[str, str] | None:
     """Render an approved raw source without changing it or derived state."""
     source = read_source_ref(ref, include_body=True)
@@ -2164,6 +2245,9 @@ def source_document_html(ref: str) -> tuple[str, str] | None:
     rows = [[html.escape(label), html.escape(str(metadata[name]))]
             for name, label in _SAFE_SOURCE_METADATA
             if name in metadata and metadata[name] not in (None, "")]
+    is_letter = str(frontmatter.get("type") or metadata.get("type") or "") == "letter"
+    if is_letter:
+        rows.extend(_letter_metadata_rows(frontmatter))
     rows.insert(0, ["Path", f"<code>{html.escape(ref)}</code>"])
     toolbar = (
         '<div class="source-toolbar">'
@@ -2179,10 +2263,43 @@ def source_document_html(ref: str) -> tuple[str, str] | None:
         + '<div class="source-meta"><h2>Safe metadata</h2>'
         + _table(["Field", "Value"], rows)
         + '</div><article class="source-body">'
-        + render_markdown(body_text)
+        + (_letter_body_html(body_text) if is_letter else render_markdown(body_text))
         + "</article>"
     )
     return title, body
+
+
+def _letter_source_tables(entries: list[tuple[str, dict]], manifest: dict | None = None) -> str:
+    """Letters (lifehug#471) listed under their own type: one table per
+    collection, in written-date order (undated last), with the writer,
+    recipient and written date the manifest carries for each record."""
+    by_collection: dict[str, list[tuple[str, dict]]] = {}
+    for key, s in entries:
+        by_collection.setdefault(str(s.get("collection") or "—"), []).append((key, s))
+    parts: list[str] = []
+    for collection in sorted(by_collection):
+        items = sorted(
+            by_collection[collection],
+            key=lambda kv: (kv[1].get("written_date") is None,
+                            str(kv[1].get("written_date") or ""), str(kv[1].get("title") or "")),
+        )
+        parts.append(f"<h4>{html.escape(collection)} ({len(items)})</h4>")
+        rows = []
+        for key, s in items:
+            ref = str(s.get("source_path") or key)
+            href = source_href(ref, manifest=manifest)
+            label = html.escape(str(s.get("title", s.get("source_id", "?"))))
+            rows.append([
+                f'<a href="{href}">{label}</a>' if href else label,
+                html.escape(str(s.get("written_date") or "undated")),
+                html.escape(str(s.get("author_label") or ", ".join(s.get("author_refs") or []) or "—")),
+                html.escape(str(s.get("recipient_label") or ", ".join(s.get("recipient_refs") or []) or "—")),
+                html.escape(str(s.get("document_type") or "—")),
+                _badge("changed", "yellow") if s.get("changed_since_first_seen") else _badge("stable", "green"),
+                f'<a href="/source-actions?ref={quote(ref)}">act</a>',
+            ])
+        parts.append(_table(["Title", "Written", "Writer", "Recipient", "Kind", "Integrity", ""], rows))
+    return "".join(parts)
 
 
 def view_sources():
@@ -2210,10 +2327,13 @@ def view_sources():
         parts.append(_empty("No sources tracked yet."))
     for t in sorted(by_type):
         parts.append(f"<h3>{html.escape(t)} ({len(by_type[t])})</h3>")
+        if t == "letter":
+            parts.append(_letter_source_tables(by_type[t], manifest))
+            continue
         rows = []
         for key, s in by_type[t]:
             ref = str(s.get("source_path") or key)
-            href = source_href(ref)
+            href = source_href(ref, manifest=manifest)
             label = html.escape(str(s.get("title", s.get("source_id", "?"))))
             title_cell = f'<a href="{href}">{label}</a>' if href else label
             rows.append([

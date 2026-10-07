@@ -1,7 +1,7 @@
 {
-  "version": 396,
-  "released": "2026-10-05",
-  "changelog": "v396: the I-1 identity flags reach the package's one CLI door. v387 added `--handle`, `--clear-handle`, `--retract-alias`, `--share-alias`/`--with`, `--located-in`, `--fold-into` (and `--focus`) to `entity_verdict.py`'s own parser only, so `lifehug.py entity-verdict … --handle aj` exited 2 `unrecognized arguments`; the flags are now ONE definition (`entity_verdict.add_identity_flags`) called by both parsers, `cmd_entity_verdict` forwards them, and a door test plus a two-parser option-set guard keep a later flag from reaching only one door.",
+  "version": 397,
+  "released": "2026-10-06",
+  "changelog": "v397: letters in the vault, PR 1 (lifehug#471). `lifehug.py documents file <letters-repo> --all|--ids … --commit <sha>` files every finished transcript from a letters repository (read through git at that commit; the repo is never written) as an immutable `type: letter` record under `sources/letters/<collection>/<slug>.md`: the transcript body byte for byte plus its own YAML header verbatim as a trailing section, and new frontmatter fields `written_date` (EDTF), `written_date_precision`, `written_date_evidence`, `author_label`, `recipient_label`, `author_refs`, `recipient_refs`, `subject_refs`, `document_type`, `collection`, `origin{repo,id,commit,source_file,source_pages,scan_blob,scan_url,transcript_blob}` and, on a refile, `supersedes`/`supersedes_path`. `captured_at` is the date written, never the filing date; `authority` is `first_person_record` for the owner's own letters and `third_party_record` otherwise; every record is `sensitivity: family`. People resolve through the repo's `people.yaml` regex aliases (collection-scoped ones included, a port of the letters site's resolver) to vault refs via `--map ID=REF`, remembered in `state/documents/letters.json`. Re-running on the same commit writes nothing; a transcript changed at a new commit gets a superseding record. The manifest carries the letter fields, `source-lint` checks each record still rebuilds its transcript (`letter_record_invalid`, `letter_manifest_mismatch`, `letter_supersedes_missing`) and `--fix` never rewrites one, Source Integrity lists letters under their own type (one table per collection: written, writer, recipient), and the v120 reader shows the letter fields, a scan link and the header collapsed. Filing is Loop-adjacent and inert for now: no question candidates, conversation turns or classifications, and letters are held out of classification, compile and resolver retrieval (`CLASSIFICATION_DEFERRED_TYPES`, `COMPILE_DEFERRED_TYPES`, `RETRIEVAL_DEFERRED_TYPES`) until PRs 2 and 4. New dependency-free `system/mini_yaml.py` reads the letters YAML. The Sources view reads the manifest once per listing instead of once per row (57s to 1.4s on a 4,300-source vault).",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -672,6 +672,19 @@
     "tests/test_v394_focus_complete.py",
     "docs/adr/0044-a-focus-at-100-is-a-milestone.md",
     "tests/test_v395_focus_complete_cli_help.py",
-    "tests/test_v396_entity_verdict_door.py"
+    "tests/test_v396_entity_verdict_door.py",
+    "system/documents.py",
+    "system/mini_yaml.py",
+    "tests/test_documents.py",
+    "tests/fixtures/letters_repo/letters/people.yaml",
+    "tests/fixtures/letters_repo/letters/old-box/dad-to-sam/transcript.md",
+    "tests/fixtures/letters_repo/letters/pat-mission/dad-letter/transcript.md",
+    "tests/fixtures/letters_repo/letters/pat-mission/newsletter/transcript.md",
+    "tests/fixtures/letters_repo/letters/pat-mission/newsletter-002/transcript.md",
+    "tests/fixtures/letters_repo/letters/pat-mission/pat-to-home/transcript.md",
+    "tests/fixtures/letters_repo/source/2001/DAD.pdf",
+    "tests/fixtures/letters_repo/source/2001/NEWSLETTER.pdf",
+    "tests/fixtures/letters_repo/source/2001/PAT HOME.pdf",
+    "tests/fixtures/letters_repo/source/OLD BOX/DAD TO SAM.pdf"
   ]
 }
