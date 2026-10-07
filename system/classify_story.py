@@ -75,6 +75,7 @@ from lifehug_core import (
     write_text,
 )
 from question_judgment import build_decision_context, load_judgment_rubric, owner_judgment_signals_block
+from source_integrity import LETTER_TYPE
 from vault_paths import atomic_write_vault_text, read_vault_text
 
 # ── constants ─────────────────────────────────────────────────────────────────
@@ -454,13 +455,29 @@ def classify_target_for(path: Path) -> Path | None:
     return None
 
 
+#: Source types filed into the vault but not yet classification targets.
+#: A `letter` record (lifehug#471 PR 1) is filed now and classified only once
+#: the classifier reads its `written_date` and `author_refs` (PR 2): a 1974
+#: letter classified as if its writer were the owner, dated by nothing, would
+#: mint the owner's moments and question candidates out of someone else's
+#: life. Lifting the deferral is that PR's one-line change here.
+CLASSIFICATION_DEFERRED_TYPES = frozenset({LETTER_TYPE})
+
+
+def is_classification_deferred(path: Path) -> bool:
+    """Is this source filed but deliberately not (yet) a classification target?"""
+    return str(_frontmatter_of(path).get("type", "")).strip() in CLASSIFICATION_DEFERRED_TYPES
+
+
 def all_source_files() -> list[Path]:
     """Return all classifiable source and answer files across the repo.
 
     Correction documents are excluded (v237): a correction is filed ABOUT a
     source, so classifying it would mint people/places/events out of an
     erratum and leave the corrected source's own stale classification
-    standing. `classify_target_for` is how a correction reaches the batch."""
+    standing. `classify_target_for` is how a correction reaches the batch.
+    Deferred record types (:data:`CLASSIFICATION_DEFERRED_TYPES`) are excluded
+    too."""
     files: list[Path] = []
     for directory in (SOURCES_DIR, ANSWERS_DIR):
         if directory.exists():
@@ -468,6 +485,7 @@ def all_source_files() -> list[Path]:
                 p for p in directory.rglob("*.md")
                 if not p.name.startswith(".")
                 and not is_correction_document(p)
+                and not is_classification_deferred(p)
             )
     return sorted(files)
 
@@ -2095,6 +2113,11 @@ def _safe_source_path(value: object) -> Path:
         raise ClassificationPreparationError(
             "correction documents are not classification targets",
             code="source_is_correction",
+        )
+    if is_classification_deferred(resolved):
+        raise ClassificationPreparationError(
+            "letter records are not classification targets yet (lifehug#471 PR 2)",
+            code="source_classification_deferred",
         )
     return REPO_DIR / relative
 

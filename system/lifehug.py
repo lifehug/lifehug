@@ -197,6 +197,11 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # single-file bank mutation, the same family as candidates-promote.
     "question-retire",
     "ingest", "ingest-story",
+    # documents (lifehug#471 PR 1): `documents file` writes immutable letter
+    # records under sources/letters/ and registers them in the manifest.
+    # --dry-run writes nothing but the command is classified BY NAME, the
+    # focus-autopilot / era-migrate convention.
+    "documents",
     # decisions-feed-the-loop (ADR 0009): the weekly RUBRIC-EDIT runtime
     # writes state/question_judgment/learned.md and last_edit.json directly
     # (--dry-run/--emit-task never write) — same family as quality-update.
@@ -3373,6 +3378,25 @@ def cmd_unretract(args: argparse.Namespace) -> int:
     return run_python("source_integrity.py", flags)
 
 
+def cmd_documents(args: argparse.Namespace) -> int:
+    flags = [args.documents_action, args.repo, "--commit", args.commit]
+    if args.all:
+        flags.append("--all")
+    if args.ids:
+        flags.extend(["--ids", *args.ids])
+    for value in args.map or []:
+        flags.extend(["--map", value])
+    if args.scan_url_template:
+        flags.extend(["--scan-url-template", args.scan_url_template])
+    if args.repo_name:
+        flags.extend(["--repo-name", args.repo_name])
+    if args.dry_run:
+        flags.append("--dry-run")
+    if args.json:
+        flags.append("--json")
+    return run_python("documents.py", flags)
+
+
 def cmd_connector_auth(args: argparse.Namespace) -> int:
     return run_python("connector.py", ["auth", args.connector])
 
@@ -4196,6 +4220,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-candidates", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_ingest)
+
+    # --- Documents (lifehug#471): letters filed as immutable records ---
+    p = sub.add_parser("documents", help="File documents (letters) into the vault as immutable records")
+    documents_sub = p.add_subparsers(dest="documents_action", required=True)
+    dp = documents_sub.add_parser(
+        "file", help="File letter transcripts from a letters repo at a pinned commit into sources/letters/")
+    dp.add_argument("repo", help="Path to the letters repository (read through git; never written)")
+    pick = dp.add_mutually_exclusive_group(required=True)
+    pick.add_argument("--all", action="store_true", help="Every transcript at the commit")
+    pick.add_argument("--ids", nargs="+", metavar="ID", help="Letter ids (<collection>/<slug>)")
+    dp.add_argument("--commit", required=True, help="Commit of the letters repository to file from")
+    dp.add_argument("--map", action="append", metavar="ID=REF",
+                    help="Map a people.yaml id to a vault ref (self, person/<slug>); repeatable; remembered")
+    dp.add_argument("--scan-url-template", default=None,
+                    help="Scan URL with {id}/{collection}/{slug}; remembered in state/documents/letters.json")
+    dp.add_argument("--repo-name", default=None, help="origin.repo (default: from the origin remote)")
+    dp.add_argument("--dry-run", action="store_true", help="Report what would be filed; write nothing")
+    dp.add_argument("--json", action="store_true", help="Machine-readable counts")
+    p.set_defaults(func=cmd_documents)
 
     # --- Connectors (calibrated external-evidence ingestion, v106) ---
     p = sub.add_parser("connector-auth", help="One-time OAuth consent for a connector (gmail.readonly only)")

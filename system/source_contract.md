@@ -66,6 +66,35 @@ Exact-byte replay is idempotent; different bytes/revisions/paths conflict, and
 crash adoption comes from the source marker plus canonical Git history rather
 than the source manifest or another projection (ADR 0020).
 
+## Letter Records
+
+A finished transcript from a letters repository is filed once as an immutable
+`type: letter` source under `sources/letters/<collection>/<slug>.md` by
+`lifehug.py documents file` (lifehug#471). It is a record, never a memory:
+`source_trust: external_record` and `authority: third_party_record`, or
+`first_person_record` when the owner wrote it; `sensitivity: family`;
+`captured_at` is when it was WRITTEN (midnight UTC for a day-precise date, the
+EDTF string for a month or year, empty when undated), never when it was filed.
+The frontmatter also carries `written_date` (EDTF), `written_date_precision`,
+`written_date_evidence`, `author_label` / `recipient_label` (the transcript's
+own from/to), `author_refs` / `recipient_refs` / `subject_refs` (`self` or
+`person/<slug>`), `document_type`, `collection`, and `origin` (`repo`, `id`,
+`commit`, `source_file`, `source_pages`, `scan_blob`, `scan_url`,
+`transcript_blob`). Scans are referenced by blob and URL, never copied.
+
+The body is the transcript body byte for byte, followed by one trailing
+section holding the transcript's own YAML header verbatim, so the original file
+can be rebuilt exactly; `source-lint` checks that it still does
+(`letter_record_invalid`) and `--fix` never rewrites a record. A transcript
+revised in the letters repository is refiled as a NEW record with
+`supersedes: letters:<id>@<old commit>`; the old record stays.
+
+Filing is Loop-adjacent. Until the classifier reads a record's writer and
+written date, and the compiler has a capped records lane, letter records are
+listed and readable but are not classification targets, compile sources, or
+resolver evidence (`CLASSIFICATION_DEFERRED_TYPES`, `COMPILE_DEFERRED_TYPES`,
+`RETRIEVAL_DEFERRED_TYPES`).
+
 ## Artifact Sources
 
 Drafting happens under `outputs/<artifact>/`. When an artifact is final enough

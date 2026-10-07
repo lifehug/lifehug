@@ -67,6 +67,7 @@ import chronology as chrono  # noqa: E402
 import temporal_claims as tc  # noqa: E402
 import temporal_store as store  # noqa: E402
 from lifehug_core import load_how_words_arrive, split_frontmatter  # noqa: E402
+from source_integrity import LETTER_TYPE  # noqa: E402
 from temporal_claims import collapsed_text  # noqa: E402
 from vault_paths import atomic_write_vault_text  # noqa: E402
 
@@ -209,6 +210,14 @@ def _digest(value: object) -> str:
     ).hexdigest()
 
 
+#: Filed record types the resolver does not retrieve yet. A letter record
+#: (lifehug#471 PR 1) is someone else's words, dated by when it was written;
+#: until a record's claims carry `document` basis and its writer as subject
+#: (PR 2), a passage from a 1974 letter must not be offered as evidence for
+#: the owner's own moments.
+RETRIEVAL_DEFERRED_TYPES = frozenset({LETTER_TYPE})
+
+
 def story_documents(root: Path) -> list[dict]:
     """Every narrative file as passages: ``{doc_id, kind, path, title, text}``."""
     docs: list[dict] = []
@@ -221,6 +230,8 @@ def story_documents(root: Path) -> list[dict]:
             if rel.startswith("sources/corrections/temporal-"):
                 continue
             metadata, body = split_frontmatter(_read(path))
+            if str(metadata.get("type") or "") in RETRIEVAL_DEFERRED_TYPES:
+                continue
             title = str(metadata.get("title") or metadata.get("question_text") or path.stem)
             body = body.strip()
             if not body:

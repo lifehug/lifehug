@@ -630,6 +630,44 @@ python3 system/lifehug.py connector-audit gmail                # promoted source
 
 Hard rules: `gmail.readonly` scope only (token gitignored at `state/connectors/gmail_token.json`); bodies are fetched ONLY for threads being promoted or calibration-sampled; promoted threads become immutable `sources/gmail/YYYY-MM-DD-<slug>.md` records (`type`/`source_trust: external_record`, `authority: third_party_record` — corroborating record, never first-person memory), idempotent by message id, capped per run, registered via `source_integrity`. Institutional mail yields `state/connectors/gmail_date_evidence.json`; unknown correspondents/threads/institutions mine into `state/question_candidates.json` (provenance `connector-mined`). The promote threshold and axis weights are the owner's one-time, versioned decision (`state/connectors/weights.json`, via `connector-calibrate`). `weights.json` also accepts `vip_correspondents` (email → label) + `vip_bonus` (v107): declared VIPs pin `relationship_signal` to 1.0, lift the thread total, are never mined as unknown, and become page candidates when the wiki lacks them — declare family once, every excavation honors it. AI correspondent dossiers (v108) extend this: `connector-dossier gmail [--limit N] [--redossier] [--dry-run]` samples 2–3 high-density threads per top unclassified correspondent, persists one classification verdict each to `state/connectors/gmail_dossiers.json`, and excavate runs the pass before scoring so `family` verdicts ≥ the confidence floor auto-apply as VIPs (declared VIPs win conflicts; `vip_blocklist` vetoes; bodies cache committed under `state/connectors/gmail_body_cache/`). Suppress a bad promotion with the existing `retract-source` flow; never edit or delete the source. Date evidence pays off on the timeline (v110, calibrated v111): periods and moments matching an evidence entity (roster name/slug/alias token-subset, or the moment's description) show a `✉ entity ×count · span` corroboration badge windowed to the moment's own year or the period's stated range, and tight-clustered records contradicting the story's own dates (email says 2003, the answer says 2004) surface as `date_contradiction` timeline gaps plus `connector-mined` question candidates appended by `connector-excavate` — surfaced for the owner to answer, never auto-applied.
 
+### Letters and documents (v397, lifehug#471)
+
+A letters repository (scan → transcribe → review → answer pass; the owner's
+workshop, never written to by Lifehug) is filed into the vault as immutable
+**letter records**, one per finished transcript, read through `git` at a
+pinned commit:
+
+```bash
+python3 system/lifehug.py documents file <letters-repo> --all --commit <sha> --dry-run
+python3 system/lifehug.py documents file <letters-repo> --all --commit <sha> \
+    --map <owner-id>=self --map <dad-id>=person/dad \
+    --scan-url-template 'https://<site>/letters/{id}/scan.pdf'
+python3 system/lifehug.py documents file <letters-repo> --ids <collection>/<slug> --commit <sha>
+git add sources/letters state/documents state/source_manifest.json && git commit -m "File letters @ <sha>"
+```
+
+- Each record lands at `sources/letters/<collection>/<slug>.md`: the transcript
+  body byte for byte plus its own YAML header verbatim as a trailing section;
+  writer/recipient/about as refs (`self`, `person/<slug>`) resolved through the
+  repo's `letters/people.yaml` aliases (collection-scoped ones included);
+  `captured_at` is the date WRITTEN; `authority: first_person_record` for the
+  owner's own letters, `third_party_record` otherwise; `sensitivity: family`.
+  Full field list: `system/source_contract.md` § Letter Records.
+- `--map ID=REF` says which people.yaml id is which vault person (unmapped ids
+  become `person/<id>`); the map and the scan URL template are remembered in
+  `state/documents/letters.json` (user data), so a later refile needs neither.
+- Re-running on the same commit writes nothing. A transcript changed at a new
+  commit gets a superseding record (`<slug>--<commit12>.md`, `supersedes:
+  letters:<id>@<old commit>`); the old one stays. Uncommitted edits in the
+  letters repo are never filed.
+- **Loop-adjacent, and deliberately inert for now:** filing creates no question
+  candidates, conversation turns or classifications, and letter records are not
+  yet classification targets, compile sources or resolver evidence (lifehug#471
+  PRs 2 and 4 open those doors, dated and capped). They show in Source
+  Integrity (`/views/sources`) under their own `letter` type, one table per
+  collection with writer, recipient and written date, and the v120 reader shows
+  the letter fields, a scan link, and the transcript header collapsed.
+
 ### Opinions & Essays (v95)
 
 An **opinion** is the author's stated position — a lens on life, a philosophical
@@ -1652,12 +1690,12 @@ Lifehug tracks its version in `system/version.json`. Framework files (listed the
 
 **Framework files** (updated automatically):
 - `CLAUDE.md`, `system/ai_provider.py`, `system/answer_ack.py`, `system/answer_ack_delivery.py`, `system/ask.py`,
-  `system/conversation.py`, `system/conversation_delivery.py`, `system/conversation_lints.py`, `system/eval_gates.py`, `system/interaction_registry.py`, `system/question_candidate.py`, `system/question_candidate_evals.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/jobs.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+  `system/conversation.py`, `system/conversation_delivery.py`, `system/conversation_lints.py`, `system/eval_gates.py`, `system/interaction_registry.py`, `system/question_candidate.py`, `system/question_candidate_evals.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/jobs.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/documents.py`, `system/mini_yaml.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/post.md`, `templates/chapter.md`
 - `skills/artifact/SKILL.md`, `skills/focus/SKILL.md`, `skills/compile/SKILL.md`
 
 **User data** (never touched):
-- `README.md`, `profile.yaml` (committed identity/prefs), `config.yaml` (gitignored secrets/overrides), `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
+- `README.md`, `profile.yaml` (committed identity/prefs), `config.yaml` (gitignored secrets/overrides), `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`, `state/documents/letters.json`
 - `answers/`, `outputs/`, `sources/`
 - `state/answer_acknowledgments.json`, `state/conversation_deliveries.json`, `state/question_candidates.json`, `state/question_queue.json`, `state/planner_state.json`, `state/source_manifest.json`, `state/source_lint_findings.json`, `state/timeline_placements.json`
 

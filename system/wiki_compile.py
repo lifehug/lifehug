@@ -26,6 +26,7 @@ from pathlib import Path
 
 from ai_provider import call_ai, failure_metadata
 from entity_roster import load_roster
+from source_integrity import LETTER_TYPE
 from lifehug_core import (
     ANSWERS_DIR,
     CLASSIFICATIONS_DIR,
@@ -181,6 +182,14 @@ def should_preserve_existing(existing_text: str, new_synthesized: bool) -> bool:
     return page_is_synthesized(existing_text)
 
 
+#: Filed record types the compiler does not read yet. A letter record
+#: (lifehug#471 PR 1) is filed, listed and readable, but matched by keyword
+#: alone it would crowd answers out of the 14-source synthesis window on
+#: dozens of pages ("Mom" in "moment", a 1974 mission letter on the
+#: Switzerland page). PR 4's capped, date-aware records lane lifts this.
+COMPILE_DEFERRED_TYPES = frozenset({LETTER_TYPE})
+
+
 def read_manual_sources() -> dict[str, dict]:
     sources = {}
     if not SOURCES_DIR.exists():
@@ -200,6 +209,8 @@ def read_manual_sources() -> dict[str, dict]:
         source_id = frontmatter_value(text, "source_id", f"source:{path.stem}")
         kind = frontmatter_value(text, "type", "manual_source")
         if candidate_path and kind != "candidate_research":
+            continue
+        if str(metadata.get("type") or "") in COMPILE_DEFERRED_TYPES:
             continue
         validated_candidate = None
         if kind == "candidate_research":
