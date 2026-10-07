@@ -116,7 +116,14 @@ READ_ONLY_COMMANDS = frozenset({
     "followups-prompt", "followups-status", "interview-pack", "next", "notify",
     "focus-candidate-evals", "focus-candidate-prompt", "entity-candidate-evals", "entity-candidate-prompt",
     "planner-report", "progress", "quality-stats", "question-candidate-evals",
-    "question-candidate-prompt", "roadmap", "serve",
+    "question-candidate-prompt", "roadmap",
+    # intake (v398, #469): an orchestrator like `serve`. It writes only its own
+    # gitignored `state/intake/<id>/` record; every vault mutation is a child
+    # lifehug.py command that is classified (and locked or queued) on its
+    # own, and its commit takes the writer lease itself for just that step.
+    # Holding the lease for the whole intake would hold it across a
+    # terminal y/n and stall the daily question behind a person thinking.
+    "intake", "serve",
     "source-findings", "source-scan", "status", "weekly-summary",
     # Issue #117: routing reads rotation + session state and makes a model
     # call, but mutates nothing durable (test_route_mutates_nothing pins
@@ -566,6 +573,11 @@ def cmd_reflect_source(args: argparse.Namespace) -> int:
     return run_python("source_integrity.py", flags)
 
 
+def cmd_intake(args: argparse.Namespace) -> int:
+    """`intake` — one door, intake.py's own argv (lifehug#469, v398)."""
+    return run_python("intake.py", list(args.intake_args or []))
+
+
 def cmd_ingest_story(args: argparse.Namespace) -> int:
     flags = ["--source", args.source]
     if args.title:
@@ -574,6 +586,8 @@ def cmd_ingest_story(args: argparse.Namespace) -> int:
         flags.extend(["--captured-at", args.captured_at])
     if getattr(args, "witness", None):
         flags.extend(["--witness", args.witness])
+    if getattr(args, "record", None):
+        flags.extend(["--record", args.record])
     if getattr(args, "sensitivity", None):
         flags.extend(["--sensitivity", args.sensitivity])
     if getattr(args, "kind", None) and args.kind != "story":
@@ -3893,11 +3907,30 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-candidates", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--witness", default=None, metavar="PERSON", help="This is another person's account (second voice), e.g. --witness Mom")
+    p.add_argument("--record", default=None, metavar="REF",
+                   help="This is a third-party DOCUMENT (a letter, an itinerary), filed as an "
+                        "external_record with authority third_party_record; REF names it (v398)")
     p.add_argument("--sensitivity", default=None, choices=["private", "family", "friends", "public"])
     p.add_argument("--kind", default="story", choices=["story", "opinion"],
                    help="Content kind: opinion = the author's stated position/lens; gets Socratic follow-ups and can seed an essay artifact")
     p.add_argument("--commit", action="store_true", help="Git commit and push after ingesting")
     p.set_defaults(func=cmd_ingest_story)
+
+    # intake (lifehug#469, v398): the terminal front door — capture, read,
+    # ask, file, classify, compile, push, report — as one verb with phase
+    # lines. Everything after the verb is intake.py's own parser; this door
+    # only hands the argv through, so the two cannot drift.
+    p = sub.add_parser(
+        "intake",
+        help="Here is evidence: file a story, a witness account or a third-party "
+             "record, read it for landmarks, ask before revising one, then "
+             "classify, compile and push (start | continue | status | list)",
+    )
+    p.add_argument("intake_args", nargs=argparse.REMAINDER,
+                   help="start --story|--witness NAME|--record REF [--plan] [--yes] … | "
+                        "continue <id> [--completions F] [--response F] [--units a,b|--all-new|--none] | "
+                        "status <id> | list")
+    p.set_defaults(func=cmd_intake)
 
     def add_candidate_filters(candidate_parser: argparse.ArgumentParser) -> None:
         candidate_parser.add_argument("--status", choices=CANDIDATE_STATUS_CHOICES)

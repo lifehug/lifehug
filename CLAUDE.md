@@ -612,6 +612,45 @@ This writes an owner-only source file under `sources/manual/` and stores initial
 
 Unprompted stories follow the same source contract as answers: they are raw source-of-truth files. Later corrections and changed perspective belong in `sources/corrections/`, not by rewriting the original story.
 
+### Intake: here is evidence (v398, lifehug#469)
+
+A story is the owner talking; **intake is "here is evidence."** When the user
+hands over a letter, another person's account, a document, or a proposal file
+derived from one — anything that may raise the confidence of a landmark or
+cornerstone — run the **intake** skill (`skills/intake/SKILL.md`) rather than
+`ingest-story` alone. One verb runs the eight phases that were eight
+commands and prints one line per phase:
+
+```bash
+printf '%s\n' "$TEXT" | python3 system/lifehug.py intake start --witness "Dad" --title "Dad's letter of 7 June 2002"
+python3 system/lifehug.py intake start --record family-letters:dave-mission-2001/travel-itinerary --file letter.md
+python3 system/lifehug.py intake start --story --plan < story.md          # read and ask; file nothing
+python3 system/lifehug.py intake continue <id> --units <a,b> | --all-new | --none
+python3 system/lifehug.py intake list / status <id>
+```
+
+`--witness NAME` files a `witness_account` whose dates are `relative`
+evidence; `--record REF` files an `external_record` (`authority:
+third_party_record`, the Gmail connector's contract, now a general verb on
+`ingest-story --record`) whose dates are `document` evidence; `--story` is the
+owner's own words. Phases: preflight (pull, `ai-status`, start the viewer on
+8765 if closed) → filing (`ingest-story`) → reading (Add Landmark's host-run
+protocol over the same text with the declared evidence) → **asking** (one card
+per unit: `[new]`, `[revision]` with current → proposed and which would be
+shown, `[conflict]`; duplicates one line) → landmarks (`landmark-offer --apply`
+on the units the owner named; the receipt and the `--retract` undo print) →
+classifying (`classify-story --prompt`/`--from-response`) → compiling
+(`compile --emit-tasks` scoped to the pages this source touched, cap 6, then
+`compile --no-ai`, model-free; other pages wait for the next compile) → pushing (tracked vault paths, one rebase retry; Lifehug Cloud
+converges at its next touch) → report (source page, timeline, pages, receipt,
+undo). Keyless, it is a state machine: it stops at each model step, prints
+the file to write and the exact `continue` command, and `state/intake/<id>/`
+(gitignored) holds where it stands. **A revision or a conflict is never
+filed without the owner's yes, even under `--yes`**, which files only what the
+ask would have shown as new. Never use `landmark-record` by label for a
+revision — the offer road is interval-aware and two stays at one address stay
+two.
+
 ### External Evidence Connectors (v106 — Gmail first)
 
 Connectors ingest external archives as **selective evidence and discovery**, never bulk import. The invariant: **the ledger is permanent; relevance is recomputed.** `connector-fetch` appends metadata-only lines (no bodies) to `state/connectors/gmail_ledger.jsonl`; `connector-excavate` re-scores the ENTIRE ledger against the current wiki/rosters/sources and delta-promotes. A thread sub-threshold today promotes on a later run once its correspondent gains a roster/wiki entry — without any re-fetch. This is a rare excavation (quarterly/yearly), not a sync service, and it is loop-adjacent: manual, owner-triggered, outside the daily/weekly/monthly rhythms.
