@@ -555,6 +555,49 @@ def _restate(record: object, *, stated: bool, hedged: bool,
     return payload
 
 
+def evidence_provenance(evidence: object, *, source: object = None,
+                        quote: object = None) -> dict:
+    """The ONE provenance entry an evidenced bound carries (lifehug#469).
+
+    ``{"basis": <evidence>, "source": <evidence_source>, "claim": <quote>}`` —
+    the same shape `chronology.witness_provenance` mints for a relative, so
+    `chronology.claim_score` counts the source toward consilience and
+    `chronology.display_date` renders where the date came from. ``source`` is
+    the vault source id or witness ref the caller named; absent, the entry
+    still says the basis and the words.
+    """
+    text = (quote or {}).get("text") if isinstance(quote, dict) else quote
+    entry = {"basis": str(evidence)}
+    if collapsed_text(source):
+        entry["source"] = collapsed_text(source)
+    if collapsed_text(text):
+        entry["claim"] = collapsed_text(text)
+    return entry
+
+
+def _evidenced(payload: dict, *, evidence: object, source: object,
+               quote: object) -> dict:
+    """A stated bound, re-based on the DECLARED evidence (lifehug#469).
+
+    Runs only after :func:`_restate` said the text carries the bound, so the
+    bytes test is untouched: this changes what KIND of evidence dated it,
+    never whether it was dated. Confidence stays what the words earned
+    (``certain`` or, hedged, ``approximate``).
+    """
+    if evidence not in EVIDENCE_BASES:
+        raise LandmarkOfferError(
+            "unsupported_input",
+            f"evidence must be one of {', '.join(EVIDENCE_BASES)}, not {evidence!r}")
+    stamped = dict(payload)
+    stamped["basis"] = str(evidence)
+    provenance = [dict(item) for item in (stamped.get("provenance") or ())]
+    entry = evidence_provenance(evidence, source=source, quote=quote)
+    if entry not in provenance:
+        provenance.append(entry)
+    stamped["provenance"] = provenance
+    return stamped
+
+
 def _bounds_of(record: dict) -> list[tuple[str, object]]:
     """``[(path, value)]`` for every date bound a landmark record carries."""
     rows: list[tuple[str, object]] = []
@@ -625,10 +668,24 @@ DATE_KEYS = ("start", "end", "precision", "basis", "confidence", "estimated",
 #: `chronology.BASES`: a bound's basis is `stated` or `anchor` and lives on
 #: the record, and this is the summary a person reads — "you said it", "it was
 #: read from something else", "nothing was read".
-UNIT_BASES = ("stated", "inferred", "none")
+UNIT_BASES = ("stated", "inferred", "none", "relative", "document")
+
+#: The two EVIDENCE bases an offer may declare for the whole submission
+#: (lifehug#469). `chronology.BASES` already carries both — `document` (a
+#: printed date read off paper, weight 7.0) and `relative` (somebody else
+#: relaying it, 5.5) — but the offer road could not say them: its
+#: stated-versus-inferred decision is a BYTES test (:func:`date_evidence`),
+#: and a letter quote carries its own years, so an itinerary's date filed as
+#: something the person stated. Declared once per submission, never read off
+#: a completion, and applied AFTER the bytes test: a bound the text does not
+#: carry is still dropped, whatever the evidence says. `photo` is deliberately
+#: absent — a photo dates a window, and this road reads text.
+EVIDENCE_BASES = ("relative", "document")
 
 
-def rebase_record(record: dict, quote: object, source_text: str) -> tuple[dict, dict]:
+def rebase_record(record: dict, quote: object, source_text: str, *,
+                  evidence: object = None,
+                  evidence_source: object = None) -> tuple[dict, dict]:
     """``(record, dates)`` — the filed record, and the unit's own date block.
 
     Every bound is re-based by :func:`date_evidence`. A bound the person's own
@@ -637,6 +694,13 @@ def rebase_record(record: dict, quote: object, source_text: str) -> tuple[dict, 
     confident-looking inference, which is the v290 defect this reverses (D5).
     A record left with no bounds at all summarises ``basis: "none"``, which
     renders "no date read" and earns the domain's own question.
+
+    ``evidence`` (lifehug#469) is one of :data:`EVIDENCE_BASES`, declared by
+    the caller for the WHOLE submission. It changes nothing about which bounds
+    survive — the bytes test runs first and unchanged — and re-stamps every
+    survivor with that basis plus one provenance entry naming
+    ``evidence_source`` and the quotation, so a date read off a letter is
+    filed as a letter's date and `chronology.reconcile` weighs it as one.
     """
     filed = json.loads(json.dumps(record))
     hedged = _hedged(quote)
@@ -652,9 +716,17 @@ def rebase_record(record: dict, quote: object, source_text: str) -> tuple[dict, 
             _drop_bound(filed, path)
             dropped.append(path)
             continue
+        if evidence:
+            restated = _evidenced(restated, evidence=evidence,
+                                  source=evidence_source, quote=quote)
         _set_bound(filed, path, restated)
     summary = _date_summary(filed)
-    summary["basis"] = "stated" if _bounds_of(filed) else "none"
+    if not _bounds_of(filed):
+        summary["basis"] = "none"
+    elif evidence:
+        summary["basis"] = str(evidence)
+    else:
+        summary["basis"] = "stated"
     if summary["basis"] == "none":
         summary["confidence"] = None
     summary["inherited_from"] = None
@@ -791,7 +863,8 @@ def derive_story_id(*, offset: object, length: object, quote: object) -> str:
     return f"{STORY_ID_PREFIX}:{_digest(payload)}"
 
 
-def derive_proposal_id(text: object, generation: object) -> str:
+def derive_proposal_id(text: object, generation: object, *,
+                       evidence: object = None) -> str:
     """The proposal's identity: the submitted text, against the vault
     generation it was read against.
 
@@ -800,11 +873,27 @@ def derive_proposal_id(text: object, generation: object) -> str:
     saw are different, so the duplicates and conflicts it reports are
     different — and pretending otherwise would hand somebody yesterday's
     proposal for today's vault.
+
+    ``evidence`` (lifehug#469) joins the payload ONLY when one was declared:
+    the same letter offered as a document and as the person's own words are
+    two readings with two sets of bases, and an undeclared offer keeps the
+    exact id it always had.
     """
     payload = {"text": store.normalize_payload(str(text or "")),
                "generation": int(generation or 0),
                "reading_revision": PROPOSAL_READING_REVISION}
+    if collapsed_text(evidence):
+        payload["evidence"] = collapsed_text(evidence)
     return f"{PROPOSAL_ID_PREFIX}:{_digest(payload)}"
+
+
+def proposal_evidence_basis(proposal: object) -> str | None:
+    """The evidence basis a written proposal declared, or None."""
+    row = proposal if isinstance(proposal, dict) else {}
+    evidence = row.get("evidence")
+    if isinstance(evidence, dict):
+        return collapsed_text(evidence.get("basis")) or None
+    return None
 
 
 def proposal_reading_rank(proposal: object) -> tuple[int, int]:
@@ -851,7 +940,8 @@ def proposal_matches_current_reading(proposal: object, text: object, *,
             and proposal.get("state") in PROPOSAL_STATES
             and (generation is None or rank[0] == generation)
             and proposal.get("source_text") == str(text or "")
-            and proposal.get("proposal_id") == derive_proposal_id(text, rank[0]))
+            and proposal.get("proposal_id") == derive_proposal_id(
+                text, rank[0], evidence=proposal_evidence_basis(proposal)))
 
 
 def is_current_proposal(proposal: object, text: object, *,
@@ -913,8 +1003,11 @@ def _subject_of(record: dict, domain: str) -> str:
 
 def _unit(*, domain: str, record: dict, subject: str, quote: object,
           source_text: str, extractor: str, within: object = None,
-          names: object = None, name_evidence: object = None) -> dict:
-    filed, dates = rebase_record(record, quote, source_text)
+          names: object = None, name_evidence: object = None,
+          evidence: object = None, evidence_source: object = None) -> dict:
+    filed, dates = rebase_record(record, quote, source_text,
+                                 evidence=evidence,
+                                 evidence_source=evidence_source)
     kind = UNIT_KIND_BY_DOMAIN.get(domain, domain)
     return {
         "unit_id": derive_unit_id(domain=domain, kind=kind, subject=subject,
@@ -937,6 +1030,11 @@ def _unit(*, domain: str, record: dict, subject: str, quote: object,
         "name_evidence": dict(name_evidence or {}),
         "duplicates": [],
         "conflicts": [],
+        # lifehug#469: the SAME stay, already filed, whose bound this unit
+        # would change — the "this is new information" signal a terminal asks
+        # about. Additive; a host that does not read it sees a duplicate-free,
+        # conflict-free unit exactly as before.
+        "revises": [],
         "questions": [],
         "auto_file_eligible": False,
         "extractor": extractor,
@@ -956,8 +1054,8 @@ def _remint(unit: dict) -> dict:
 #: has one place to read the contract from.
 UNIT_KEYS = (
     "unit_id", "domain", "kind", "subject", "entity_candidates", "dates",
-    "quote", "within", "names", "name_evidence", "duplicates", "conflicts", "questions",
-    "auto_file_eligible", "extractor", "record",
+    "quote", "within", "names", "name_evidence", "duplicates", "conflicts",
+    "revises", "questions", "auto_file_eligible", "extractor", "record",
 )
 
 
@@ -983,6 +1081,15 @@ def annotate_against_known(unit: dict, landmarks: object) -> dict:
     * A **conflict** is a dated stretch that overlaps a DIFFERENT identity's
       by more than :data:`CONFLICT_OVERLAP_MONTHS`, or a record that
       contradicts a standing "that never happened".
+    * A **revision** (lifehug#469) is the same stay — same key, and
+      `same_landmark_stay` — carrying a bound the filed entry does not have
+      or does not agree with. Until v397 that read as a duplicate ("filing
+      adds nothing"), which was wrong for a date refinement: the merge road
+      would reconcile the two claims correctly, but nothing told anybody to
+      ask. Each row names the bound, what is filed now, what this unit says,
+      and which of the two `chronology.reconcile` would hold as
+      best-supported — the loser is kept as an alternate, never deleted.
+      A unit with a revision is never `auto_file_eligible`.
     """
     domain = unit["domain"]
     try:
@@ -994,6 +1101,7 @@ def annotate_against_known(unit: dict, landmarks: object) -> dict:
     mine = li.entry_stay_interval(record)
     duplicates: list[str] = []
     conflicts: list[dict] = []
+    revises: list[dict] = []
     for existing in li.landmark_entries(landmarks, domain):
         existing_key = li.landmark_entry_key(existing, row)
         if li.is_none_entry(existing, row) and li.asserts_happened(record):
@@ -1005,7 +1113,12 @@ def annotate_against_known(unit: dict, landmarks: object) -> dict:
             continue
         if existing_key == key:
             if li.same_landmark_stay(existing, record, row):
-                duplicates.append(entry_id(domain, existing_key))
+                changed = bound_revisions(existing, record,
+                                          entry_id=entry_id(domain, existing_key))
+                if changed:
+                    revises.extend(changed)
+                else:
+                    duplicates.append(entry_id(domain, existing_key))
             continue
         theirs = li.entry_stay_interval(existing)
         if mine and theirs and chrono.overlap_months(mine, theirs) > \
@@ -1019,7 +1132,69 @@ def annotate_against_known(unit: dict, landmarks: object) -> dict:
     unit["duplicates"] = sorted(dict.fromkeys(duplicates))
     unit["conflicts"] = sorted(conflicts, key=lambda row_: (row_["kind"],
                                                             row_["entry_id"]))
+    unit["revises"] = sorted(revises, key=lambda row_: (row_["entry_id"],
+                                                        row_["bound"]))
     return unit
+
+
+#: The three bounds a landmark record can carry, as `revises[].bound` names
+#: them: a point landmark's ``date``, a stretch's ``start`` and ``end``.
+REVISION_BOUNDS = ("date", "start", "end")
+
+
+def _bound_brief(value: object) -> dict | None:
+    """``{best, earliest, latest, basis, confidence}`` for one bound, or None."""
+    parsed = chrono.from_dict(value)
+    if parsed is None:
+        return None
+    return {"best": parsed.best, "earliest": parsed.earliest,
+            "latest": parsed.latest, "basis": parsed.basis,
+            "confidence": parsed.confidence}
+
+
+def bound_revisions(existing: object, record: object, *,
+                    entry_id: str) -> list[dict]:
+    """The bounds on which ``record`` would change ``existing`` (lifehug#469).
+
+    One row per bound of :data:`REVISION_BOUNDS` the incoming record carries
+    that the filed entry either lacks (``current`` is None) or holds with a
+    different interval — compared by `chronology.claim_identity`'s interval,
+    never by basis or confidence, so the same date told again on firmer
+    evidence is corroboration (a duplicate) rather than a revision.
+    ``winner`` is which side `chronology.reconcile` holds as best-supported:
+    ``"proposed"`` when the incoming claim would take the entry's shown date,
+    ``"current"`` when it would file as an alternate beside the standing one.
+    Pure.
+    """
+    theirs_rows = dict(_bounds_of(existing if isinstance(existing, dict) else {}))
+    mine_rows = dict(_bounds_of(record if isinstance(record, dict) else {}))
+    rows: list[dict] = []
+    for bound in REVISION_BOUNDS:
+        path = bound if bound == "date" else f"span.{bound}"
+        mine = mine_rows.get(path)
+        if mine is None:
+            continue
+        theirs = theirs_rows.get(path)
+        mine_id = chrono.claim_identity(mine)
+        theirs_id = chrono.claim_identity(theirs) if theirs is not None else None
+        if mine_id is None:
+            continue
+        if theirs_id is not None and theirs_id[0] == mine_id[0]:
+            continue
+        if theirs is None:
+            winner = "proposed"
+        else:
+            best = chrono.reconcile([theirs, mine]).get("best_supported")
+            best_id = chrono.claim_identity(best) if best is not None else None
+            winner = "proposed" if best_id == mine_id else "current"
+        rows.append({
+            "entry_id": entry_id,
+            "bound": bound,
+            "current": _bound_brief(theirs),
+            "proposed": _bound_brief(mine),
+            "winner": winner,
+        })
+    return rows
 
 
 #: Which roster type a domain's subject is an entity of. Read from the
@@ -1283,6 +1458,7 @@ def _auto_file_eligible(unit: dict) -> bool:
     dates = unit.get("dates") or {}
     return bool(
         dates.get("basis") == "stated"
+        and not unit.get("revises")
         and dates.get("confidence") == "certain"
         and dates.get("start")
         and not unit.get("duplicates")
@@ -1536,7 +1712,9 @@ def build_groups(units: object, events: object, stories: object) -> list[dict]:
 
 
 def _units_from_reading(reading: object, source_text: str, *,
-                        framework_root: str | Path | None = None) -> tuple[list[dict], dict]:
+                        framework_root: str | Path | None = None,
+                        evidence: object = None,
+                        evidence_source: object = None) -> tuple[list[dict], dict]:
     """``(units, by_ref)`` — the reading's units, in text order, with R7's
     inheritance already applied.
 
@@ -1562,7 +1740,8 @@ def _units_from_reading(reading: object, source_text: str, *,
                          subject=read_unit.subject, quote=read_unit.quote,
                          source_text=source_text, extractor="reading",
                          within=(parent or {}).get("unit_id"),
-                         names=read_unit.names, name_evidence=read_unit.name_evidence)
+                         names=read_unit.names, name_evidence=read_unit.name_evidence,
+                         evidence=evidence, evidence_source=evidence_source)
             if parent is not None and unit["dates"].get("basis") == "none":
                 if inherit_dates(unit, parent, framework_root=framework_root):
                     _remint(unit)
@@ -1578,7 +1757,8 @@ def _units_from_reading(reading: object, source_text: str, *,
                 unit = _unit(domain=read_unit.domain, record=read_unit.record,
                              subject=read_unit.subject, quote=read_unit.quote,
                              source_text=source_text, extractor="reading",
-                             names=read_unit.names, name_evidence=read_unit.name_evidence)
+                             names=read_unit.names, name_evidence=read_unit.name_evidence,
+                             evidence=evidence, evidence_source=evidence_source)
                 by_ref[read_unit.ref] = unit
                 units.append(unit)
             break
@@ -1589,7 +1769,8 @@ def propose(text: str, vault_root: object = None, *, call,
             model: object = None, now: object = None,
             write: bool = True, landmarks: object = None,
             roster: object = None, generation: object = None,
-            framework_root: str | Path | None = None) -> dict:
+            framework_root: str | Path | None = None,
+            evidence: object = None, evidence_source: object = None) -> dict:
     """Read volunteered text; propose landmark units. Files NOTHING.
 
     **ONE reading (R6, R9).** ``call(prompt, model) -> str`` is injected
@@ -1611,17 +1792,33 @@ def propose(text: str, vault_root: object = None, *, call,
     makes the whole function pure over data the caller holds — which is how
     the eval harness replays recorded completions against fixed context
     without a vault at all.
+
+    ``evidence``/``evidence_source`` (lifehug#469) declare, for the WHOLE
+    submission, that its dates are a document's or a relative's rather than
+    the person's own — see :data:`EVIDENCE_BASES`. The reading prompt is
+    unchanged; the declaration is applied to every bound the bytes test kept
+    (:func:`rebase_record`), recorded on the proposal as ``evidence``, and
+    folded into the proposal's id.
     """
     body = str(text or "")
     if not body.strip():
         raise LandmarkOfferError("unsupported_input",
                                  "an offer needs some text")
+    evidence = collapsed_text(evidence) or None
+    if evidence is not None and evidence not in EVIDENCE_BASES:
+        raise LandmarkOfferError(
+            "unsupported_input",
+            f"evidence must be one of {', '.join(EVIDENCE_BASES)}, not {evidence!r}")
+    evidence_source = collapsed_text(evidence_source) or None
+    if evidence_source and not evidence:
+        raise LandmarkOfferError("unsupported_input",
+                                 "--evidence-source needs --evidence")
     supplied = (landmarks is not None and roster is not None
                 and generation is not None)
     root = None if (not write and supplied) else _bound_vault(vault_root)
     generation = (pub.published_generation(root) if generation is None
                   else int(generation))
-    proposal_id = derive_proposal_id(body, generation)
+    proposal_id = derive_proposal_id(body, generation, evidence=evidence)
     landmarks = _known_landmarks() if landmarks is None else landmarks
     roster = _roster_snapshot() if roster is None else roster
     stamp = normalized_timestamp(now, error=tc.TemporalContractError)
@@ -1646,7 +1843,9 @@ def propose(text: str, vault_root: object = None, *, call,
                        "detail": reading.findings[0]}
 
     units, by_ref = _units_from_reading(reading, body,
-                                        framework_root=framework_root)
+                                        framework_root=framework_root,
+                                        evidence=evidence,
+                                        evidence_source=evidence_source)
     for unit in units:
         annotate_against_known(unit, landmarks)
         annotate_entities(unit, roster)
@@ -1689,6 +1888,10 @@ def propose(text: str, vault_root: object = None, *, call,
         "state": state,
         "source_text": body,
         "source_digest": f"sha256:{store.payload_sha256(store.normalize_payload(body))}",
+        # lifehug#469: what kind of evidence the submission was declared to
+        # be, or None for the person's own words. Additive.
+        "evidence": ({"basis": evidence, "source": evidence_source}
+                     if evidence else None),
         "units": units,
         "events": events,
         "stories": stories,
@@ -2205,7 +2408,8 @@ def _apply_publication(vault_root: Path):
 
 
 def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
-          now: object = None, reason: object = None) -> dict:
+          now: object = None, reason: object = None,
+          evidence: object = None, evidence_source: object = None) -> dict:
     """File the units a person confirmed. Idempotent by ``(proposal, unit)``.
 
     Every unit goes through the SAME road a landmark ANSWER takes —
@@ -2238,6 +2442,7 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
 
     root = _bound_vault(vault_root)
     proposal = read_proposal(root, proposal_id)
+    _refuse_mismatched_evidence(proposal, evidence, evidence_source)
     by_id = {unit["unit_id"]: unit for unit in proposal.get("units") or ()
              if isinstance(unit, dict) and unit.get("unit_id")}
     wanted = [collapsed_text(value) for value in (unit_ids or ()) if value]
@@ -2372,6 +2577,10 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
             "stories": sum(len(row["stories"]) for row in slices),
         },
         "evidence_ref": text_ref.to_dict(),
+        # lifehug#469: the evidence basis the proposal declared, carried onto
+        # the act so a receipt says whose dates these were. Additive.
+        "evidence": proposal.get("evidence") if isinstance(
+            proposal.get("evidence"), dict) else None,
         "generation_before": pub._generation_of(before) if before else 0,  # noqa: SLF001
         "generation_after": pub._generation_of(after) if after else 0,  # noqa: SLF001
         "gain": gain,
@@ -2379,6 +2588,36 @@ def apply(proposal_id: str, unit_ids: object, vault_root: str | Path, *,
         "retired_opportunities": retired,
     }
     return _save_receipt(root, receipt)
+
+
+def _refuse_mismatched_evidence(proposal: dict, evidence: object,
+                                evidence_source: object) -> None:
+    """``--evidence`` on apply is a CHECK, never a change (lifehug#469).
+
+    The bases were fixed when the proposal was written — they are in every
+    unit's record and in the proposal id — so an apply that names a different
+    evidence basis or source is applying a proposal that does not exist. It is
+    refused rather than quietly re-stamped. Naming nothing on apply is the
+    ordinary case and always passes.
+    """
+    wanted = collapsed_text(evidence) or None
+    wanted_source = collapsed_text(evidence_source) or None
+    if wanted is None and wanted_source is None:
+        return
+    declared = proposal.get("evidence") if isinstance(
+        proposal.get("evidence"), dict) else {}
+    have = collapsed_text(declared.get("basis")) or None
+    have_source = collapsed_text(declared.get("source")) or None
+    if wanted is not None and wanted != have:
+        read_as = have or "the person's own words"
+        raise LandmarkOfferError(
+            "unsupported_input",
+            f"{proposal.get('proposal_id')} was read as {read_as}, not {wanted}")
+    if wanted_source is not None and wanted_source != have_source:
+        raise LandmarkOfferError(
+            "unsupported_input",
+            f"{proposal.get('proposal_id')} names evidence source "
+            f"{have_source or 'nothing'}, not {wanted_source}")
 
 
 def _save_receipt(vault_root: Path, receipt: dict) -> dict:
@@ -2720,6 +2959,20 @@ def lint_offer_proposal(proposal: object) -> list[dict]:
                                f"text does not"),
                 })
                 break
+        if dates.get("basis") in EVIDENCE_BASES:
+            for _path, bound in _bounds_of(unit.get("record") or {}):
+                entries = (bound.get("provenance") or ()) if isinstance(
+                    bound, dict) else ()
+                if not any(isinstance(item, dict)
+                           and item.get("basis") == dates.get("basis")
+                           for item in entries):
+                    findings.append({
+                        "lint": HONEST_BASIS_LINT,
+                        "detail": f"{unit.get('unit_id')} is {dates.get('basis')} "
+                                  f"evidence and a bound says nothing about "
+                                  f"where it came from",
+                    })
+                    break
         if dates.get("basis") == "inferred" and not collapsed_text(
                 dates.get("clause")):
             findings.append({
@@ -2840,9 +3093,28 @@ def render_unit(unit: object) -> str:
         lines.append(f"  already filed as {duplicate}")
     for conflict in row.get("conflicts") or ():
         lines.append(f"  conflicts: {conflict.get('detail')}")
+    for revision in row.get("revises") or ():
+        lines.append("  " + render_revision(revision))
     for question in row.get("questions") or ():
         lines.append(f"  to check: {question}")
     return "\n".join(lines)
+
+
+def render_revision(revision: object) -> str:
+    """ONE `revises[]` row in plain language (lifehug#469): what is filed,
+    what this says, and which would be shown — the loser stays as an
+    alternate either way."""
+    row = revision if isinstance(revision, dict) else {}
+    current = row.get("current") if isinstance(row.get("current"), dict) else None
+    proposed = row.get("proposed") if isinstance(row.get("proposed"), dict) else {}
+    bound = row.get("bound") or "date"
+    now = (f"{current.get('best')} ({current.get('basis')}, {current.get('confidence')})"
+           if current else "nothing filed")
+    new = f"{proposed.get('best')} ({proposed.get('basis')}, {proposed.get('confidence')})"
+    verdict = ("this would be shown; the filed date stays as an alternate"
+               if row.get("winner") == "proposed"
+               else "the filed date would still be shown; this files as an alternate")
+    return f"revises {row.get('entry_id')} {bound}: {now} → {new} — {verdict}"
 
 
 NO_UNITS = "(nothing in this reads as a landmark)"
@@ -3171,7 +3443,9 @@ def propose_from_completions(text: str, vault_root: object,
                              now: object = None, write: bool = True,
                              landmarks: object = None, roster: object = None,
                              generation: object = None,
-                             framework_root: str | Path | None = None) -> dict:
+                             framework_root: str | Path | None = None,
+                             evidence: object = None,
+                             evidence_source: object = None) -> dict:
     """Step 2 of the host-run protocol: `propose`, driven by the completion a
     host already made rather than by a live model call.
 
@@ -3192,7 +3466,8 @@ def propose_from_completions(text: str, vault_root: object,
     call = host_completions_call(completions)
     return propose(text, vault_root, call=call, model=model, now=now,
                    write=write, landmarks=landmarks, roster=roster,
-                   generation=generation, framework_root=framework_root)
+                   generation=generation, framework_root=framework_root,
+                   evidence=evidence, evidence_source=evidence_source)
 
 
 def load_host_context(path: str | Path) -> dict:
@@ -3279,6 +3554,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="a JSON file of {reading: <completion>} a host "
                              "already made; runs and writes the proposal "
                              "from it")
+    parser.add_argument("--evidence", default=None, choices=EVIDENCE_BASES,
+                        help="with --propose: the dates in this text are a "
+                             "document's or a relative's, not the person's "
+                             "own; with --apply: a check that the proposal "
+                             "was read that way")
+    parser.add_argument("--evidence-source", dest="evidence_source",
+                        default=None,
+                        help="with --evidence: the vault source id or "
+                             "witness ref the evidence came from")
     args = parser.parse_args(argv)
 
     from lifehug_core import REPO_DIR  # noqa: PLC0415
@@ -3294,8 +3578,10 @@ def main(argv: list[str] | None = None) -> int:
             proposal = read_proposal(root, args.apply_id)
             unit_ids = _unit_ids_from(args, proposal)
             print(json.dumps(apply(args.apply_id, unit_ids, root,
-                                   reason=args.reason), indent=2,
-                             sort_keys=True))
+                                   reason=args.reason,
+                                   evidence=args.evidence,
+                                   evidence_source=args.evidence_source),
+                             indent=2, sort_keys=True))
             return 0
 
         context = load_host_context(args.context) if args.context else {}
@@ -3311,7 +3597,8 @@ def main(argv: list[str] | None = None) -> int:
             proposal = propose_from_completions(
                 text, root, completions, model=args.model,
                 landmarks=landmarks_ctx, roster=roster_ctx,
-                generation=generation_ctx)
+                generation=generation_ctx, evidence=args.evidence,
+                evidence_source=args.evidence_source)
             print(json.dumps(proposal, indent=2, sort_keys=True))
             return 0
 
@@ -3333,7 +3620,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         from ai_provider import call_ai  # noqa: PLC0415
 
-        proposal = propose(text, root, call=call_ai, model=args.model)
+        proposal = propose(text, root, call=call_ai, model=args.model,
+                           evidence=args.evidence,
+                           evidence_source=args.evidence_source)
         print(json.dumps(proposal, indent=2, sort_keys=True))
         # R3: a WRITTEN proposal is durable regardless of its state, so a
         # `failed` reading is not a nonzero exit — see this function's own
@@ -3363,6 +3652,12 @@ __all__ = [
     "PROPOSAL_STATES",
     "PROPOSAL_READING_REVISION",
     "UNIT_KEYS",
+    "EVIDENCE_BASES",
+    "REVISION_BOUNDS",
+    "bound_revisions",
+    "evidence_provenance",
+    "proposal_evidence_basis",
+    "render_revision",
     "UNIT_KIND_BY_DOMAIN",
     "annotate_against_known",
     "annotate_entities",

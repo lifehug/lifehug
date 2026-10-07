@@ -1671,6 +1671,21 @@ issues #51–#54.
 
 ## Decided 2026-09-03 — TIMELINE UNIFICATION (platform program)
 
+**Evidence and revisions on Add Landmark, v397 (lifehug#469):** `landmark-offer
+--propose --evidence relative|document [--evidence-source <id>]` declares that a
+submission's dates are a relative's or a document's. The bytes test
+(`date_evidence`) is unchanged and runs first; every bound it keeps is then
+filed under the declared basis with one provenance entry naming the source and
+the quotation, so a letter outranks a memory (document 7.0 > stated 6.0) and a
+relative's date sits just under the owner's own (5.5) — the losing claim stays
+as an alternate, never deleted. The proposal carries `evidence` and folds it
+into its id; the receipt carries it; on `--apply` the flag is a mismatch check.
+A unit that is the SAME stay as a filed entry with a different or missing bound
+is now `revises[]` (entry, bound, current, proposed, winner) instead of a
+duplicate, is never `auto_file_eligible`, and the card says which date would be
+shown. Hosts thread two additive things: `revises` on a unit and `evidence` on
+the proposal and receipt. Never file a revision without the owner's yes.
+
 **Large Add Landmark filing, v298:** one successful confirmed apply publishes
 the calculated timeline once, after its unit writes and group claims. Landmark
 draws remain sequential and immediately readable. The bounded, vault-specific

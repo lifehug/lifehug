@@ -1,7 +1,7 @@
 {
-  "version": 396,
-  "released": "2026-10-05",
-  "changelog": "v396: the I-1 identity flags reach the package's one CLI door. v387 added `--handle`, `--clear-handle`, `--retract-alias`, `--share-alias`/`--with`, `--located-in`, `--fold-into` (and `--focus`) to `entity_verdict.py`'s own parser only, so `lifehug.py entity-verdict … --handle aj` exited 2 `unrecognized arguments`; the flags are now ONE definition (`entity_verdict.add_identity_flags`) called by both parsers, `cmd_entity_verdict` forwards them, and a door test plus a two-parser option-set guard keep a later flag from reaching only one door.",
+  "version": 397,
+  "released": "2026-10-06",
+  "changelog": "v397: Add Landmark reads EVIDENCE and says when it REVISES (lifehug#469, first of the intake PRs). `landmark-offer --propose --evidence relative|document [--evidence-source <id>]` declares that a submission's dates are a relative's or a document's rather than the person's own: the bytes test is unchanged and runs first, then every bound it keeps is filed under the declared basis with one provenance entry naming the source and the quotation — so a letter's date outranks a remembered one (document 7.0 > stated 6.0), a relative's sits just under it (5.5), and the losing claim stays as an alternate. The proposal carries a new additive top-level field `evidence` ({basis, source}) and folds it into its id only when declared; the apply receipt carries `evidence` too; `--evidence` on `--apply` is a mismatch check that refuses, never a re-stamp. Units carry a new additive field `revises` — the same stay as a filed entry whose bound this unit lacks or changes, with entry_id, bound, current, proposed and winner — where they used to be flagged `duplicates` ('filing adds nothing'); a revising unit is never auto_file_eligible and the card says which date would be shown. Hosts that replay a vendored stand-in must thread `revises` (unit) and `evidence` (proposal, receipt). Two stays at one address stay two. The `honest_basis` lint now also names an evidence bound with no provenance. Design for the whole intake skill: docs/pr-specs/intake-terminal-skill.md.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -672,6 +672,7 @@
     "tests/test_v394_focus_complete.py",
     "docs/adr/0044-a-focus-at-100-is-a-milestone.md",
     "tests/test_v395_focus_complete_cli_help.py",
-    "tests/test_v396_entity_verdict_door.py"
+    "tests/test_v396_entity_verdict_door.py",
+    "tests/test_landmark_offer_evidence.py"
   ]
 }
