@@ -215,6 +215,8 @@ def content_source_type(args: argparse.Namespace) -> str:
     """
     if getattr(args, "witness", None):
         return "witness_account"
+    if getattr(args, "record", None):
+        return "external_record"
     if getattr(args, "kind", "story") == "opinion":
         return "opinion"
     return "unprompted_story"
@@ -288,6 +290,15 @@ def frontmatter(args: argparse.Namespace, source_path: str, candidate_ids: list[
     if witness:
         values["witness"] = witness
         values["witness_slug"] = slugify(witness)
+    record_ref = getattr(args, "record", None)
+    if record_ref:
+        # lifehug#469 (v398): a third-party DOCUMENT — a letter, an itinerary,
+        # a proposal file derived from them — filed under the same contract
+        # `sources/gmail/` already uses: corroborating record, never
+        # first-person memory. `record_ref` names what it is.
+        values["source_trust"] = "external_record"
+        values["authority"] = "third_party_record"
+        values["record_ref"] = str(record_ref).strip()
     return format_frontmatter(values)
 
 
@@ -296,6 +307,11 @@ def main() -> int:
     parser.add_argument("--source", default="manual", help="Source label, e.g. telegram, voice, email, manual")
     parser.add_argument("--title", default=None)
     parser.add_argument("--captured-at", default=now_utc())
+    parser.add_argument("--record", default=None, metavar="REF",
+                        help="This is a third-party DOCUMENT (a letter, an itinerary, a "
+                             "proposal derived from them), not memory. Stored as an "
+                             "external_record source with authority third_party_record; "
+                             "REF names the document (e.g. family-letters:dave-mission-2001/travel-itinerary)")
     parser.add_argument("--witness", default=None, metavar="PERSON",
                         help="This is ANOTHER PERSON's account (a second voice), e.g. --witness Mom. "
                              "Stored as a witness_account source, attributed to them, never merged "
@@ -321,10 +337,16 @@ def main() -> int:
               "(a witness account is someone else's words; an opinion is the author's)",
               file=sys.stderr)
         return 1
+    if args.record and (args.witness or args.kind == "opinion"):
+        print("Error: --record is a third-party document; it cannot also be a "
+              "witness account or an opinion", file=sys.stderr)
+        return 1
 
     if args.witness:
         default_title = f"{args.witness}'s account — {title_from_text(story)}"
         args.title = args.title or default_title
+    elif args.record:
+        args.title = args.title or f"Record — {title_from_text(story)}"
     args.title = args.title or title_from_text(story)
     source_path = unique_source_path(args.title, args.captured_at)
     relative_source = source_path.relative_to(REPO_DIR).as_posix()
@@ -366,6 +388,9 @@ def main() -> int:
     if args.witness:
         print(f"✓ Ingested witness account from {args.witness}: {relative_source}")
         print(f"  Their words, kept separate from yours — the wiki renders both accounts side by side.")
+    elif args.record:
+        print(f"✓ Ingested third-party record ({args.record}): {relative_source}")
+        print("  A corroborating record, never first-person memory — cited, not merged.")
     elif args.kind == "opinion":
         print(f"✓ Ingested opinion: {relative_source}")
     else:
