@@ -651,6 +651,18 @@ ask would have shown as new. Never use `landmark-record` by label for a
 revision — the offer road is interval-aware and two stays at one address stay
 two.
 
+**A folder of updates (v399).** `intake start --from-updates DIR [--plan]
+[--yes]` runs every family-letters proposal file in DIR (the
+`~/Desktop/lifehug-updates/` answer-pass output; not `index.md`, not
+`applied/`) as its own `--record family-letters:<letter ids> --evidence
+document` intake with the WHOLE file as the source body (sensitivity
+`family`). A re-run continues each file's intake and picks up the agent's
+hand-off files, never filing a source twice; a file with a revision or
+conflict waits for the owner even under `--yes`; a finished file moves to
+`DIR/applied/` with its receipt and undo appended; a `flag` file (`**Proposed
+value:** no change …` or `kind: flag` front matter) writes nothing and prints
+its question each run. A re-run over a finished folder changes nothing.
+
 ### External Evidence Connectors (v106 — Gmail first)
 
 Connectors ingest external archives as **selective evidence and discovery**, never bulk import. The invariant: **the ledger is permanent; relevance is recomputed.** `connector-fetch` appends metadata-only lines (no bodies) to `state/connectors/gmail_ledger.jsonl`; `connector-excavate` re-scores the ENTIRE ledger against the current wiki/rosters/sources and delta-promotes. A thread sub-threshold today promotes on a later run once its correspondent gains a roster/wiki entry — without any re-fetch. This is a rare excavation (quarterly/yearly), not a sync service, and it is loop-adjacent: manual, owner-triggered, outside the daily/weekly/monthly rhythms.

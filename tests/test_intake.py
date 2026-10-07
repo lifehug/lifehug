@@ -466,6 +466,29 @@ class KeylessFlowTests(IntakeCase):
         self.assertIn("intake", lifehug.READ_ONLY_COMMANDS)
         self.assertNotIn("intake", lifehug.DIRECT_MUTATION_COMMANDS)
 
+    def test_a_draft_another_compile_consumed_is_not_still_needed(self):
+        proposal = self.real_proposal()
+        runner = FakeRunner(self.root, ready=False, proposal=proposal)
+        synth = self.root / "state" / "synthesis"
+        runner.emitted_tasks = [
+            {"slug": "dad", "narrative_path": str(synth / "dad.md"),
+             "sources": [{"id": "manual:2026-10-06-test", "source": "sources/manual/2026-10-06-test.md"}]}]
+        record, _ = self.start(runner, no_push=True, yes=True)
+        folder = intake.intake_dir(self.root, record["id"])
+        (folder / "reading.completion.json").write_text("{}", encoding="utf-8")
+        step = intake.Intake(self.root, intake.load_intake(self.root, record["id"]), runner=runner, say=self.say)
+        step.run(completions=folder / "reading.completion.json")
+        (folder / "classify.response.json").write_text("{}", encoding="utf-8")
+        step = intake.Intake(self.root, intake.load_intake(self.root, record["id"]), runner=runner, say=self.say)
+        self.assertFalse(step.run(response=folder / "classify.response.json"))
+        self.assertEqual(step.record["phases"]["compiling"]["status"], "waiting")
+        # A sibling's compile consumed the draft: no file, and no longer uncached.
+        runner.emitted_tasks = []
+        self.lines.clear()
+        final = intake.Intake(self.root, intake.load_intake(self.root, record["id"]), runner=runner, say=self.say)
+        self.assertTrue(final.run())
+        self.assertFalse(any("still needs" in line for line in self.lines))
+
     def test_a_terminal_ask_decides_card_by_card(self):
         proposal = self.real_proposal()
         runner = FakeRunner(self.root, ready=True, proposal=proposal)
