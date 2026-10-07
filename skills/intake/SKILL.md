@@ -116,4 +116,43 @@ platform at its next touch — say so, it is not a failure.
 - `intake list` / `intake status <id>` show where every intake stands;
   records live under `state/intake/` (gitignored).
 - `~/Desktop/lifehug-updates/`-style proposal files are `--record` intakes;
-  the whole file is the source body, not only its quotes.
+  the whole file is the source body, not only its quotes. Run the folder
+  with `--from-updates` (below), never file by file by hand.
+
+## A folder of family-letters updates (`--from-updates`, v399)
+
+```bash
+python3 system/lifehug.py intake start --from-updates ~/Desktop/lifehug-updates --plan   # cards only
+python3 system/lifehug.py intake start --from-updates ~/Desktop/lifehug-updates          # file
+```
+
+Every proposal file in the folder (not `index.md`, not `applied/`) becomes
+its own intake: `--record family-letters:<letter ids> --evidence document`,
+the WHOLE file as the source body, sensitivity `family`. The batch prints one
+`intake: updates [n/N] <file> (<kind>)` line per file and a closing summary
+(`N landmark card(s) in F file(s) · flag-only · record-only · waiting ·
+applied`).
+
+1. **Readings.** Each waiting file names its `reading.completion.json`; write
+   each one exactly as in step 1 above (a file that proposes no landmark of
+   the owner's own — a namesake, a bishop, a friend's mission, an uncle's
+   family — reads as zero units with the title as a story).
+2. **Re-run the same command.** A re-run CONTINUES each file's intake and
+   picks up every hand-off file you wrote; it never files a source twice.
+3. **Ask, per file.** A file with a `[revision]` or `[conflict]` waits even
+   under `--yes`; put each card to the owner, then `intake continue <id>
+   --units …` (or `--none`). Do not file a `[new]` card that is really an
+   existing entry the reading could not match (a start-only school telling
+   beside a graded school reads as new) — say so instead.
+4. **Classify and draft**, as in steps 3–4, then re-run once more. Each
+   finished file moves to `applied/<file>` with its receipt and undo
+   appended. The flag file (`**Proposed value:** no change …`, or `kind:
+   flag` front matter) writes nothing and prints its question every run —
+   ask the owner that question.
+5. A final re-run changes nothing: no commit, no move; only the flag
+   question prints.
+
+Kinds come from structure only: optional front matter (`kind:
+landmark|record|flag`, `letters:`, `question:`) — the family-letters answer
+pass will emit it — else the `**Proposed value:**` field and backticked
+`group/letter` ids.

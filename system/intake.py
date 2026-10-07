@@ -254,7 +254,9 @@ def new_record(*, kind: str, text: str, title: str | None, witness: str | None,
                record_ref: str | None, evidence: str | None,
                evidence_source: str | None, source_label: str, plan: bool,
                yes: bool, no_serve: bool, no_push: bool, cap: int,
-               now: str | None = None) -> dict:
+               now: str | None = None, sensitivity: str | None = None,
+               read: bool = True, updates_file: str | None = None,
+               update_kind: str | None = None) -> dict:
     if kind not in KINDS:
         raise IntakeError("unsupported_input", f"kind must be one of {KINDS}")
     if not text.strip():
@@ -295,6 +297,17 @@ def new_record(*, kind: str, text: str, title: str | None, witness: str | None,
         "no_serve": bool(no_serve),
         "no_push": bool(no_push),
         "synthesis_cap": int(cap),
+        # v399 (--from-updates): the filed source's sensitivity, whether the
+        # landmark reading runs at all (`kind: record` files skip it), and
+        # the update file this intake came from.
+        "sensitivity": (sensitivity or "").strip() or None,
+        "read": bool(read),
+        "updates_file": updates_file,
+        "update_kind": update_kind,
+        # A batch file with a revision or conflict on it is not finished by
+        # `--yes` (which would file its new units and move the file to
+        # applied/ with the revision unasked): it waits for the owner.
+        "hold_revisions": bool(updates_file),
         "text_sha256": _sha256(text),
         "phases": {name: {"status": "pending"} for name in PHASES},
         "done": False,
@@ -637,6 +650,8 @@ class Intake:
             args += ["--witness", record["witness"]]
         elif record["kind"] == "record":
             args += ["--record", record["record_ref"]]
+        if record.get("sensitivity"):
+            args += ["--sensitivity", record["sensitivity"]]
         result = self._lifehug(*args, stdin=text)
         if result.returncode != 0:
             raise IntakeError("write_failure",
@@ -653,6 +668,13 @@ class Intake:
     def phase_reading(self, completions: Path | None = None) -> str:
         row = self.phase("reading")
         record = self.record
+        if record.get("read") is False:
+            for name in ("reading", "asking"):
+                self.phase(name).update({"status": "skipped"})
+            self.phase("asking")["counts"] = card_counts([])
+            self.save()
+            self.say(f"{PHASE_PREFIX} reading skipped (a record: filed as a source, not read for landmarks)")
+            return "done"
         text_path = self.folder / "text.md"
         evidence_flags: list[str] = []
         if record.get("evidence"):
@@ -732,7 +754,9 @@ class Intake:
         if units or all_new or none:
             chosen = decide_units(cards, units=units, all_new=all_new, none=none)
             mode = "units" if units else ("all-new" if all_new else "none")
-        elif self.record.get("yes"):
+        elif self.record.get("yes") and not (
+                self.record.get("hold_revisions")
+                and any(card["kind"] in ("revision", "conflict") for card in cards)):
             chosen = decide_units(cards, yes=True)
             mode = "yes"
         elif not any(card["kind"] != "duplicate" for card in cards):
@@ -879,7 +903,13 @@ class Intake:
                 scoped_rows = json.loads(Path(row["tasks_path"]).read_text(encoding="utf-8"))
             except (OSError, ValueError, KeyError):
                 scoped_rows = []
-            pending = [t for t in scoped_rows if not Path(t.get("narrative_path") or "").is_file()]
+            # A draft another compile already consumed (a sibling intake in
+            # the same batch, a manual compile) is no longer a file, and its
+            # page is no longer uncached: ask the compiler, not the disk.
+            still = self._uncached_slugs()
+            pending = [t for t in scoped_rows
+                       if t.get("slug") in still
+                       and not Path(t.get("narrative_path") or "").is_file()]
             if pending:
                 self.say(f"{PHASE_PREFIX} compiling still needs {len(pending)} draft(s); compiling with what is there")
         result = self._lifehug_job("compile", "--no-ai")
@@ -894,6 +924,19 @@ class Intake:
         self.finish("compiling", detail,
                     pages=list(row.get("tasks") or []), updates=updates)
         return "done"
+
+    def _uncached_slugs(self) -> set[str]:
+        """The slugs `compile --emit-tasks` still lists (pages with no cached
+        prose and no draft); empty when the listing cannot be read."""
+        tasks_path = self.folder / "synthesis.tasks.json"
+        result = self._lifehug("compile", "--emit-tasks", str(tasks_path))
+        if result.returncode != 0:
+            return set()
+        try:
+            rows = json.loads(tasks_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return set()
+        return {str(t.get("slug")) for t in rows if isinstance(t, dict)}
 
     def phase_pushing(self) -> str:
         row = self.phase("pushing")
@@ -1017,13 +1060,17 @@ def start(vault_root: Path, text: str, *, kind: str, title: str | None = None,
           source_label: str = "cli", plan: bool = False, yes: bool = False,
           no_serve: bool = False, no_push: bool = False,
           cap: int = DEFAULT_SYNTHESIS_CAP, runner: Runner | None = None,
-          say=print, ask=None, now: str | None = None) -> tuple[dict, bool]:
+          say=print, ask=None, now: str | None = None,
+          sensitivity: str | None = None, read: bool = True,
+          updates_file: str | None = None,
+          update_kind: str | None = None) -> tuple[dict, bool]:
     """Create the record, keep the text, and run as far as the phases go."""
     record = new_record(kind=kind, text=text, title=title, witness=witness,
                         record_ref=record_ref, evidence=evidence,
                         evidence_source=evidence_source, source_label=source_label,
                         plan=plan, yes=yes, no_serve=no_serve, no_push=no_push,
-                        cap=cap, now=now)
+                        cap=cap, now=now, sensitivity=sensitivity, read=read,
+                        updates_file=updates_file, update_kind=update_kind)
     folder = intake_dir(vault_root, record["id"])
     _write_vault_text(vault_root, folder / "text.md",
                       text if text.endswith("\n") else text + "\n")
@@ -1033,6 +1080,138 @@ def start(vault_root: Path, text: str, *, kind: str, title: str | None = None,
     intake = Intake(vault_root, record, runner=runner, say=say, ask=ask)
     finished = intake.run()
     return intake.record, finished
+
+
+# --------------------------------------------------------------------------
+# --from-updates DIR: one intake per family-letters proposal file (v399)
+# --------------------------------------------------------------------------
+
+def landmark_card_count(record: dict) -> int:
+    """How many cards an intake ASKS — new, revision, conflict."""
+    counts = ((record.get("phases") or {}).get("asking") or {}).get("counts") or {}
+    return sum(int(counts.get(kind) or 0) for kind in ("new", "revision", "conflict"))
+
+
+def update_outcome(record: dict | None) -> str:
+    """What one update file is, for the summary: ``flag``, ``waiting``,
+    ``landmark`` (the reading asked something) or ``record`` (it did not —
+    the file is a source in the vault and nothing more)."""
+    if record is None:
+        return "flag"
+    phases = record.get("phases") or {}
+    reading = (phases.get("reading") or {}).get("status")
+    if reading not in ("done", "skipped"):
+        return "waiting"
+    return "landmark" if landmark_card_count(record) else "record"
+
+
+def _hand_offs(intake: "Intake") -> dict:
+    """The keyless hand-off files an agent has already written for a waiting
+    intake, as ``run`` inputs. A batch re-run picks them up; nothing else
+    about a waiting intake changes."""
+    inputs: dict = {}
+    phases = intake.record.get("phases") or {}
+    completion = intake.folder / "reading.completion.json"
+    if (phases.get("reading") or {}).get("status") == "waiting" and completion.is_file():
+        inputs["completions"] = completion
+    response = intake.folder / "classify.response.json"
+    if (phases.get("classifying") or {}).get("status") == "waiting" and response.is_file():
+        inputs["response"] = response
+    return inputs
+
+
+def run_updates(vault_root: Path, folder: Path, *, plan: bool = False, yes: bool = False,
+                no_serve: bool = False, no_push: bool = False,
+                cap: int = DEFAULT_SYNTHESIS_CAP, runner: Runner | None = None,
+                say=print, now: str | None = None) -> dict:
+    """Run every proposal file in ``folder`` as its own record intake.
+
+    * Each file is ``--record family-letters:<letter ids> --evidence
+      document`` with the WHOLE file as the source body, sensitivity
+      ``family`` — filed once, through ``ingest-story``.
+    * A ``flag`` file writes nothing and prints its question, every run.
+    * A file whose intake already exists (same path, same bytes, same
+      ``--plan``) is CONTINUED, never started again — so a re-run on the
+      same folder files nothing twice. Hand-off files the agent wrote
+      (``reading.completion.json``, ``classify.response.json``) are picked up.
+    * A finished, non-plan intake moves its file to ``applied/`` with the
+      receipt appended; a re-run then no longer sees it.
+
+    Landmark decisions stay per file and per unit: ``--yes`` files only NEW
+    units; a revision or conflict waits for ``intake continue <id> --units``.
+    """
+    import intake_updates as iu  # noqa: PLC0415
+
+    folder = Path(folder).expanduser()
+    try:
+        files = iu.update_files(folder)
+    except FileNotFoundError as exc:
+        raise IntakeError("unsupported_input", str(exc)) from exc
+    say(f"{PHASE_PREFIX} updates {folder} — {len(files)} file(s)"
+        + (" (plan: nothing filed)" if plan else ""))
+    known = list_intakes(vault_root)
+    rows = []
+    for number, path in enumerate(files, 1):
+        update = iu.parse_update(path)
+        say(f"{PHASE_PREFIX} updates [{number}/{len(files)}] {update['name']} ({update['kind']})")
+        if update["kind"] == "flag":
+            say(f"  flag-only — writes nothing. Question: {update['question']}")
+            rows.append({"file": update["name"], "outcome": "flag", "intake_id": None,
+                         "cards": 0, "question": update["question"]})
+            continue
+        existing = [row for row in known
+                    if row.get("updates_file") == str(path)
+                    and row.get("text_sha256") == update["sha256"]
+                    and bool(row.get("plan")) == bool(plan)]
+        if existing:
+            record = existing[-1]
+            intake = Intake(vault_root, record, runner=runner, say=say)
+            if not record.get("done"):
+                say(f"  continuing {record['id']}")
+                intake.run(**_hand_offs(intake))
+            record = intake.record
+        else:
+            record, _finished = start(
+                vault_root, update["text"], kind="record", title=update["title"],
+                record_ref=update["record_ref"], evidence="document",
+                evidence_source=update["record_ref"], source_label=iu.SOURCE_LABEL,
+                plan=plan, yes=yes, no_serve=no_serve, no_push=no_push, cap=cap,
+                runner=runner, say=say, now=now, sensitivity=iu.SENSITIVITY,
+                read=update["kind"] != "record", updates_file=str(path),
+                update_kind=update["kind"])
+        outcome = update_outcome(record)
+        moved = None
+        if record.get("done") and not plan:
+            phases = record.get("phases") or {}
+            moved = iu.move_applied(path, {
+                "intake_id": record["id"], "at": now or now_utc(),
+                "source_path": (phases.get("filing") or {}).get("source_path"),
+                "receipt_id": (phases.get("landmarks") or {}).get("receipt_id")})
+            say(f"  applied → {moved}")
+        elif not record.get("done"):
+            waiting = [name for name, row in (record.get("phases") or {}).items()
+                       if row.get("status") == "waiting"]
+            say(f"  waiting: {waiting[0] if waiting else 'in progress'} — "
+                f"python3 system/lifehug.py intake continue {record['id']}")
+        rows.append({"file": update["name"], "outcome": outcome, "intake_id": record["id"],
+                     "cards": landmark_card_count(record),
+                     "counts": ((record.get("phases") or {}).get("asking") or {}).get("counts"),
+                     "done": bool(record.get("done")),
+                     "applied": str(moved) if moved else None})
+    summary = {
+        "landmark_cards": sum(row["cards"] for row in rows),
+        "landmark_files": sum(1 for row in rows if row["outcome"] == "landmark"),
+        "flag_only": sum(1 for row in rows if row["outcome"] == "flag"),
+        "record_only": sum(1 for row in rows if row["outcome"] == "record"),
+        "waiting": sum(1 for row in rows if row["outcome"] != "flag" and not row.get("done")),
+        "applied": sum(1 for row in rows if row.get("applied")),
+        "files": rows,
+    }
+    say(f"{PHASE_PREFIX} updates {'plan ' if plan else ''}summary: "
+        f"{summary['landmark_cards']} landmark card(s) in {summary['landmark_files']} file(s) · "
+        f"{summary['flag_only']} flag-only · {summary['record_only']} record-only · "
+        f"{summary['waiting']} waiting · {summary['applied']} applied")
+    return summary
 
 
 def terminal_ask(card: dict) -> bool:
@@ -1061,6 +1240,9 @@ def build_parser() -> argparse.ArgumentParser:
     kind.add_argument("--story", action="store_true", help="the person's own words")
     kind.add_argument("--witness", metavar="NAME", help="another person's words")
     kind.add_argument("--record", metavar="REF", help="a third-party document; REF names it")
+    kind.add_argument("--from-updates", dest="from_updates", metavar="DIR",
+                      help="every family-letters proposal file in DIR, each as "
+                           "--record family-letters:<ids> --evidence document")
     s.add_argument("--evidence", choices=EVIDENCE_BASES, default=None,
                    help="with --record: how its dates are held (default document)")
     s.add_argument("--evidence-source", dest="evidence_source", default=None)
@@ -1095,6 +1277,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = REPO_DIR
     try:
+        if args.verb == "start" and args.from_updates:
+            run_updates(root, Path(args.from_updates), plan=args.plan, yes=args.yes,
+                        no_serve=args.no_serve, no_push=args.no_push, cap=args.cap)
+            return 0
         if args.verb == "start":
             text = (Path(args.file).read_text(encoding="utf-8") if args.file
                     else sys.stdin.read())
@@ -1146,7 +1332,8 @@ __all__ = [
     "Intake", "IntakeError", "KINDS", "PHASES", "PHASE_PREFIX", "Result", "Runner",
     "card_counts", "card_kind", "cards_from_proposal", "decide_units",
     "intake_dir", "list_intakes", "load_intake", "new_record", "render_report",
-    "save_intake", "scope_tasks", "start", "synthesis_prompt", "viewer_base",
+    "save_intake", "scope_tasks", "start", "run_updates", "update_outcome",
+    "landmark_card_count", "synthesis_prompt", "viewer_base",
 ]
 
 
