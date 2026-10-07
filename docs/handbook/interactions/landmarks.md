@@ -357,6 +357,9 @@ echo "I lived in Mesa from 1990 to 1992." | \
     python3 system/lifehug.py landmark-offer --propose
 python3 system/lifehug.py landmark-offer --apply lmo:… --all
 python3 system/lifehug.py landmark-offer --retract lmr:…
+# v397: the text is a letter, not the person's own words
+python3 system/lifehug.py landmark-offer --propose --from-file letter.md \
+    --evidence document --evidence-source letters:travel-itinerary
 ```
 
 `--propose` files no landmark. It writes ONE file,
@@ -434,6 +437,27 @@ or in the two-digit form people write (`'91`), and a finer grain with its month
 named in full or abbreviated. A bound the text carries files `basis: stated`; a
 bound it does not is **dropped with a finding, never rewritten** into a
 confident-looking inference.
+
+**Evidence is declared, not read off the completion (v397, lifehug#469).** A
+letter quote carries its own years, so the bytes test alone would file an
+itinerary's date as something the person stated. `--evidence relative|document`
+(`--evidence-source <source id or witness ref>`) declares, for the WHOLE
+submission, that its dates are a relative's or a document's: the bytes test
+runs first and unchanged, then every surviving bound is re-stamped with that
+basis (`chronology.BASIS_WEIGHT`: document 7.0, stated 6.0, relative 5.5) plus
+one provenance entry `{basis, source, claim}` naming the source and the words.
+The proposal records it as `evidence` and folds it into its id; the receipt
+carries it; `--evidence` on `--apply` is a check that refuses a mismatch,
+never a re-stamp. `honest_basis` lints an evidence bound with no provenance.
+
+**A revision is asked, never auto-filed (v397).** The same stay as a filed
+entry (`same_landmark_stay`) with a bound the entry lacks or disagrees with
+used to be annotated `duplicates` — "filing adds nothing" — which was wrong for
+a date refinement. `revises[]` on the unit now names `entry_id`, `bound`,
+`current`, `proposed` and `winner` (which side `chronology.reconcile` would
+show; the loser stays as an alternate), `auto_file_eligible` is false for any
+unit carrying one, and `render_revision` says it in words on the card. Two
+stays at one address stay two: a revision binds to the stay it intersects.
 
 **Filing is the road an answer already takes.** A confirmed unit files through
 `timeline.save_landmark`, so an offer and an answer are indistinguishable
@@ -657,7 +681,7 @@ ask, you bound, you do the arithmetic. They supply what they know.
 | Claims, both passes (v229) | `general_listener.CLAIM_PROMPT_KEYS`, `validate_claim_draft`, `parse_claims`, `bind_claims`, `render_event_kinds`, `claim_refused`; `landmark_recorder.parse_recorder_claims`, `RecorderOutcome.claims`. The contract is `system/temporal_claims.py` — one door, one vocabulary |
 | Their retryable lint (v229) | `general_listener.CLAIMS_MISSING_SUBJECTS_LINT`, `claims_missing_subjects`, `every_claim_reminder` — a BINDING of v214's `_name_groups`/`_record_terms`, never a second copy |
 | Their write path (v229) | `landmark_recorder.file_claims` over `temporal_store.file_message_extraction`; the extractor's identity is `recorder_extractor`/`listener_extractor` + `general_listener.leaf_prompt_version`, so editing a leaf is a NEW extractor and a new receipt |
-| The `offer` mode (v287, ADR 0033; one reading v291; filing v292) | `system/landmark_offer.py`: `propose(text, vault_root, call=…)` → the proposal (units with `unit_id`, `domain`, `kind`, `subject`, `entity_candidates`, `dates`, `quote`, `within`, `names`, `duplicates`, `conflicts`, `questions`, `auto_file_eligible`, `record`; plus `events`, `stories`, `groups`, `unrecognized`, `questions`) · `build_groups` / `group_members` / `group_slice` / `group_source_relative_path` / `derive_story_id` (v292, R7) · `apply(proposal_id, unit_ids, vault_root)` → the receipt (`filed`, `filed_names`, `filed_slices`, `counts`), idempotent on `(proposal_id, unit_id)` through `timeline.save_landmark`'s `digest_override`, filing names through `go_dig_writer.record_unit` and events/moments through `general_listener.bind_claims` + `temporal_store.write_receipt` · `retract(receipt_id, vault_root)` through `temporal_store.retract_claims` and `roster_relations.retract_alias`, scope `EVENTS_SCOPE` for what a stay held · `date_evidence` (the stated/inferred rule, read off the bytes) · `lint_offer_proposal` / `lint_offer_reply` / `OFFER_LINT_CLASSES` · `build_offer_turn` / `render_proposal` / `render_group` / `render_unit` / `render_event` / `render_story` / `render_open_questions` for the leaf's `{proposed_units}` and `{open_questions}` · `offer_context` for the three manifest blocks · `OFFER_STATES`, `FAILURE_CLASSES`, `GROUP_KEYS`, `MEMBER_KINDS`. Leaf: `prompt/turn-instructions-offer.md`; slot: `composition.offer_turn`; role: `role.worker`. Data: `state/landmarks/offers/` |
+| The `offer` mode (v287, ADR 0033; one reading v291; filing v292) | `system/landmark_offer.py`: `propose(text, vault_root, call=…)` → the proposal (units with `unit_id`, `domain`, `kind`, `subject`, `entity_candidates`, `dates`, `quote`, `within`, `names`, `duplicates`, `conflicts`, `revises` (v397), `questions`, `auto_file_eligible`, `record`; top-level `evidence` (v397); plus `events`, `stories`, `groups`, `unrecognized`, `questions`) · `build_groups` / `group_members` / `group_slice` / `group_source_relative_path` / `derive_story_id` (v292, R7) · `apply(proposal_id, unit_ids, vault_root)` → the receipt (`filed`, `filed_names`, `filed_slices`, `counts`), idempotent on `(proposal_id, unit_id)` through `timeline.save_landmark`'s `digest_override`, filing names through `go_dig_writer.record_unit` and events/moments through `general_listener.bind_claims` + `temporal_store.write_receipt` · `retract(receipt_id, vault_root)` through `temporal_store.retract_claims` and `roster_relations.retract_alias`, scope `EVENTS_SCOPE` for what a stay held · `date_evidence` (the stated/inferred rule, read off the bytes) · `lint_offer_proposal` / `lint_offer_reply` / `OFFER_LINT_CLASSES` · `build_offer_turn` / `render_proposal` / `render_group` / `render_unit` / `render_event` / `render_story` / `render_open_questions` for the leaf's `{proposed_units}` and `{open_questions}` · `offer_context` for the three manifest blocks · `OFFER_STATES`, `FAILURE_CLASSES`, `GROUP_KEYS`, `MEMBER_KINDS`. Leaf: `prompt/turn-instructions-offer.md`; slot: `composition.offer_turn`; role: `role.worker`. Data: `state/landmarks/offers/` |
 | Its ONE reading (v291, R6) | `system/landmark_reading.py`: `build_reading_prompt(text, landmarks=…, roster=…)` · `parse_reading(raw, text=…)` → `Reading(units, events, stories, unplaced, findings)` · `reading_extractor` (versioned by the leaf's own bytes) · `render_name_keys` / `render_date_shapes` / `render_span_nouns` / `render_estimation_marks` / `name_keys_for` / `date_shape_for` / `span_noun`. Leaf: `prompt/reading.md`; slot: `composition.reading`; role: `role.reading` (sonnet-class) |
 | Its retired extractor, now deleted (v287 shipped it, uncalled at v291, gone at v293/Cut 6h) | `system/go_dig_grammar.py` (the deterministic block grammar; no model) and `go_dig_writer.plan_import` were reachable ONLY through `landmark_offer.grammar_units`, which R6 (v291) took off the offer path and Cut 6h (v293) deleted along with `_date_dict` and `_grammar_block_quote` — neither `landmark_offer` nor `landmark_reading` names `go_dig_grammar` any more, by any route (`tests/test_landmark_offer.py::NoSecondCopyTests`). `go_dig_writer.record_unit` remains the writer seam `apply` uses; `go_dig_writer` itself and `go_dig_grammar.py` are Cut 7b's to delete |
 | The host-run reading protocol (v289 Cut 6c; v291 Cut 6f) | `host_reading_prompt(text, vault_root, model=, landmarks=, roster=)` → `{"reading": {"prompt", "model", "prompt_version"}}` · `propose_from_completions(text, vault_root, {"reading": <completion>}, ...)` → `propose`'s own return, writing the proposal · `host_completions_call(completions)` — the `call` it builds, which needs no dispatch because there is one prompt per submission (R9) · `load_host_context(path)` for `--context`'s `{landmarks, roster, generation}`. `host_listener_prompt` and `host_recorder_prompts` were DELETED at v291 with the passes they named |

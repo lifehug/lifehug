@@ -777,3 +777,47 @@ fold and every active-index write are unchanged. Standalone receipt readers,
 immutable write validation, sequential landmark merge/supersession, final
 publication ordering and applied-receipt replay retain their existing paths.
 No durable format, identity formula, model request or host budget changes.
+
+## Amendment 8, 2026-10-06 (v397, lifehug#469): Declared Evidence and Revisions
+
+The owner's family-letters archive produced vault proposals — a mission that
+ended on 5 July 2002 per the Church travel itinerary, not 6 June; a move dated
+by a grandmother's letter — and the offer road could not file them honestly.
+Two reasons, both structural.
+
+**Stated-versus-inferred is a bytes test, and a letter carries its own
+years.** `date_evidence` asks whether the submitted text contains the year
+(§3), so a date quoted from a document came out `basis: stated` — attributed
+to the person, weighted as memory. The vocabulary already held `document` and
+`relative` (ADR 0025's evidence bases, kept at v204's flat weights); nothing
+on this road could declare them. `propose` now takes `evidence` (one of
+`EVIDENCE_BASES = ("relative", "document")`) and `evidence_source`, declared
+by the CALLER for the whole submission and never read off a completion. The
+bytes test is untouched and runs first; `_evidenced` re-stamps each
+surviving bound with the declared basis and one provenance entry
+`{basis, source, claim}`. The proposal records `evidence`, folds it into
+`derive_proposal_id` only when declared (an undeclared offer keeps its exact
+id), and the receipt carries it. On `apply` the flags are a CHECK: a
+mismatch is refused, never re-stamped. `photo` is deliberately absent — a
+photo dates a window and this road reads text.
+
+**A refinement of a filed date read as "nothing to file."** The same stay
+(`same_landmark_stay`) with a different bound was annotated `duplicates`. The
+merge road would have reconciled the two claims correctly, but no host was
+told to ask. `annotate_against_known` now distinguishes: same interval →
+duplicate (corroboration); a bound the entry lacks or disagrees with →
+`revises[]` with `entry_id`, `bound`, `current`, `proposed` and `winner`
+(`bound_revisions`, pure, by `chronology.claim_identity`'s interval and
+`chronology.reconcile`). A revising unit is never `auto_file_eligible`;
+`render_revision` says on the card which date would be shown and that the
+other stays as an alternate. A second stay at a known identity is still a
+second entry, so a revision binds to the stay it intersects and the other
+is untouched.
+
+No reading prompt, schema or validator version changes. `UNIT_KEYS` gains
+`revises`; the proposal and receipt gain `evidence`; both are additive, and
+hosts that replay a vendored stand-in must thread them (AGENTS.md).
+
+### Status
+
+Shipped v397. Tests: `tests/test_landmark_offer_evidence.py`.

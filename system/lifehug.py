@@ -2797,6 +2797,10 @@ def cmd_landmark_offer(args: argparse.Namespace) -> int:
         argv.extend(["--reason", args.reason])
     if getattr(args, "model", None):
         argv.extend(["--model", args.model])
+    if getattr(args, "evidence", None):
+        argv.extend(["--evidence", args.evidence])
+    if getattr(args, "evidence_source", None):
+        argv.extend(["--evidence-source", args.evidence_source])
     return run_python("landmark_offer.py", argv)
 
 
@@ -4909,6 +4913,17 @@ def build_parser() -> argparse.ArgumentParser:
                    help="With --propose: a JSON file of {reading: "
                         "<completion>} a host already made; runs and writes "
                         "the proposal from it")
+    # lifehug#469 (v397): the dates in this text are a document's or a
+    # relative's, not the person's own. On --apply it is a check only.
+    p.add_argument("--evidence", default=None, choices=("relative", "document"),
+                   help="With --propose: file every date the text carries as "
+                        "this kind of evidence (relative = somebody else "
+                        "relaying it, document = read off paper) rather than "
+                        "as stated by you; with --apply: refuse unless the "
+                        "proposal was read that way")
+    p.add_argument("--evidence-source", dest="evidence_source", default=None,
+                   help="With --evidence: the vault source id or witness ref "
+                        "the evidence came from, recorded on every bound")
     p.set_defaults(func=cmd_landmark_offer)
 
     p = sub.add_parser("landmark-record",
