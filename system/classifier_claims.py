@@ -599,7 +599,7 @@ def capture_context(vault_root: str | Path, source_path: object) -> dict:
     return found
 
 
-#: v401 (letters-in-the-vault D1). The source type `family_letters` files a
+#: v404 (letters-in-the-vault D1). The source type `family_letters` files a
 #: cited letter under, and the marker the ONE synthetic event of a letter
 #: source carries. The marker is honoured only when the source's own
 #: frontmatter says it is a letter (:func:`capture_context`), so a classifier
@@ -815,7 +815,7 @@ def temporal_reading(event: object, capture: object = None) -> dict:
     what it was, which is what keeps this change additive.
     """
     row = event if isinstance(event, dict) else {}
-    # v401: the letter's own date, printed on it (:func:`letter_reading`).
+    # v404: the letter's own date, printed on it (:func:`letter_reading`).
     letter = letter_reading(row, capture)
     if letter is not None:
         return letter
@@ -1502,7 +1502,7 @@ def migrate_classifier_moments(
         report["skipped_empty_description"] += len(
             (data or {}).get("events") or ()
         ) - len(events)
-        # v401 (letters D1): a letter source is also the moment "the letter",
+        # v404 (letters D1): a letter source is also the moment "the letter",
         # dated by the letter itself; the classifier's events are the stories
         # told inside it.
         letter_moment = letter_event(capture)

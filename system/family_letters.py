@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""A cited family letter is filed as a letter (letters-in-the-vault D1, v401).
+"""A cited family letter is filed as a letter (letters-in-the-vault D1, v404).
 
 The family-letters archive (repo ``lifehug/letters``) holds one transcript per
 letter at ``letters/<collection>/<letter>/transcript.md``: a YAML header
 (``id``, ``date``, ``date_precision``, ``date_evidence``, ``from``,
 ``from_relationship``, ``to``, ``people``, ``places``, ``summary``,
-``source_file`` …) and then the transcript body. Until v401 intake cited a
+``source_file`` …) and then the transcript body. Until v404 intake cited a
 letter only as a string (``record_ref: family-letters:<id>``) on the update
 memo it filed; the letter itself never reached the vault.
 
@@ -30,7 +30,7 @@ This module is the one place that turns a letter id into a vault source:
   is untouched.
 * :func:`link_citing_memos` — every record memo whose ``record_ref`` names a
   letter gets that letter in its ``cites``. This is how a memo filed before
-  v401 (or filed while the archive was not on this machine) is linked once
+  v404 (or filed while the archive was not on this machine) is linked once
   the letter is filed.
 
 A missing archive or a missing letter is never a crash: one honest line, and

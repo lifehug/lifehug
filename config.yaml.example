@@ -103,7 +103,7 @@ followup_model: "anthropic/claude-opus-4-6"
 # Tiers set how deep a Focus goes before it's "well-known": basic ~8 answers
 # (blog), standard ~20 (essay/chapter/a person), extreme ~50+ (book / life's work).
 
-# --- Family letters (v401) ---
+# --- Family letters (v404) ---
 # Where the family-letters archive (letters/<collection>/<letter>/transcript.md)
 # lives on this machine. `intake … --record family-letters:<id>` and
 # `intake letter <id>` file a cited letter from here as sources/letters/.

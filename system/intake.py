@@ -101,7 +101,7 @@ JOB_TERMINAL_STATES = ("succeeded", "failed")
 QUEUED_JOB_RE = re.compile(r"Queued (\S+) job (\S+)")
 
 #: The line `ingest-story` prints for the memo it filed. Anchored on the
-#: verb: since v401 the letter lines (``✓ Filed letter …: sources/letters/…``)
+#: verb: since v404 the letter lines (``✓ Filed letter …: sources/letters/…``)
 #: come first and also end in a source path.
 INGESTED_RE = re.compile(r"^✓ Ingested[^\n]*?:\s+(sources/\S+\.md)\s*$", re.M)
 LETTER_FILED_RE = re.compile(r"^✓ Filed letter (\S+): (sources/\S+\.md)\s*$", re.M)
@@ -110,7 +110,7 @@ LETTER_UNRESOLVED_RE = re.compile(r"^! letter (\S+) not filed \(([a-z_]+)\): .*$
 
 
 def letter_lines(stdout: str) -> dict:
-    """What `ingest-story` said about the letters a record cites (v401):
+    """What `ingest-story` said about the letters a record cites (v404):
     ``{"filed": [{id, path}], "already": [{id, path}], "unresolved": [{id,
     reason}], "unresolved_lines": [str]}``."""
     text = stdout or ""
@@ -1257,7 +1257,7 @@ def run_updates(vault_root: Path, folder: Path, *, plan: bool = False, yes: bool
 
 
 # --------------------------------------------------------------------------
-# intake letter <id>: get it from family letters (v401, letters D1)
+# intake letter <id>: get it from family letters (v404, letters D1)
 # --------------------------------------------------------------------------
 
 def file_letters(vault_root: Path, refs: list[str], *, letters_root: Path | None = None,

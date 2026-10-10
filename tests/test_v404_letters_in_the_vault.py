@@ -1,4 +1,4 @@
-"""A cited letter is filed as a letter (letters-in-the-vault D1, v401).
+"""A cited letter is filed as a letter (letters-in-the-vault D1, v404).
 
 `family-letters:<collection>/<letter>` on a record intake resolves to the
 archive's transcript and files it ONCE as an immutable `sources/letters/`
@@ -194,7 +194,7 @@ class HeaderAndRefTests(unittest.TestCase):
 
 class FilingTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = root_parent_tmp(self, ROOT, prefix="v401-letters-")
+        self.tmp = root_parent_tmp(self, ROOT, prefix="v404-letters-")
         self.archive = make_archive(self.tmp)
         self.vault = make_vault(self.tmp)
 
@@ -254,7 +254,7 @@ class FilingTests(unittest.TestCase):
         self.assertEqual(memo["type"], "external_record")
 
     def test_intake_letter_files_with_no_memo_and_links_the_memos_that_cite_it(self):
-        # A memo filed before the archive was here (or before v401): no cites.
+        # A memo filed before the archive was here (or before v404): no cites.
         old = ingest_record(self.vault, None, f"family-letters:{LETTER_ID},{OTHER_ID}",
                             "Old memo")
         memo_path = self.vault / intake.INGESTED_RE.search(old.stdout).group(1)
@@ -419,7 +419,7 @@ class ManifestTests(unittest.TestCase):
     def test_framework_ships_the_code_and_never_the_letters(self):
         manifest = json.loads((SYSTEM / "version.json").read_text(encoding="utf-8"))
         shipped = set(manifest["framework_files"])
-        for name in ("system/family_letters.py", "tests/test_v401_letters_in_the_vault.py"):
+        for name in ("system/family_letters.py", "tests/test_v404_letters_in_the_vault.py"):
             self.assertIn(name, shipped)
         # `sources/letters/` is user data: never shipped, not even a .gitkeep.
         self.assertFalse(any(path.startswith("sources/letters") for path in shipped))

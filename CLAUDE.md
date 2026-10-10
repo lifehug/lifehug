@@ -707,7 +707,7 @@ conflict waits for the owner even under `--yes`; a finished file moves to
 value:** no change …` or `kind: flag` front matter) writes nothing and prints
 its question each run. A re-run over a finished folder changes nothing.
 
-**A cited letter is filed as a letter (v401, letters-in-the-vault D1).** A
+**A cited letter is filed as a letter (v404, letters-in-the-vault D1).** A
 `family-letters:<collection>/<letter>` record (either door above) also files
 each cited letter, once, as an immutable `sources/letters/<collection>--<letter>.md`:
 `type: letter` (an `external_record`, `authority: third_party_record`,

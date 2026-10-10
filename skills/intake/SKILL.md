@@ -30,7 +30,7 @@ every bound will carry (v397, `landmark-offer --evidence`):
 | a third-party document (an itinerary, a bishop's letter, a proposal file from the family-letters archive) | `--record <ref>` | `external_record`, `authority: third_party_record` | `document` (7.0 — outranks a remembered date; the memory stays as an alternate) |
 
 `<ref>` names the document, e.g. `family-letters:dave-mission-2001/travel-itinerary`.
-A `family-letters:` ref also files each cited letter itself (v401, below).
+A `family-letters:` ref also files each cited letter itself (v404, below).
 When unsure whether something is a witness or a record, ask the owner one
 line: *"Is this Dad's own account, or a document?"*
 
@@ -158,7 +158,7 @@ landmark|record|flag`, `letters:`, `question:`) — the family-letters answer
 pass will emit it — else the `**Proposed value:**` field and backticked
 `group/letter` ids.
 
-## The letter itself (v401, letters-in-the-vault D1)
+## The letter itself (v404, letters-in-the-vault D1)
 
 A `family-letters:<collection>/<letter>[,<id>]` record — `--record` or a
 `--from-updates` file — files each cited letter ONCE as
