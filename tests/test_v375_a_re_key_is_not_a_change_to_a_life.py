@@ -447,7 +447,7 @@ class TheFoldFollowsTheRedirectTests(unittest.TestCase):
         self.assertTrue(self.unresolved(after))
 
     def test_the_rule_version_moved(self) -> None:
-        self.assertEqual(self.tt.CALCULATION_RULE_VERSION, "timeline-rules:26")
+        self.assertEqual(self.tt.CALCULATION_RULE_VERSION, "timeline-rules:27")
         self.assertIn("node_aliases", self.tt.A_LINK_FOLLOWS_ITS_NODE_THROUGH_A_RE_KEY)
 
 

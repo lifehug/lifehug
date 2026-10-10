@@ -1855,6 +1855,21 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
     )
     rows = list(batch["rows"])
     have_slugs = {row["slug"] for row in rows}
+    # v403, `roster_relations.A_RELATIVE_TOLD_WITH_A_BIRTHDAY_JOINS_THE_ROSTER`:
+    # a dated birth whose own telling names the relation on a line no claim
+    # quotes ("Sister Kristine (Kris) Thompson + household:").
+    try:
+        telling_texts = relation_words.own_telling_texts(REPO_DIR)
+    except Exception:  # noqa: BLE001  — unreadable tellings introduce nobody
+        telling_texts = {}
+    told = roster_relations.relative_birth_introductions(
+        claims, roster=roster, telling_texts=telling_texts, owner_names=owner_names,
+        landmark_entries=landmark_entries, correction_texts=correction_texts)
+    for row in told["rows"]:
+        if row["slug"] not in have_slugs:
+            rows.append(row)
+            have_slugs.add(row["slug"])
+    batch = {**batch, "findings": (*batch["findings"], *told["findings"])}
     plan = landmark_introduction_plan(landmark_entries, roster=roster, owner_names=owner_names)
     for row in plan["mint"]:
         if row["slug"] not in have_slugs:
@@ -1930,6 +1945,15 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
             claims, roster=without, owner_names=owner_names,
             landmark_entries=landmark_entries, correction_texts=correction_texts)
         if any(row.get("slug") == candidate["slug"] for row in again["rows"]):
+            continue
+        # v403: nor one his own telling of a dated birth introduces again
+        # (`roster_relations.A_RELATIVE_TOLD_WITH_A_BIRTHDAY_JOINS_THE_ROSTER`)
+        # — that birth claim answers to it.
+        if any(row.get("slug") == candidate["slug"]
+               for row in roster_relations.relative_birth_introductions(
+                   claims, roster=without, telling_texts=telling_texts,
+                   owner_names=owner_names, landmark_entries=landmark_entries,
+                   correction_texts=correction_texts)["rows"]):
             continue
         receipt = {"verdict": "retire", "reason": RETIRE_REASON,
                    "rule": A_ROW_RETIRES_WITH_THE_ENTRIES_THAT_INTRODUCED_IT,

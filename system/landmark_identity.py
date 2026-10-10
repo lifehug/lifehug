@@ -918,6 +918,45 @@ def anchor_place_phrase(text: object) -> tuple[str, str] | None:
     return None
 
 
+#: v403 (owner, 2026-10-10): *"If he gets laid off in San Diego, we would have
+#: been in San Diego, so how does that happen? Why is there no sanity check?"*
+#: "Father laid off in San Diego" (1987/1990-06) and "Family lived in San Diego
+#: a few" (1988-06/1990-06) were drawn across his Mesa stays although his only
+#: San Diego stay is Thunderhead, 1989-06 → 1990-06. The fold's place bound
+#: (`temporal_timeline.A_PLACE_MENTION_IS_AN_OUTER_BOUND`) reads a telling's
+#: place only through :func:`anchor_place_phrase` — "when we lived in X",
+#: "while living in X", a handle that IS "in X" — and a moment's own TITLE says
+#: where it happened in two plainer shapes it never read: a title that ENDS
+#: "… in <Place>" and one that says "<who> lived in <Place>". THE RULE: the
+#: moment's own title in either shape names its place exactly as an anchor
+#: phrase does; everything after that is the outer-bound rule unchanged (only an
+#: inferred window it overlaps is narrowed; a stated date, or a window wholly
+#: outside his stays there, stands).
+A_TITLE_THAT_SAYS_WHERE_NAMES_ITS_PLACE = (
+    "a moment's own title that ends \"in <Place>\" or says \"lived in <Place>\" "
+    "names where it happened, exactly as an anchor phrase does, and the place "
+    "bounds it by his stays there"
+)
+
+_TITLE_PLACE_TAIL_RE = re.compile(r"\s(?i:in)\s+(?P<place>" + _PLACE + r")\s*$")
+_TITLE_LIVED_RE = re.compile(r"\b(?i:lived|living)\s+(?i:in|at)\s+(?P<place>" + _PLACE + r")")
+
+
+def title_place_phrase(text: object) -> tuple[str, str] | None:
+    """:data:`A_TITLE_THAT_SAYS_WHERE_NAMES_ITS_PLACE` — ``("during", place)``
+    for a title :func:`anchor_place_phrase` already reads or that ends "in
+    <Place>" / says "lived in <Place>"; None otherwise."""
+    found = anchor_place_phrase(text)
+    if found is not None:
+        return found
+    raw = " ".join(str(text or "").split())
+    for pattern in (_TITLE_PLACE_TAIL_RE, _TITLE_LIVED_RE):
+        match = pattern.search(raw)
+        if match:
+            return ("during", match.group("place").strip(" .,;"))
+    return None
+
+
 #: Who can be moving when the moment is his: he, the family, or a relative he
 #: moved with ("my parents moved into BJ's house and I moved in with them").
 _MOVER = r"(?:i|we|my\s+(?:parents|family|folks|wife|husband|mom|dad|mother|father))"

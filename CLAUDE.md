@@ -90,6 +90,33 @@ node of that kind. `landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION` decides
 which ladders are live; never offer either ladder by hand to a vault that has
 not raised it.
 
+**A birthday anniversary is not a birth (v403, owner 2026-10-10).** A dated
+birthday is a birth (v344) only when it can be one: a birthday whose year
+disagrees with a birth the vault already knows for that person — roster
+`born`, a stated `family`/`children` landmark birth, a stated birth claim — or
+a parent's or grandparent's birthday inside the owner's own lifetime is an
+ANNIVERSARY, stays a `moment`, never anchors their age, and says so in the
+finding `birthday_read_as_anniversary`
+(`temporal_timeline.A_BIRTHDAY_ANNIVERSARY_IS_NOT_A_BIRTH`). Every telling of
+the owner's own birth dated exactly at his stated birth folds into his one
+birth node, its old id published as a redirect (`temporal_timeline.ONE_OWNER_BIRTH`);
+a title that names no birth ("Date marker 11 Jul 1981") is left where it is.
+A title that is a name and an age ("Kristine turns 10") is that person's age off
+their own birth (`temporal_timeline.A_TITLE_THAT_IS_AN_AGE_IS_AN_AGE`); a
+moment's own title that ends "in <Place>" or says "lived in <Place>" names its
+place for the outer bound (`landmark_identity.A_TITLE_THAT_SAYS_WHERE_NAMES_ITS_PLACE`);
+a residence is drawn at its entry's best ends
+(`temporal_timeline.A_STAY_IS_DRAWN_AT_ITS_ENTRYS_BEST`). All five are fold-time
+READINGS (`timeline-rules:27`), In the Loop by construction: every publish —
+the daily sweep, a filing, a compile, the weekly and monthly recompiles —
+applies them with no vault edit and no new step, and the rule-version bump
+makes an upgraded vault re-derive on its first publish. A relative his own
+telling heads with a relation word and a dated birth ("Sister Kristine (Kris)
+Thompson" over "Kris Thompson — November 20, 1977") is introduced to the roster
+by the existing `entity-roster --ensure-introduced`
+(`roster_relations.A_RELATIVE_TOLD_WITH_A_BIRTHDAY_JOINS_THE_ROSTER`); never
+add such a row by hand.
+
 **Cornerstones (v360, owner 2026-09-25, ADR 0038).** Beside landmarks (the
 skeleton) and keystones (the computed highest-leverage gap) sits a FIXED set of
 dates asked to the day: the owner's birth; his children's, parents', siblings'

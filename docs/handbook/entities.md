@@ -364,6 +364,18 @@ into the roster's `retired_rows` ledger with a receipt naming the entries and
 why, and comes back if an entry introduces it again. A refresh keeps the
 ledger. Never hand-delete a roster row; refile the entry that minted it.
 
+Since v403 it also reads a dated BIRTH the roster lacks against the owner's own
+telling of it (`roster_relations.A_RELATIVE_TOLD_WITH_A_BIRTHDAY_JOINS_THE_ROSTER`):
+when the source's own line puts an immediate-family relation word directly
+before that person's name — "Sister Kristine (Kris) Thompson + household:" over
+"- Kris Thompson — November 20, 1977" — the person gets a row with the
+relationship and the `born`, the header's name as the row's name and the birth
+line's spelling and the parenthetical nickname as aliases. A relation word is
+never an alias (a family has more than one sister), a distant word (aunt,
+cousin) introduces nobody, and no model is called. `relationship` and `born`
+are settled identity fields, so a later roster refresh keeps the row, and the
+v402 retire rule never retires it while the birth claim still introduces it.
+
 ### Owner verdicts (ADR 0013)
 
 `entity-verdict <type> <slug> graduate|never|clear` writes one of two

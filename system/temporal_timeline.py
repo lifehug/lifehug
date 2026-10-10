@@ -367,7 +367,19 @@ from temporal_claims import (  # noqa: E402
 #: follows this generation's own ``node_aliases`` redirect
 #: (:data:`A_LINK_FOLLOWS_ITS_NODE_THROUGH_A_RE_KEY`). The same claims
 #: calculate to different edges, bounds and ``anchor_unresolved`` findings.
-CALCULATION_RULE_VERSION = "timeline-rules:26"
+#: timeline-rules:27 (v403, owner 2026-10-10, "a birthday anniversary is not a
+#: birth"): a birthday reading that disagrees by year with a birth the vault
+#: knows, or an elder's birthday inside his lifetime, stays a moment
+#: (:data:`A_BIRTHDAY_ANNIVERSARY_IS_NOT_A_BIRTH`); every telling of his own
+#: birth dated at his known birth folds into his one birth node
+#: (:data:`ONE_OWNER_BIRTH`); a title that is a name and an age is that
+#: person's age (:data:`A_TITLE_THAT_IS_AN_AGE_IS_AN_AGE`); a moment's own
+#: title names its place (`landmark_identity.A_TITLE_THAT_SAYS_WHERE_NAMES_ITS_PLACE`);
+#: a residence is drawn at its entry's best ends
+#: (:data:`A_STAY_IS_DRAWN_AT_ITS_ENTRYS_BEST`). The same claims calculate to
+#: different kinds, node ids, bounds and findings — so an upgraded vault
+#: re-derives on its next publish whatever its substrate says.
+CALCULATION_RULE_VERSION = "timeline-rules:27"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -969,16 +981,553 @@ def reads_as_a_birth(claim: object, *, owner_ref: object) -> bool:
     return bool(ref or collapsed_text(mention))
 
 
-def _read_event_kind(claim: dict, *, owner_ref: object) -> str:
+def _read_event_kind(claim: dict, *, owner_ref: object,
+                     births: "KnownBirths | None" = None) -> str:
     """What this claim's event IS, as the fold reads it.
 
     The stored kind, except where :func:`reads_as_a_birth` fills an unkinded
     birthday. ONE seat, read by :func:`_group_claims` before the node id is
     minted, so a vault drawn for the first time and a vault re-drawn agree about
     both the kind and the key.
+
+    v403: and except where :func:`birthday_anniversary_refusal` says the
+    birthday is an ANNIVERSARY (:data:`A_BIRTHDAY_ANNIVERSARY_IS_NOT_A_BIRTH`)
+    — then it is the ``moment`` it was told as, never a birth.
     """
     stored = collapsed_text(claim.get("event_kind"))
+    if births is not None and birthday_anniversary_refusal(
+            claim, owner_ref=owner_ref, births=births) is not None:
+        return "moment"
     return "birth" if reads_as_a_birth(claim, owner_ref=owner_ref) else stored
+
+
+#: v403 (owner, 2026-10-10). WHERE IT WAS SEEN: his text *"Happy birthday mom"*
+#: of 19 June 2026 was classified as an event titled "Mom's birthday", dated
+#: 2026-06-19, and :data:`A_DATED_BIRTHDAY_IS_A_BIRTH` re-kinded it as his
+#: mother's BIRTH — node "Desiree Taylor's birth | 2026-06-19" — although her
+#: roster row says born 1955-06-19. A birth node outranks the roster `born`
+#: (:func:`_births_by_subject`), so every age about her was measured from 2026:
+#: "Mom married dad at 21" drew at 2047. The same reading made his father's
+#: 2018 birthday visit "James Taylor's birth | 2018-07-12".
+#:
+#: THE RULE: a birthday reading whose date disagrees BY YEAR with a birth the
+#: vault already knows for that person — their roster `born`, a stated birth in
+#: a `family`/`children` landmark entry, or a stated birth claim about them —
+#: is an ANNIVERSARY of that birth, and a birthday of a PARENT or GRANDPARENT
+#: dated inside the owner's own lifetime is one whatever the vault knows. Its
+#: kind stays ``moment``, it never becomes that person's age anchor, and the
+#: refusal is published as a finding on the node
+#: (:data:`DIAGNOSTIC_BIRTHDAY_READ_AS_ANNIVERSARY`), never silent. The same
+#: refusal covers a ``birth``-kinded claim whose date is WORKED OUT rather than
+#: stated (a landmark entry's ``anchor`` date, "Charlee Joy Taylor's birth |
+#: 2026-01") when it disagrees by year with a birth somebody stated. A fold-time
+#: READING like v344's own: no receipt is rewritten, so every redraw heals.
+A_BIRTHDAY_ANNIVERSARY_IS_NOT_A_BIRTH = (
+    "a birthday reading whose date disagrees by year with a birth the vault "
+    "already knows for that person (roster born, a stated family/children "
+    "landmark birth, a stated birth claim), or a parent's or grandparent's "
+    "birthday dated inside the owner's own lifetime, is an anniversary: it stays "
+    "a moment, never anchors that person's age, and the refusal is published"
+)
+
+#: Reported on the node, never raised: the claim a birthday reading would have
+#: made a birth, and the birth the vault already knew.
+DIAGNOSTIC_BIRTHDAY_READ_AS_ANNIVERSARY = "birthday_read_as_anniversary"
+
+#: The roster relationships whose birth necessarily PRECEDES the owner's own —
+#: `identity_resolution.RELATIONSHIP_CARDINALITY`'s elders, named here because a
+#: birthday of theirs inside his lifetime is impossible as a birth.
+ELDER_RELATIONSHIPS = ("parent", "grandparent")
+
+
+@dataclass(frozen=True)
+class KnownBirths:
+    """What the vault knows about births BEFORE any group is drawn.
+
+    Read off the fold's own inputs — the roster, the landmark entries and the
+    stated birth claims — so :func:`_read_event_kind` can ask it while minting
+    node ids, which is before `_births_by_subject` (a reader of GROUPS) exists.
+    """
+
+    key_index: dict
+    ambiguous: frozenset
+    births: dict          # key -> (DateRecord, "roster_born" | "landmark_birth" | "stated_claim")
+    elders: frozenset     # keys of roster parents and grandparents
+    owner_birth: object   # DateRecord | None
+
+    def keys_of(self, value: object) -> tuple[str, ...]:
+        return _subject_birth_keys(value, self.key_index, self.ambiguous)
+
+    def known_for(self, keys) -> tuple:
+        for key in keys:
+            if key in self.births:
+                return self.births[key]
+        return None
+
+
+def _record_years(record: object) -> tuple[int, int] | None:
+    """``(first year, last year)`` a date record can fall in, or ``None``."""
+    if record is None:
+        return None
+    low = getattr(record, "earliest", None) or getattr(record, "best", None)
+    high = getattr(record, "latest", None) or getattr(record, "best", None)
+    try:
+        first = int(str(low)[:4]) if low else None
+        last = int(str(high)[:4]) if high else None
+    except ValueError:
+        return None
+    if first is None and last is None:
+        return None
+    return (first if first is not None else last, last if last is not None else first)
+
+
+def _years_disagree(left: object, right: object) -> bool:
+    a, b = _record_years(left), _record_years(right)
+    return a is not None and b is not None and (a[1] < b[0] or b[1] < a[0])
+
+
+def known_births(claims: object, *, roster_snapshot: object, landmark_entries: object,
+                 owner_ref: object, birth_date: object = None) -> KnownBirths:
+    """:class:`KnownBirths` for :data:`A_BIRTHDAY_ANNIVERSARY_IS_NOT_A_BIRTH`. PURE.
+
+    In :data:`BIRTH_ANCHOR_TIERS`' spirit, most settled first, and a person
+    filed by a higher tier is never re-filed by a lower one: the roster `born`;
+    a ``family``/``children`` landmark entry whose date is a STATED birth
+    (`landmark_projection.entry_date_event_kind`); a stated ``birth``-kinded
+    claim, used only when every stated birth claim about that person agrees by
+    year (a contradiction is a card's question, never this rule's answer).
+    The owner's birth is ``birth_date`` when supplied, else his stated
+    ``birth`` landmark (`landmark_projection.owner_stated_birth`).
+    """
+    owner = collapsed_text(owner_ref) or DEFAULT_OWNER_REF
+    owner_key = normalized_mention_key(owner)
+    key_index, ambiguous = _person_key_index(roster_snapshot)
+    births: dict = {}
+    elders: set = set()
+
+    def keys(value: object) -> tuple[str, ...]:
+        return _subject_birth_keys(value, key_index, ambiguous)
+
+    def file(value: object, record: object, tier: str) -> None:
+        if record is None:
+            return
+        found = keys(value)
+        if any(key in births for key in found):
+            return
+        for key in found:
+            births.setdefault(key, (record, tier))
+
+    for row in axm.roster_person_rows(roster_snapshot):
+        slug = (normalized_mention_key(row.get("slug"))
+                or normalized_mention_key(row.get("name"))).replace(" ", "-")
+        if not slug:
+            continue
+        ref = ident.entity_ref("person", slug)
+        if normalized_mention_key(ref) == owner_key:
+            continue
+        if collapsed_text(row.get("relationship")) in ELDER_RELATIONSHIPS:
+            elders.update(keys(ref))
+        file(ref, chrono.from_dict(row.get("born")), "roster_born")
+
+    for entry in landmark_entries or ():
+        if not isinstance(entry, dict):
+            continue
+        domain = collapsed_text(entry.get("domain"))
+        record = entry.get("record")
+        if domain not in lp.BIRTH_DATE_SEMANTICS_DOMAINS or not isinstance(record, dict):
+            continue
+        if lp.entry_date_event_kind(domain, record) != lp.BIRTH_DATE_SEMANTICS:
+            continue
+        date = chrono.from_dict(record.get("date"))
+        if date is None or date.basis != "stated":
+            continue
+        who = collapsed_text(record.get("who")) or collapsed_text(record.get("subject"))
+        if who and normalized_mention_key(who) != owner_key:
+            file(who, date, "landmark_birth")
+
+    stated: dict[str, list] = {}
+    for claim in claims or ():
+        if not isinstance(claim, dict):
+            continue
+        if collapsed_text(claim.get("event_kind")) != "birth":
+            continue
+        if collapsed_text(claim.get("claim_type")) not in tc.DATED_CLAIM_TYPES:
+            continue
+        record = chrono.from_dict(claim.get("temporal_value"))
+        if record is None or record.basis != "stated":
+            continue
+        subject = collapsed_text(claim.get("subject_ref")) or collapsed_text(
+            claim.get("subject_mention"))
+        if not subject or normalized_mention_key(subject) == owner_key \
+                or is_owner_reference_only(subject) or lp.is_birth_domain_word(subject) \
+                or normalized_mention_key(subject) in ident.OWNER_SUBJECT_MENTIONS:
+            continue
+        found = keys(subject)
+        if found:
+            stated.setdefault(found[-1], []).append((subject, record))
+    for rows in stated.values():
+        if all(not _years_disagree(rows[0][1], record) for _, record in rows[1:]):
+            file(rows[0][0], rows[0][1], "stated_claim")
+
+    owner_birth = chrono.from_dict(birth_date) if birth_date is not None else None
+    if owner_birth is None:
+        # His stated `birth` LANDMARK only — never "the first stated birth
+        # claim", which is a pick when two of his birth claims disagree.
+        owner_birth = chrono.from_dict(lp.owner_stated_birth(landmark_entries))
+    return KnownBirths(key_index=key_index, ambiguous=ambiguous, births=births,
+                       elders=frozenset(elders), owner_birth=owner_birth)
+
+
+def birthday_anniversary_refusal(claim: object, *, owner_ref: object,
+                                 births: KnownBirths) -> dict | None:
+    """The refusal :data:`A_BIRTHDAY_ANNIVERSARY_IS_NOT_A_BIRTH` makes of this
+    claim, or ``None`` when it is not refused.
+
+    Two claims are asked: a birthday :func:`reads_as_a_birth` would make a
+    birth, and a stored ``birth`` whose date is not a STATED one. Either is
+    refused when its date disagrees by year with the subject's known birth;
+    the first also when its subject is a roster parent or grandparent and its
+    date falls on or after the owner's own birth.
+    """
+    if not isinstance(claim, dict) or births is None:
+        return None
+    record = chrono.from_dict(claim.get("temporal_value"))
+    if record is None:
+        return None
+    birthday = reads_as_a_birth(claim, owner_ref=owner_ref)
+    worked_out = (not birthday
+                  and collapsed_text(claim.get("event_kind")) == "birth"
+                  and collapsed_text(claim.get("claim_type")) in tc.DATED_CLAIM_TYPES
+                  and record.basis != "stated")
+    if not birthday and not worked_out:
+        return None
+    subject = collapsed_text(claim.get("subject_ref")) or collapsed_text(
+        claim.get("subject_mention"))
+    if not subject:
+        return None
+    owner_key = normalized_mention_key(collapsed_text(owner_ref) or DEFAULT_OWNER_REF)
+    if normalized_mention_key(subject) == owner_key:
+        return None
+    found = births.keys_of(subject)
+    known = births.known_for(found)
+    if known is not None and _years_disagree(record, known[0]):
+        return {"rule": A_BIRTHDAY_ANNIVERSARY_IS_NOT_A_BIRTH,
+                "claim_id": collapsed_text(claim.get("claim_id")),
+                "subject_ref": subject,
+                "stated": record.best or record.earliest,
+                "known_birth": known[0].best or known[0].earliest,
+                "known_from": known[1]}
+    if birthday and births.owner_birth is not None \
+            and any(key in births.elders for key in found):
+        start = births.owner_birth.earliest or births.owner_birth.best or ""
+        told = record.earliest or record.best or ""
+        if start and told and told[:len(start)] >= start:
+            return {"rule": A_BIRTHDAY_ANNIVERSARY_IS_NOT_A_BIRTH,
+                    "claim_id": collapsed_text(claim.get("claim_id")),
+                    "subject_ref": subject,
+                    "stated": record.best or record.earliest,
+                    "known_birth": None,
+                    "known_from": "elder_inside_owner_lifetime",
+                    "owner_birth": start}
+    return None
+
+
+def _anniversary_rekey_aliases(claims: list[dict], *, groups: dict, owner_ref: str,
+                               births: KnownBirths) -> tuple[dict, list]:
+    """``({old node id: new node id}, findings)`` for refused births that moved.
+
+    :data:`AN_IDENTITY_RE_KEY_IS_A_WAY_A_NODE_ID_MOVES` for the v403 refusal: a
+    claim with no ``event_ref`` of its own mints its id from its KIND, so a
+    worked-out "birth" that now reads as a ``moment`` is drawn at a different
+    id. The old id is published as a redirect when nothing publishes it any
+    more, never otherwise — the same two refusals v350 makes.
+    """
+    moves: dict[str, str] = {}
+    for claim in claims or ():
+        if not isinstance(claim, dict) or collapsed_text(claim.get("event_ref")):
+            continue
+        if birthday_anniversary_refusal(claim, owner_ref=owner_ref, births=births) is None:
+            continue
+        subject = _subject_handle(claim)
+        was_kind = _read_event_kind(claim, owner_ref=owner_ref)
+        if not subject or not was_kind or was_kind == "moment":
+            continue
+        was = _mint_node_id(event_kind=was_kind, subject=subject, owner_ref=owner_ref)
+        now_id = _mint_node_id(event_kind="moment", subject=subject, owner_ref=owner_ref)
+        if was != now_id and was not in groups and now_id in groups:
+            moves.setdefault(was, now_id)
+    findings = [{"finding": DIAGNOSTIC_ANNIVERSARY_REKEYED, "node_id": now_id,
+                 "was_node_id": was} for was, now_id in sorted(moves.items())]
+    return moves, findings
+
+
+#: v403. Reported, never raised: the id a refused "birth" used to be drawn at.
+DIAGNOSTIC_ANNIVERSARY_REKEYED = "anniversary_rekeyed"
+
+
+#: v403 (owner, 2026-10-10). WHERE IT WAS SEEN: the owner had ELEVEN birth rows.
+#: Two were kinded ``birth`` ("Dave Taylor's birth", "Born in Redlands"), and
+#: nine more were ``moment``s dated 1981-07-11 about "narrator", "the narrator",
+#: "author", "self" — "Birth on 11 Jul 1981", "Born in Redlands, California" ×3,
+#: "Birth in Redlands" ×2, "Your birth". :data:`A_DATED_BIRTHDAY_IS_A_BIRTH`
+#: deliberately leaves the owner out, and the binder's once-per-subject rule
+#: only sees tellings already kinded as births, so nothing folded them.
+#:
+#: THE RULE: a group whose every claim is about the OWNER (an owner mention,
+#: `identity_resolution.OWNER_SUBJECT_MENTIONS`, his ref, or his own name),
+#: whose every event mention reads as a birth (the birth domain's own words,
+#: `landmark_projection.birth_event_subject` naming him, or a title that opens
+#: with a birth noun — "Born in Redlands"), and whose every dated claim is
+#: EXACTLY his known birth (his stated `birth` landmark) IS his birth: it folds
+#: into his one birth node, and its old id is published as a redirect. The date
+#: guard is what keeps v340's "Harvey's birth as turning point" (subject
+#: ``self``, 2021-10-11) out, and a title that names no birth ("Date marker 11
+#: Jul 1981") is left exactly where it is.
+ONE_OWNER_BIRTH = (
+    "a telling about the owner that reads as a birth and is dated exactly at "
+    "his known birth is his birth: it folds into his one birth node, the id it "
+    "used to be drawn at is published as a redirect, and a telling dated "
+    "anywhere else or titled as something else never folds"
+)
+
+#: Reported, never raised: a telling of the owner's birth folded into his node.
+DIAGNOSTIC_OWNER_BIRTH_TELLING_FOLDED = "owner_birth_telling_folded"
+
+
+def _owner_given_and_surnames(owner_names: object) -> tuple[frozenset, frozenset]:
+    given: set[str] = set()
+    surnames: set[str] = set()
+    for name in owner_names or ():
+        words = collapsed_text(name).casefold().split()
+        if not words:
+            continue
+        given.add(words[0])
+        if len(words) > 1:
+            surnames.add(words[-1])
+    return frozenset(given), frozenset(surnames)
+
+
+def _names_the_owner(text: object, *, owner: str, owner_names: object = ()) -> bool:
+    """Is this subject text the OWNER — his ref, an owner-only word, or a name
+    of his own (his given name and his surname, "Dave Taylor")?"""
+    body = collapsed_text(text)
+    if not body:
+        return False
+    key = normalized_mention_key(body)
+    if key == normalized_mention_key(owner) or key in ident.OWNER_SUBJECT_MENTIONS \
+            or body.casefold() in ident.OWNER_SUBJECT_MENTIONS \
+            or is_owner_reference_only(body):
+        return True
+    words = body.casefold().split()
+    given, surnames = _owner_given_and_surnames(owner_names)
+    if any(body.casefold() == collapsed_text(name).casefold() for name in owner_names or ()):
+        return True
+    return (2 <= len(words) <= 4 and words[0] in given and words[-1] in surnames)
+
+
+def _mention_reads_as_owner_birth(text: object, *, owner: str, owner_names: object) -> bool:
+    """Does this event mention read as a BIRTH that is the owner's own?"""
+    body = collapsed_text(text)
+    if not body:
+        return False
+    if lp.is_birth_domain_word(body):
+        return True
+    named = lp.birth_event_subject(body)
+    if named:
+        return _names_the_owner(named, owner=owner, owner_names=owner_names)
+    folded = body.casefold().translate(str.maketrans({"’": "'"}))
+    return any(folded == noun or folded.startswith(noun + " ")
+               for noun in lp.BIRTH_EVENT_NOUNS)
+
+
+def _owner_birth_telling(group: dict, *, owner: str, owner_names: object,
+                         owner_birth: object) -> bool:
+    """Is this group a telling of the owner's birth (:data:`ONE_OWNER_BIRTH`)?"""
+    if group.get("era_label") or group.get("participation_domain"):
+        return False
+    if collapsed_text(group.get("event_kind")) not in ("", "moment", "birth"):
+        return False
+    claims = [c for c in group.get("claims") or () if isinstance(c, dict)]
+    if not claims or owner_birth is None:
+        return False
+    dated = 0
+    named_birth = False
+    for claim in claims:
+        if not _names_the_owner(_subject_handle(claim), owner=owner, owner_names=owner_names):
+            return False
+        mention = collapsed_text(claim.get("event_mention"))
+        if mention:
+            if not _mention_reads_as_owner_birth(mention, owner=owner, owner_names=owner_names):
+                return False
+            named_birth = True
+        elif collapsed_text(claim.get("event_kind")) == "birth":
+            named_birth = True
+        if collapsed_text(claim.get("claim_type")) in tc.DATED_CLAIM_TYPES:
+            record = chrono.from_dict(claim.get("temporal_value"))
+            if record is None:
+                return False
+            if (record.earliest, record.latest) != (owner_birth.earliest, owner_birth.latest):
+                return False
+            dated += 1
+        elif collapsed_text(claim.get("claim_type")) not in ("occurrence", "identity"):
+            return False
+    return named_birth and dated > 0
+
+
+def _fold_owner_birth_tellings(groups: dict, *, owner: str, owner_names: object,
+                               births: KnownBirths) -> tuple[dict, list]:
+    """:data:`ONE_OWNER_BIRTH`, applied to the drawn groups IN PLACE.
+
+    Returns ``({old node id: owner birth node id}, findings)``. Runs right after
+    grouping, before any reader of births, so the owner's age anchor, the
+    cornerstone and every title see one birth.
+    """
+    owner_birth = births.owner_birth if births is not None else None
+    target = _mint_node_id(event_kind="birth", subject=owner, owner_ref=owner)
+    if target not in groups:
+        return {}, []
+    moved = [node_id for node_id, group in sorted(groups.items())
+             if node_id != target and _owner_birth_telling(
+                 group, owner=owner, owner_names=owner_names, owner_birth=owner_birth)]
+    if not moved:
+        return {}, []
+    home = groups.get(target)
+    if home is None or collapsed_text(home.get("event_kind")) != "birth":
+        # Folding is INTO the node his birth already is; with none drawn the
+        # tellings stand where they are and nothing is re-keyed.
+        return {}, []
+    aliases: dict[str, str] = {}
+    findings: list[dict] = []
+    seen = {collapsed_text(c.get("claim_id")) for c in home["claims"] if isinstance(c, dict)}
+    for node_id in moved:
+        group = groups.pop(node_id)
+        for claim in group["claims"]:
+            claim_id = collapsed_text(claim.get("claim_id"))
+            if claim_id not in seen:
+                seen.add(claim_id)
+                home["claims"].append(claim)
+        for subject in group.get("subjects") or ():
+            if subject not in home["subjects"]:
+                home["subjects"].append(subject)
+        aliases[node_id] = target
+        findings.append({"finding": DIAGNOSTIC_OWNER_BIRTH_TELLING_FOLDED,
+                         "node_id": target, "was_node_id": node_id,
+                         "rule": ONE_OWNER_BIRTH})
+    home["claims"].sort(key=lambda row: collapsed_text(row.get("claim_id")))
+    home["subjects"].sort()
+    return aliases, findings
+
+
+#: v403 (owner, 2026-10-10). WHERE IT WAS SEEN: "Kristine turns 10" and
+#: "Kristine 10" were drawn across the whole Fisches House stay (1986-06/1988-06)
+#: because nobody had recorded his sister's birthday. Once she has one
+#: (:data:`roster_relations.A_RELATIVE_TOLD_WITH_A_BIRTHDAY_JOINS_THE_ROSTER`),
+#: a title that is nothing but her name and an age IS an age of hers, and it is
+#: arithmetic off her birth: "<Name> turns <N>" / "<Name> turned <N>" is her Nth
+#: birthday, "<Name> <N>" is the year she was N. It NARROWS an inferred window
+#: (the resolver's, an anchor's) it overlaps and dates a moment with none; it
+#: never moves a date somebody stated (v345: an age never places a moment the
+#: vault already dates), and a window it does not overlap is left alone and
+#: reported. The name must be the group's own subject — the person whose birth
+#: :func:`_births_by_subject` files under it — so "Kristine 10" is never
+#: measured from anybody else's birthday.
+A_TITLE_THAT_IS_AN_AGE_IS_AN_AGE = (
+    "a moment titled by nothing but a person's name and an age — \"Kristine "
+    "turns 10\", \"Kristine 10\" — is that person's age, measured from their own "
+    "known birth: it narrows an inferred window it overlaps, dates a moment "
+    "with none, and never moves a stated date"
+)
+
+#: Reported, never raised: a node a title's age dated or narrowed.
+DIAGNOSTIC_TITLE_AGE_DATED = "title_age_dated"
+#: Reported, never raised: a title's age that does not fit the node's window.
+DIAGNOSTIC_TITLE_AGE_DISAGREES = "title_age_disagrees"
+
+_TITLE_AGE_RE = re.compile(
+    r"^(?P<who>[A-Z][\w'’.-]*(?:\s+[A-Z][\w'’.-]*){0,3})\s+"
+    r"(?:(?P<verb>turns|turned)\s+)?(?P<age>\d{1,3})$")
+
+#: The bases a title's age may narrow: an inference, never a statement.
+TITLE_AGE_NARROWS_BASES = ("anchor", "order", "relative", "age")
+
+
+def title_age_window(text: object, birth: object) -> tuple[str, object] | None:
+    """``(name as written, DateRecord)`` — the window a title's age names, or
+    ``None`` (:data:`A_TITLE_THAT_IS_AN_AGE_IS_AN_AGE`)."""
+    match = _TITLE_AGE_RE.match(collapsed_text(text))
+    if match is None or birth is None:
+        return None
+    age = int(match.group("age"))
+    if age > 120:
+        return None
+    turned = chrono.add_years(birth, age)
+    if turned is None:
+        return None
+    if match.group("verb"):
+        return match.group("who"), replace(turned, basis="age", confidence="inferred",
+                                           anchors=(), provenance=())
+    following = chrono.add_years(birth, age + 1)
+    start = turned.earliest
+    end = chrono.day_before(following.earliest) if following is not None else None
+    if not start or not end:
+        return None
+    return match.group("who"), chrono.DateRecord(
+        best=f"{start}/{end}", earliest=start, latest=end, granularity="range",
+        confidence="inferred", basis="age")
+
+
+def _apply_title_ages(groups: dict, calculated: dict, *, birth_for_group,
+                      births_by_subject: dict, diagnostics: list) -> None:
+    """:data:`A_TITLE_THAT_IS_AN_AGE_IS_AN_AGE`, on the reconciled rows IN PLACE."""
+    for node_id, group in sorted(groups.items()):
+        claims = [c for c in group.get("claims") or () if isinstance(c, dict)]
+        if any(collapsed_text(c.get("claim_type")) == "age" for c in claims):
+            continue
+        birth = birth_for_group(group)
+        if birth is None or getattr(birth, "granularity", "") not in ("day", "month"):
+            continue
+        for claim in claims:
+            found = title_age_window(claim.get("event_mention"), birth)
+            if found is None:
+                continue
+            who, window = found
+            if births_by_subject.get(normalized_mention_key(who)) is not birth:
+                continue
+            row = calculated[node_id]
+            best = row.get("best")
+            if best is None:
+                row["best"] = window
+            elif best.basis not in TITLE_AGE_NARROWS_BASES:
+                break
+            else:
+                narrowed = chrono.intersect(best, window)
+                if narrowed is None:
+                    diagnostics.append({"finding": DIAGNOSTIC_TITLE_AGE_DISAGREES,
+                                        "node_id": node_id,
+                                        "claim_id": collapsed_text(claim.get("claim_id")),
+                                        "placed": chrono.to_edtf(best) or "",
+                                        "age_window": _window_text(window)})
+                    break
+                row["best"] = narrowed
+            diagnostics.append({"finding": DIAGNOSTIC_TITLE_AGE_DATED, "node_id": node_id,
+                                "claim_id": collapsed_text(claim.get("claim_id")),
+                                "age_window": _window_text(window),
+                                "rule": A_TITLE_THAT_IS_AN_AGE_IS_AN_AGE})
+            break
+
+
+def _anniversary_findings(groups: dict, *, owner_ref: object,
+                          births: KnownBirths) -> list[dict]:
+    """One :data:`DIAGNOSTIC_BIRTHDAY_READ_AS_ANNIVERSARY` per refused claim,
+    filed under the node it was drawn in."""
+    out: list[dict] = []
+    for node_id, group in sorted(groups.items()):
+        for claim in group.get("claims") or ():
+            refusal = birthday_anniversary_refusal(claim, owner_ref=owner_ref, births=births)
+            if refusal is not None:
+                out.append({"finding": DIAGNOSTIC_BIRTHDAY_READ_AS_ANNIVERSARY,
+                            "node_id": node_id, **refusal})
+    return out
 
 
 def _node_kind_for(event_kind: object) -> str:
@@ -2597,7 +3146,8 @@ def _era_groups(era_views: object, *, owner_ref: str) -> dict:
 
 
 def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
-                  identity: object = None, participation: object = None) -> dict:
+                  identity: object = None, participation: object = None,
+                  births: "KnownBirths | None" = None) -> dict:
     """Claims → ``node_id -> group``, in one deterministic pass.
 
     The grouping key is the EPISODE's node id when an active ``same`` binding
@@ -2651,7 +3201,8 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
     # never redirected, for v342's own reason: the recorder still holds it.
     rekeys = {
         was: now_id
-        for was, now_id in _identity_rekeys(claims, owner_ref=owner_ref).items()
+        for was, now_id in _identity_rekeys(claims, owner_ref=owner_ref,
+                                            births=births).items()
         if was not in seeded and now_id not in seeded
     }
     # One place, one landmark (`landmark_identity.ONE_PLACE_ONE_LANDMARK`): a
@@ -2681,7 +3232,7 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
         # undated stay.
         if not stay and _claim_is_empty(claim):
             continue
-        event_kind = _read_event_kind(claim, owner_ref=owner_ref)
+        event_kind = _read_event_kind(claim, owner_ref=owner_ref, births=births)
         subject = _subject_handle(claim)
         if not subject or (not event_kind and not stay):
             continue
@@ -2821,7 +3372,8 @@ AN_IDENTITY_RE_KEY_IS_A_WAY_A_NODE_ID_MOVES = (
 )
 
 
-def _identity_rekeys(claims: list[dict], *, owner_ref: str) -> dict[str, str]:
+def _identity_rekeys(claims: list[dict], *, owner_ref: str,
+                     births: "KnownBirths | None" = None) -> dict[str, str]:
     """``{the id a claim's key USED to mint: the id it mints now}``.
 
     :data:`AN_IDENTITY_RE_KEY_IS_A_WAY_A_NODE_ID_MOVES`, as one pure map, and
@@ -2850,7 +3402,7 @@ def _identity_rekeys(claims: list[dict], *, owner_ref: str) -> dict[str, str]:
         mention = collapsed_text(claim.get("subject_mention"))
         if not ref or not mention or ref == mention:
             continue
-        event_kind = _read_event_kind(claim, owner_ref=owner_ref)
+        event_kind = _read_event_kind(claim, owner_ref=owner_ref, births=births)
         if not event_kind:
             continue
         now_id = _mint_node_id(event_kind=event_kind, subject=ref, owner_ref=owner_ref)
@@ -2871,7 +3423,8 @@ def _identity_rekeys(claims: list[dict], *, owner_ref: str) -> dict[str, str]:
 
 
 def _identity_rekey_aliases(claims: list[dict], *, groups: dict,
-                            owner_ref: str) -> tuple[dict, list]:
+                            owner_ref: str,
+                            births: "KnownBirths | None" = None) -> tuple[dict, list]:
     """``({old node id: new node id}, findings)`` for the subjects that resolved.
 
     v345's `_landmark_redraw_aliases` in the mirror: the same two quiet refusals
@@ -2885,7 +3438,8 @@ def _identity_rekey_aliases(claims: list[dict], *, groups: dict,
     """
     aliases: dict[str, str] = {}
     findings: list[dict] = []
-    for was, now_id in sorted(_identity_rekeys(claims, owner_ref=owner_ref).items()):
+    for was, now_id in sorted(_identity_rekeys(claims, owner_ref=owner_ref,
+                                               births=births).items()):
         if was in groups or now_id not in groups:
             continue
         aliases[was] = now_id
@@ -3444,6 +3998,70 @@ def _apply_durations(group: dict, calculated: dict, *, diagnostics: list) -> Non
 # --------------------------------------------------------------------------
 
 
+#: v403 (owner, 2026-10-10). WHERE IT WAS SEEN: his "Avenue F" stay has two
+#: filed ends — "July 1982" (stated, 2026-09-15) and "June 1982" (from the
+#: family letters, document, 2026-10-07). The landmark drawing reconciles each
+#: end with `chronology.reconcile` and publishes June 1982 as the end, July as
+#: its alternate; the fold took the LATEST stated end instead, so the stay node
+#: read "1981-07-11/1982-07" while its own landmark said June, and every moment
+#: folded onto the stay showed "July 1981–July 1982".
+#:
+#: THE RULE: a residence stay's node is drawn at its ENTRY's best on both ends —
+#: each end reconciled exactly as the drawing reconciles it
+#: (`landmark_projection.drawn_bound`, over the landmark's own dated claims) —
+#: and the losing readings stay alternates, named in the span's provenance.
+A_STAY_IS_DRAWN_AT_ITS_ENTRYS_BEST = (
+    "a residence stay's node is drawn at its entry's best start and best end — "
+    "each reconciled as the landmark drawing reconciles it — and the other "
+    "readings of each end stay alternates in its provenance"
+)
+
+#: Reported, never raised: a stay whose drawn end moved to the entry's best.
+DIAGNOSTIC_STAY_DRAWN_AT_ENTRY_BEST = "stay_drawn_at_entry_best"
+
+
+def _span_at_the_entrys_best(group: dict, span: object, *, diagnostics: list):
+    """:data:`A_STAY_IS_DRAWN_AT_ITS_ENTRYS_BEST`; ``span`` unchanged when the
+    group is not a landmark stay or its entry's ends already agree."""
+    if span is None or collapsed_text(group.get("participation_domain")) \
+            != RESIDENCE_OVERLAP_DOMAIN:
+        return span
+    bounds: dict[str, list] = {lp.SPAN_START_EVENT_KIND: [], lp.SPAN_END_EVENT_KIND: []}
+    for claim in group.get("claims") or ():
+        if not isinstance(claim, dict) or collapsed_text(claim.get("claim_type")) != "date":
+            continue
+        source = claim.get("source_ref") if isinstance(claim.get("source_ref"), dict) else {}
+        if not collapsed_text(source.get("source_id")).startswith("landmark:"):
+            continue
+        kind = collapsed_text(claim.get("event_kind"))
+        record = chrono.from_dict(claim.get("temporal_value"))
+        if kind in bounds and record is not None:
+            bounds[kind].append(record.to_dict())
+    start, start_alternates = lp.drawn_bound(bounds[lp.SPAN_START_EVENT_KIND])
+    end, end_alternates = lp.drawn_bound(bounds[lp.SPAN_END_EVENT_KIND])
+    start_record = chrono.from_dict(start) if start else None
+    end_record = chrono.from_dict(end) if end else None
+    earliest = start_record.earliest if start_record is not None else span.earliest
+    latest = end_record.latest if end_record is not None else span.latest
+    if (earliest, latest) == (span.earliest, span.latest) or not earliest:
+        return span
+    weaker = [record.basis for record in (start_record, end_record)
+              if record is not None and record.basis != "stated"]
+    notes = tuple(
+        {"rule": "landmark_span_alternate", "bound": bound,
+         "text": f"also told: {bound} {chrono.from_dict(row).best}"}
+        for bound, rows in (("start", start_alternates), ("end", end_alternates))
+        for row in rows if chrono.from_dict(row) is not None)
+    diagnostics.append({"finding": DIAGNOSTIC_STAY_DRAWN_AT_ENTRY_BEST,
+                        "node_id": group["node_id"],
+                        "was": span.best, "rule": A_STAY_IS_DRAWN_AT_ITS_ENTRYS_BEST})
+    return chrono.DateRecord(
+        best=f"{earliest}/{latest or '..'}", earliest=earliest, latest=latest,
+        granularity="range", confidence=span.confidence,
+        basis=weaker[0] if weaker else span.basis, anchors=span.anchors,
+        provenance=tuple(span.provenance) + notes)
+
+
 def _apply_participation_span(group: dict, calculated: dict, *, diagnostics: list) -> None:
     """A stay's two ends are ONE stretch, not two rival readings of a date.
 
@@ -3497,6 +4115,7 @@ def _apply_participation_span(group: dict, calculated: dict, *, diagnostics: lis
                 provenance=tuple(stated.provenance) + tuple(window.provenance),
             )
             open_ended = False
+    span = _span_at_the_entrys_best(group, span, diagnostics=diagnostics)
     alternates = []
     if (stated is not None and window is not None
             and (window.earliest, window.latest) != (span.earliest, span.latest)):
@@ -4145,9 +4764,12 @@ def _place_anchor_resolver(stays: list[dict]):
 
     def resolve(text: object, kind: str = "") -> str:
         raw = collapsed_text(text)
-        phrase = lid.anchor_place_phrase(raw)
+        # v403, `landmark_identity.A_TITLE_THAT_SAYS_WHERE_NAMES_ITS_PLACE`: a
+        # moment's own TITLE ("Father laid off in San Diego") names its place.
+        phrase = (lid.title_place_phrase(raw) if kind == "title"
+                  else lid.anchor_place_phrase(raw))
         relation, place = phrase if phrase else ("during", raw)
-        if kind == "telling" and phrase is None:
+        if kind in ("telling", "title") and phrase is None:
             return ""
         if kind != "telling" and phrase is None:
             # An anchor HANDLE that ends "… in <place>" names where it was.
@@ -4322,8 +4944,15 @@ def _telling_place_edges(groups: dict, calculated: dict, resolve,
                 row.get("quote") for row in claim.get("evidence") or ()
                 if isinstance(row, dict)]
             ref = ""
-            for text in texts:
-                ref = resolve(text, "telling") if collapsed_text(text) else ""
+            for position, text in enumerate(texts):
+                # The first text is the moment's own title (v403,
+                # `landmark_identity.A_TITLE_THAT_SAYS_WHERE_NAMES_ITS_PLACE`),
+                # read as a SANITY CHECK on a window the vault already drew —
+                # an undated moment is left to the containment rung and the
+                # anchor phrases, which place it more narrowly than a city can.
+                as_title = position == 0 and best is not None
+                ref = (resolve(text, "title" if as_title else "telling")
+                       if collapsed_text(text) else "")
                 if ref:
                     break
             if ref and ref != node_id:
@@ -6645,8 +7274,24 @@ def derive_calculated_timeline(
     # by an identity operation, so it has no member tellings of its own and
     # publishing `telling_count: 0` on it would be a fact nobody filed.
     identity.adopt_participation_episodes(participation.node_of_episode)
+    # v403, `A_BIRTHDAY_ANNIVERSARY_IS_NOT_A_BIRTH`: what the vault already
+    # knows about births, read off the fold's own inputs BEFORE any node id is
+    # minted, because whether a birthday is a birth decides the id.
+    births = known_births(resolved, roster_snapshot=roster_snapshot,
+                          landmark_entries=landmark_entries, owner_ref=owner,
+                          birth_date=birth_date)
     groups = _group_claims(resolved, owner_ref=owner, era_views=era_views,
-                           identity=identity, participation=participation)
+                           identity=identity, participation=participation,
+                           births=births)
+    diagnostics.extend(_anniversary_findings(groups, owner_ref=owner, births=births))
+    anniversary_aliases, anniversary_alias_findings = _anniversary_rekey_aliases(
+        resolved, groups=groups, owner_ref=owner, births=births)
+    diagnostics.extend(anniversary_alias_findings)
+    # v403, `ONE_OWNER_BIRTH`: every telling of his birth folds into his one
+    # birth node, BEFORE the age anchor and the cornerstones read births.
+    owner_birth_aliases, owner_birth_findings = _fold_owner_birth_tellings(
+        groups, owner=owner, owner_names=owner_names, births=births)
+    diagnostics.extend(owner_birth_findings)
     # v345. The node id a re-read landmark entry used to be drawn at, redirected
     # to the id it is drawn at now — computed AFTER grouping, so a key the
     # drawing still publishes is never made an alias of anything.
@@ -6658,7 +7303,7 @@ def derive_calculated_timeline(
     # same reason as the line above: AFTER grouping, so a key the drawing still
     # publishes is never made an alias of anything.
     rekey_aliases, rekey_alias_findings = _identity_rekey_aliases(
-        resolved, groups=groups, owner_ref=owner
+        resolved, groups=groups, owner_ref=owner, births=births
     )
     diagnostics.extend(rekey_alias_findings)
     roster_names = _roster_names(roster_snapshot)
@@ -6785,6 +7430,10 @@ def derive_calculated_timeline(
         if node_id in groups:
             _apply_participation_span(groups[node_id], calculated[node_id],
                                       diagnostics=diagnostics)
+    # v403, `A_TITLE_THAT_IS_AN_AGE_IS_AN_AGE`: after the spans, before the
+    # edges, so an age-dated moment is an ordinary seed for the fixpoint.
+    _apply_title_ages(groups, calculated, birth_for_group=birth_for_group,
+                      births_by_subject=births_by_subject, diagnostics=diagnostics)
     # E-L2a retires `place_co_location` into the ONE containment rung
     # (design §0.2 M1, §4.1). What the pass could still do that the rung
     # cannot — ask WHICH of several stays a mention belongs to — stays here as
@@ -6827,7 +7476,8 @@ def derive_calculated_timeline(
         stem_index=_stem_anchor_index(groups, displays), labels=labels,
         # v375 (timeline-rules:26): the SAME redirect table this generation
         # publishes as `node_aliases` below, in the same precedence.
-        aliases={**rekey_aliases, **landmark_aliases,
+        aliases={**anniversary_aliases, **owner_birth_aliases,
+                 **rekey_aliases, **landmark_aliases,
                  **participation.node_aliases, **identity.node_aliases()})
     across = []
     for node_id in sorted(ambiguity):
@@ -7346,7 +7996,10 @@ def derive_calculated_timeline(
         # person's decision and a stay's own re-key both outrank a redraw.
         # v350 adds the fourth beside it, at the same lowest precedence and for
         # the same reason: an arithmetic re-key never outranks a decision.
-        node_aliases={**rekey_aliases, **landmark_aliases,
+        # v403 adds the refused-birth and owner-birth re-keys at the same
+        # lowest precedence: arithmetic never outranks a decision.
+        node_aliases={**anniversary_aliases, **owner_birth_aliases,
+                      **rekey_aliases, **landmark_aliases,
                       **participation.node_aliases, **identity.node_aliases()},
         episode_aliases=identity.episode_aliases(),
         identity_rule_version=efc.IDENTITY_RULE_VERSION,
