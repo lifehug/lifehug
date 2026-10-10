@@ -3350,6 +3350,14 @@ def _attach_dates(entry: dict, claims: list[dict], *, row: object,
     _set_or_drop(entry, landmarks_interaction.SPAN_ALTERNATES_KEY, span_alternates or None)
 
 
+def drawn_bound(records: object) -> tuple[dict | None, list[dict]]:
+    """``(best, alternates)`` — how the landmark DRAWING reconciles one date or
+    span bound (:func:`_attach_dates`). Public so the fold draws a stay's two
+    ends exactly as `state/landmarks.json` does (v403,
+    `temporal_timeline.A_STAY_IS_DRAWN_AT_ITS_ENTRYS_BEST`)."""
+    return _reconciled(records)
+
+
 def _reconciled(records: object) -> tuple[dict | None, list[dict]]:
     rows = [r for r in (records or ()) if r]
     if not rows:

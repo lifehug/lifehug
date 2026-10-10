@@ -386,8 +386,21 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:26 -->
-`timeline-rules:26` — a link follows its node through a re-key (v375, owner
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:27 -->
+`timeline-rules:27` — a birthday anniversary is not a birth (v403, owner
+2026-10-10): a birthday reading whose date disagrees by year with a birth the
+vault already knows for that person, or a parent's or grandparent's birthday
+inside his own lifetime, stays a moment and never anchors their age
+(`temporal_timeline.A_BIRTHDAY_ANNIVERSARY_IS_NOT_A_BIRTH`, finding
+`birthday_read_as_anniversary`); every telling of his own birth dated exactly at
+his stated birth folds into his one birth node (`temporal_timeline.ONE_OWNER_BIRTH`);
+a title that is nothing but a name and an age ("Kristine turns 10") is that
+person's age off their own birth (`temporal_timeline.A_TITLE_THAT_IS_AN_AGE_IS_AN_AGE`);
+a moment's own title that ends "in <Place>" or says "lived in <Place>" names its
+place for the outer bound (`landmark_identity.A_TITLE_THAT_SAYS_WHERE_NAMES_ITS_PLACE`);
+and a residence is drawn at its entry's best ends, the other readings kept as
+alternates (`temporal_timeline.A_STAY_IS_DRAWN_AT_ITS_ENTRYS_BEST`).
+Before it, `timeline-rules:26` — a link follows its node through a re-key (v375, owner
 2026-09-29, *"a software re-key is not a change to my life; carry links
 over"*): an anchor naming a node id the drawing no longer publishes follows
 the generation's own `node_aliases` redirect

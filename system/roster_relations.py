@@ -1703,3 +1703,175 @@ def with_called_by(roster: object, texts: object) -> object:
             return annotated["entities"]
         return [with_called_by(item, texts) if isinstance(item, dict) else item for item in roster]
     return roster
+
+
+# --------------------------------------------------------------------------
+# v403 (owner, 2026-10-10) — a relative he told with a birthday introduces
+# themselves
+# --------------------------------------------------------------------------
+#
+# WHERE IT WAS SEEN: his "Family birthdays roster" note lists "Sister Kristine
+# (Kris) Thompson + household:" over the line "- Kris Thompson — November 20,
+# 1977", and "Sister Jacque Cook (…):" over "- Jacque Cook — July 24, 1979".
+# The classifier drew both births ("Kris Thompson's birth 1977-11-20"), but the
+# relation word is on the HEADER line, which no claim quotes, so the v344
+# batch — which reads only the claims' own texts — never saw "Sister", and
+# neither sister reached the roster. "Kristine turns 10" then had no birthday
+# to be measured from. The owner: "Kristine is my sister and should be in the
+# roster."
+#
+# THE RULE: a dated BIRTH claim (stored `birth`, or `<Name>'s birth`) about a
+# named person nobody on the roster answers to, whose own source — the owner's
+# telling, word for word (`relation_words.own_telling_texts`) — puts an
+# IMMEDIATE-FAMILY relation word (`axis_membership.IMMEDIATE_FAMILY_RELATION_WORDS`,
+# read through the one vocabulary `identity_resolution.RELATIONSHIP_MENTION_WORDS`)
+# directly before that person's name ("Sister Kristine (Kris) Thompson", "my
+# brother AJ Taylor"), introduces that person: one row, with the relationship
+# and the birth, through the same writer as every other introduction. The name
+# on the header is the row's name; the spelling on the birth line and a
+# parenthetical nickname ride as aliases. Never a relationship WORD as an alias
+# (a family has more than one sister), never a first name alone, no model.
+A_RELATIVE_TOLD_WITH_A_BIRTHDAY_JOINS_THE_ROSTER = (
+    "a dated birth of a named person the roster lacks, whose own telling puts "
+    "an immediate-family relation word directly before that person's name, "
+    "introduces that person with the relationship and the birth, through the "
+    "roster's one writer"
+)
+
+#: A name word keeps its capital whatever case the relation word was read in.
+_HEADER_NAME = r"(?-i:[A-Z][\w'’.-]*)"
+
+
+def _relation_header_re() -> re.Pattern:
+    return re.compile(
+        rf"(?<!\w)(?:(?:my|our)\s+)?(?P<word>{_relation_word_alternation()})"
+        rf"\s+(?P<given>{_HEADER_NAME})(?:\s+\((?P<nick>[^)]*)\))?"
+        rf"(?P<rest>(?:\s+{_HEADER_NAME})*)",
+        re.IGNORECASE)
+
+
+def _told_relation(name: str, lines: object) -> dict | None:
+    """``{"word", "name", "nickname", "clause"}`` when one of the owner's own
+    lines puts an immediate-family relation word directly before ``name`` (or
+    before the full name whose nickname ``name`` uses). Two lines that disagree
+    about the relationship decide nothing."""
+    import axis_membership as axm  # noqa: PLC0415
+
+    wanted = name.casefold().split()
+    if len(wanted) < 2:
+        return None
+    pattern = _relation_header_re()
+    found: dict[str, dict] = {}
+    for line in lines or ():
+        for clause in introduction_clauses(line) or (collapsed_text_of(line),):
+            for match in pattern.finditer(clause):
+                word = match.group("word").casefold()
+                if word not in axm.IMMEDIATE_FAMILY_RELATION_WORDS:
+                    continue
+                relationship = roster_relationship_for(word)
+                if relationship not in axm.IMMEDIATE_FAMILY_RELATIONSHIPS:
+                    continue
+                # The name must START with a capital, whatever case the
+                # relation word was matched in.
+                if not match.group("given")[:1].isupper():
+                    continue
+                rest = match.group("rest").split()
+                full = [match.group("given"), *rest]
+                nick = collapsed_text_of(match.group("nick"))
+                nickname = nick if nick and _NICKNAME_RE.match(nick) else ""
+                spellings = [full]
+                if nickname and rest:
+                    spellings.append([*nickname.split(), *rest])
+                if not any([part.casefold() for part in spelling] == wanted
+                           for spelling in spellings):
+                    continue
+                found.setdefault(relationship, {
+                    "word": word, "name": " ".join(full), "nickname": nickname,
+                    "clause": clause, "relationship": relationship})
+    if len(found) != 1:
+        return None
+    return next(iter(found.values()))
+
+
+def relative_birth_introductions(claims: object, *, roster: object = (),
+                                 telling_texts: object = None,
+                                 owner_names: object = (),
+                                 landmark_entries: object = (),
+                                 correction_texts: object = ()) -> dict:
+    """:data:`A_RELATIVE_TOLD_WITH_A_BIRTHDAY_JOINS_THE_ROSTER`. PURE.
+
+    ``telling_texts`` is `relation_words.own_telling_texts`' map
+    (``{source_path: [line, …]}``). ``{"rows", "findings"}`` in the shape of
+    :func:`relationship_introduction_batch`, deterministic (sorted by slug), and
+    every row passes the same recorded-relation verdict
+    (:func:`introduced_relation_verdict`) before it is kept.
+    """
+    import chronology as chrono  # noqa: PLC0415
+    import landmark_projection as lp  # noqa: PLC0415
+
+    texts = telling_texts if isinstance(telling_texts, dict) else {}
+    try:
+        index = ir.roster_index(roster, entity_type="person")
+    except Exception:  # noqa: BLE001  — a roster we cannot read knows nobody
+        index = None
+
+    def known(mention: str) -> bool:
+        if index is None:
+            return False
+        key = ir.normalized_mention_key(mention)
+        return bool(index.by_name_key.get(key) or index.by_alias_key.get(key)
+                    or index.has_ref(collapsed_text_of(mention)))
+
+    owner_keys = {ir.normalized_mention_key(name) for name in owner_names or ()}
+    out: dict[str, dict] = {}
+    for claim in sorted((c for c in claims or () if isinstance(c, dict)),
+                        key=lambda c: collapsed_text_of(c.get("claim_id"))):
+        if collapsed_text_of(claim.get("subject_ref")):
+            continue
+        kind = collapsed_text_of(claim.get("event_kind"))
+        mention = collapsed_text_of(claim.get("subject_mention"))
+        if kind != "birth" and not lp.birth_event_subject(claim.get("event_mention")):
+            continue
+        record = chrono.from_dict(claim.get("temporal_value"))
+        if record is None or record.granularity not in ("day", "month", "year"):
+            continue
+        name, _ = introduced_name(mention)
+        key = ir.normalized_mention_key(name)
+        if not name or key in ir.OWNER_SUBJECT_MENTIONS or key in owner_keys \
+                or known(name) or lp.is_birth_domain_word(name):
+            continue
+        source = claim.get("source_ref") if isinstance(claim.get("source_ref"), dict) else {}
+        lines = texts.get(collapsed_text_of(source.get("source_path"))) or ()
+        told = _told_relation(name, lines)
+        if told is None or known(told["name"]):
+            continue
+        slug = ir.normalized_mention_key(told["name"]).replace(" ", "-")
+        if not slug or slug in out:
+            continue
+        aliases = []
+        for alias in (name, told["nickname"]):
+            if alias and ir.normalized_mention_key(alias) != ir.normalized_mention_key(
+                    told["name"]) and alias not in aliases and not known(alias):
+                aliases.append(alias)
+        out[slug] = {
+            "name": told["name"], "slug": slug, "relationship": told["relationship"],
+            "relationship_word": told["word"], "aliases": tuple(aliases),
+            "source_id": collapsed_text_of(source.get("source_id")), "mention": mention,
+            "born": record.best, "born_basis": record.basis or "stated",
+            "rule": A_RELATIVE_TOLD_WITH_A_BIRTHDAY_JOINS_THE_ROSTER,
+        }
+    placed = dict(roster_recorded_relations(roster))
+    kept: list[dict] = []
+    findings: list[dict] = []
+    for slug in sorted(out):
+        verdict = introduced_relation_verdict(
+            out[slug],
+            recorded=recorded_relation(out[slug]["name"], roster=roster,
+                                       landmark_entries=landmark_entries,
+                                       correction_texts=correction_texts),
+            placed=placed)
+        if verdict["finding"] is not None:
+            findings.append(verdict["finding"])
+        if verdict["row"] is not None:
+            kept.append(verdict["row"])
+    return {"rows": tuple(kept), "findings": tuple(findings)}
