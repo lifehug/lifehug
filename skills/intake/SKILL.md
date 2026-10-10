@@ -164,8 +164,8 @@ A `family-letters:<collection>/<letter>[,<id>]` record — `--record` or a
 `--from-updates` file — files each cited letter ONCE as
 `sources/letters/<collection>--<letter>.md` before the memo: `type: letter`
 (an external_record, authority third_party_record, sensitivity `family`,
-`source_id: letters:<id>`), the transcript's header fields in the frontmatter
-and its body verbatim. The memo gets `cites: ["letters:<id>", …]`. Filing
+`source_id: letters:<collection>--<letter>`), the transcript's header fields in the frontmatter
+and its body verbatim. The memo gets `cites: ["letters:<collection>--<letter>", …]`. Filing
 prints one line per letter:
 
 ```

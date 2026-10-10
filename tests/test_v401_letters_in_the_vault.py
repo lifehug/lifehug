@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -171,6 +172,7 @@ class HeaderAndRefTests(unittest.TestCase):
         self.assertEqual(fl.ids_from_ref("family-letters:update/namesake"), [])
         self.assertEqual(fl.ids_from_ref("letters:x/y"), [])
         self.assertEqual(fl.source_relpath(LETTER_ID), "sources/letters/orchard-box-1980--aunt-wren.md")
+        self.assertEqual(fl.normalize_id(fl.source_id(LETTER_ID)), LETTER_ID)
 
     def test_the_archive_is_env_then_config_then_the_default(self):
         self.assertEqual(fl.letters_dir(env={"LIFEHUG_FAMILY_LETTERS_DIR": "/a"},
@@ -208,7 +210,8 @@ class FilingTests(unittest.TestCase):
         self.assertEqual(meta["source_trust"], "external_record")
         self.assertEqual(meta["authority"], "third_party_record")
         self.assertEqual(meta["sensitivity"], "family")
-        self.assertEqual(meta["source_id"], f"letters:{LETTER_ID}")
+        self.assertEqual(meta["source_id"], "letters:orchard-box-1980--aunt-wren")
+        self.assertEqual(meta["letter_id"], LETTER_ID)
         self.assertTrue(meta["immutable"])
         self.assertEqual(meta["captured_at"], "1983-04-11T00:00:00Z")  # written, not filed
         for key in ("date", "date_precision", "date_evidence", "from", "from_relationship",
@@ -220,11 +223,11 @@ class FilingTests(unittest.TestCase):
         self.assertTrue(letter.read_text(encoding="utf-8").endswith(body.lstrip("\n")))
         manifest = json.loads((self.vault / "state" / "source_manifest.json").read_text())
         self.assertEqual(manifest["sources"][fl.source_relpath(LETTER_ID)]["source_id"],
-                         f"letters:{LETTER_ID}")
+                         fl.source_id(LETTER_ID))
         # The memo cites what is on file — not the page that was not found.
         memo_rel = intake.INGESTED_RE.search(done.stdout).group(1)
         memo = front(self.vault / memo_rel)
-        self.assertEqual(memo["cites"], [f"letters:{LETTER_ID}"])
+        self.assertEqual(memo["cites"], [fl.source_id(LETTER_ID)])
         self.assertEqual(memo["record_ref"], f"family-letters:{LETTER_ID},orchard-box-1980/lost-page")
         self.assertIn(f"✓ Filed letter {LETTER_ID}: {fl.source_relpath(LETTER_ID)}", done.stdout)
         self.assertIn("! letter orchard-box-1980/lost-page not filed (missing_letter)", done.stdout)
@@ -237,7 +240,7 @@ class FilingTests(unittest.TestCase):
         self.assertEqual(letter.read_bytes(), before)
         self.assertIn(f"  letter {LETTER_ID} already filed:", again.stdout)
         second = front(self.vault / intake.INGESTED_RE.search(again.stdout).group(1))
-        self.assertEqual(second["cites"], [f"letters:{LETTER_ID}"])
+        self.assertEqual(second["cites"], [fl.source_id(LETTER_ID)])
         letters = sorted(p.name for p in (self.vault / "sources" / "letters").iterdir())
         self.assertEqual(letters, ["orchard-box-1980--aunt-wren.md"])
 
@@ -264,9 +267,13 @@ class FilingTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertTrue((self.vault / fl.source_relpath(LETTER_ID)).is_file())
         card = front(self.vault / fl.source_relpath(OTHER_ID))
-        self.assertEqual(card["captured_at"], "1985-12")  # month precision, said as month
+        # Month precision: the month lives in date_edtf; no ISO `date` is
+        # invented, and captured_at is the filing time, never a made-up day.
+        self.assertEqual(card["date_edtf"], "1985-12")
+        self.assertNotIn("date", card)
+        self.assertEqual(card["captured_at"], card["filed_at"])
         self.assertEqual(front(memo_path)["cites"],
-                         [f"letters:{LETTER_ID}", f"letters:{OTHER_ID}"])
+                         [fl.source_id(LETTER_ID), fl.source_id(OTHER_ID)])
         self.assertEqual(memo_path.read_text(encoding="utf-8").split("\n---\n", 1)[1], body_before)
         self.assertIn("intake: letters done (written, not committed)", run.stdout)
         # Nothing about an immutable source changed: lint finds no hash error.
@@ -293,6 +300,48 @@ class FilingTests(unittest.TestCase):
         self.assertEqual(run.returncode, 1)
         self.assertIn("letter orchard-box-1980/nope not filed (missing_letter)", run.stdout)
         self.assertNotIn("Traceback", run.stderr)
+
+
+#: Lifehug Cloud's vault validator (lifehug-platform
+#: `services/api/app/vault_safety/validator.py`): an id key outside this
+#: pattern is `INVALID_ID` (hard_reject), a date-named key that is not ISO is
+#: `INVALID_DATE` (manual_review) — and either verdict stops the vault being
+#: served. A letter source must pass both.
+PLATFORM_ID_KEYS = ("id", "source_id", "question_id")
+PLATFORM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$")
+PLATFORM_DATE_KEY_RE = re.compile(r"(^date$|^created$|^updated$|^answered$|_date$|_at$)")
+
+
+class PlatformValidatorTests(unittest.TestCase):
+    def assert_platform_safe(self, header_text: str, letter_id: str):
+        from datetime import date, datetime  # noqa: PLC0415
+
+        header, body = fl.parse_header(header_text)
+        _rel, content = fl.render_source({"id": letter_id, "header": header, "body": body},
+                                         filed_at=NOW)
+        meta = front_of(content)
+        for key, value in meta.items():
+            if key.lower() in PLATFORM_ID_KEYS:
+                self.assertRegex(value, PLATFORM_ID_RE, key)
+            elif PLATFORM_DATE_KEY_RE.search(key.lower()) and value not in (None, ""):
+                try:
+                    datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                except ValueError:
+                    date.fromisoformat(str(value))  # raises: INVALID_DATE
+
+    def test_a_letter_source_is_one_the_hosted_validator_serves(self):
+        self.assert_platform_safe(TRANSCRIPT, LETTER_ID)
+        self.assert_platform_safe(CARD, OTHER_ID)
+        self.assert_platform_safe(CARD.replace("date: '1985-12'", "date: '1985'").replace(
+            "date_precision: month", "date_precision: year"), OTHER_ID)
+        self.assert_platform_safe(CARD.replace("date: '1985-12'", "date: null").replace(
+            "date_precision: month", "date_precision: unknown"), OTHER_ID)
+
+
+def front_of(content: str) -> dict:
+    from lifehug_core import split_frontmatter  # noqa: PLC0415
+
+    return split_frontmatter(content)[0]
 
 
 class LetterLinesRunner(FakeRunner):
@@ -324,7 +373,7 @@ class IntakeReceiptTests(IntakeCase):
 
 
 class ClassificationTests(unittest.TestCase):
-    META = {"type": "letter", "source_id": f"letters:{LETTER_ID}", "date": "1983-04-11",
+    META = {"type": "letter", "source_id": "letters:orchard-box-1980--aunt-wren", "date": "1983-04-11",
             "date_precision": "day", "date_text": "Mon 11",
             "from": "Aunt Wren (signed 'Wren + Bo')", "to": "Ivy, Corin and the little ones",
             "summary": "Aunt Wren thanks Ivy for pictures of little Pell."}
@@ -350,7 +399,7 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(chrono.BASIS_WEIGHT[value["basis"]], max(chrono.BASIS_WEIGHT.values()))
 
     def test_precision_is_the_letters_own(self):
-        meta = dict(self.META, date="1985-12-01", date_precision="month")
+        meta = dict(self.META, date=None, date_edtf="1985-12", date_precision="month")
         capture = {"letter": cc.letter_context(meta)}
         [claim] = self.claims(capture, cc.letter_event(capture))
         self.assertEqual(claim["temporal_value"]["granularity"], "month")

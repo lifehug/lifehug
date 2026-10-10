@@ -621,7 +621,7 @@ def letter_context(metadata: object) -> dict:
     row = metadata if isinstance(metadata, dict) else {}
     if collapsed_text(row.get("type")) != LETTER_SOURCE_TYPE:
         return {}
-    date = collapsed_text(row.get("date"))
+    date = collapsed_text(row.get("date_edtf")) or collapsed_text(row.get("date"))
     width = LETTER_PRECISION_CHARS.get(collapsed_text(row.get("date_precision")) or "day")
     if not width or len(date) < width:
         return {}

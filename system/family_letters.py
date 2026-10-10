@@ -19,12 +19,13 @@ This module is the one place that turns a letter id into a vault source:
   ``sources/letters/<collection>--<letter>.md``: ``type: letter`` (a sub-kind
   of ``external_record``: ``source_trust: external_record``, ``authority:
   third_party_record``), sensitivity ``family``, ``source_id
-  letters:<collection>/<letter>``, the header fields the vault can use in the
+  letters:<collection>--<letter>`` (no ``/``: see :func:`source_id`), the
+  header fields the vault can use in the
   frontmatter, and the transcript body VERBATIM. Manifest-registered through
   ``source_integrity`` like every source. Idempotent by id: a letter already
   filed is never rewritten (a record is immutable; a revised transcript is a
   later, superseding version — D1 — not an edit).
-* :func:`stamp_cites` — adds ``cites: ["letters:<id>", …]`` to the frontmatter
+* :func:`stamp_cites` — adds ``cites: [<letter source id>, …]`` to the frontmatter
   of a record memo. Frontmatter only: the body, and so ``content_sha256``,
   is untouched.
 * :func:`link_citing_memos` — every record memo whose ``record_ref`` names a
@@ -110,11 +111,16 @@ def letters_dir(*, env: dict | None = None, config: dict | None = None) -> Path:
 
 
 def normalize_id(value: str) -> str:
+    """A letter id from any of its spellings: ``<collection>/<letter>``,
+    ``family-letters:<id>``, or the source id ``letters:<collection>--<letter>``."""
     text = str(value or "").strip()
     for prefix in (RECORD_REF_PREFIX, SOURCE_ID_PREFIX):
         if text.startswith(prefix):
             text = text[len(prefix):]
-    return text.strip().strip("`").strip()
+    text = text.strip().strip("`").strip()
+    if "/" not in text and "--" in text:
+        text = text.replace("--", "/", 1)
+    return text
 
 
 def ids_from_ref(ref: str | None) -> list[str]:
@@ -135,13 +141,25 @@ def ids_from_ref(ref: str | None) -> list[str]:
     return seen
 
 
+def source_stem(letter_id: str) -> str:
+    """``<collection>--<letter>``: the file stem, and the id's vault spelling."""
+    collection, letter = letter_id.split("/", 1)
+    return f"{collection}--{letter}"
+
+
 def source_id(letter_id: str) -> str:
-    return f"{SOURCE_ID_PREFIX}{letter_id}"
+    """``letters:<collection>--<letter>``.
+
+    NOT ``letters:<collection>/<letter>``: Lifehug Cloud's vault validator
+    hard-rejects a ``source_id`` outside ``^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$``
+    (`INVALID_ID`, lifehug-platform `app/vault_safety/validator.py`), and a
+    rejected vault is not served at all. The archive's own id (with its ``/``)
+    is kept as ``letter_id`` and ``origin.id``."""
+    return f"{SOURCE_ID_PREFIX}{source_stem(letter_id)}"
 
 
 def source_relpath(letter_id: str) -> str:
-    collection, letter = letter_id.split("/", 1)
-    return f"sources/{LETTERS_SUBDIR}/{collection}--{letter}.md"
+    return f"sources/{LETTERS_SUBDIR}/{source_stem(letter_id)}.md"
 
 
 def transcript_path(root: Path, letter_id: str) -> Path:
@@ -324,14 +342,33 @@ def _title(header: dict, body: str, letter_id: str) -> str:
     return f"Letter {letter_id}"
 
 
-def _written_at(header: dict) -> str | None:
-    """The DATE WRITTEN at the precision the transcript gives — the source's
-    ``captured_at`` (D1: never the filing date when the letter is dated)."""
+#: The transcript's date at each precision, as EDTF.
+PRECISION_CHARS = {"day": 10, "month": 7, "year": 4}
+
+
+def written_edtf(header: dict) -> str | None:
+    """The DATE WRITTEN as EDTF at the transcript's own precision
+    (``1984-03-05``, ``1985-12``, ``1985``), or ``None`` when undated."""
     date = str(header.get("date") or "").strip()
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
-        return f"{date}T00:00:00Z"
-    if re.fullmatch(r"\d{4}(-\d{2})?", date):
-        return date
+    precision = str(header.get("date_precision") or "").strip() or "day"
+    width = PRECISION_CHARS.get(precision)
+    if not width or len(date) < width:
+        return None
+    value = date[:width]
+    if not re.fullmatch(r"\d{4}(-\d{2}(-\d{2})?)?", value):
+        return None
+    return value
+
+
+def _written_at(header: dict) -> str | None:
+    """``captured_at`` when the letter is dated TO THE DAY: the day written,
+    never the filing date. A month or a year is not a timestamp (and Lifehug
+    Cloud's validator refuses a non-ISO value under any ``*_at``/``date`` key),
+    so a letter dated only to its month or year is captured at its filing time
+    and its written date lives in ``date_edtf``."""
+    value = written_edtf(header)
+    if value and len(value) == 10:
+        return f"{value}T00:00:00Z"
     return None
 
 
@@ -365,8 +402,15 @@ def render_source(letter: dict, *, filed_at: str) -> tuple[str, str]:
         "origin": {"repo": ORIGIN_REPO, "id": letter_id,
                    "path": f"letters/{letter_id}/transcript.md"},
     }
+    edtf = written_edtf(header)
+    if edtf:
+        values["date_edtf"] = edtf
     for key in HEADER_FIELDS:
         if key not in header:
+            continue
+        if key == "date" and not (edtf and len(edtf) == 10):
+            # `date` only as an ISO day: a month or year lives in `date_edtf`
+            # (Lifehug Cloud's validator refuses a non-ISO `date`).
             continue
         target = {"status": TRANSCRIPT_STATUS_KEY,
                   "confidence": TRANSCRIPT_CONFIDENCE_KEY}.get(key, key)

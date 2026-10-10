@@ -711,9 +711,10 @@ its question each run. A re-run over a finished folder changes nothing.
 `family-letters:<collection>/<letter>` record (either door above) also files
 each cited letter, once, as an immutable `sources/letters/<collection>--<letter>.md`:
 `type: letter` (an `external_record`, `authority: third_party_record`,
-sensitivity `family`, `source_id: letters:<id>`), the transcript header's
+sensitivity `family`, `source_id: letters:<collection>--<letter>`), the transcript header's
 date/precision/evidence, from, to, people, places and summary in the
-frontmatter, the body verbatim; the memo gets `cites: ["letters:<id>"]`. The
+frontmatter (`date` only as an ISO day; the written date at its precision is
+`date_edtf`), the body verbatim; the memo gets `cites: ["letters:<collection>--<letter>"]`. The
 archive is `$LIFEHUG_FAMILY_LETTERS_DIR`, else config `family_letters_dir`,
 else `~/Workspace/family-letters`; a missing archive or letter is one line
 and the memo files as before, the id named in the receipt. `intake letter
