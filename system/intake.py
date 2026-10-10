@@ -100,6 +100,29 @@ JOB_POLL_CEILING_SECONDS = 3 * 60 * 60
 JOB_TERMINAL_STATES = ("succeeded", "failed")
 QUEUED_JOB_RE = re.compile(r"Queued (\S+) job (\S+)")
 
+#: The line `ingest-story` prints for the memo it filed. Anchored on the
+#: verb: since v401 the letter lines (``✓ Filed letter …: sources/letters/…``)
+#: come first and also end in a source path.
+INGESTED_RE = re.compile(r"^✓ Ingested[^\n]*?:\s+(sources/\S+\.md)\s*$", re.M)
+LETTER_FILED_RE = re.compile(r"^✓ Filed letter (\S+): (sources/\S+\.md)\s*$", re.M)
+LETTER_ALREADY_RE = re.compile(r"^\s+letter (\S+) already filed: (sources/\S+\.md)\s*$", re.M)
+LETTER_UNRESOLVED_RE = re.compile(r"^! letter (\S+) not filed \(([a-z_]+)\): .*$", re.M)
+
+
+def letter_lines(stdout: str) -> dict:
+    """What `ingest-story` said about the letters a record cites (v401):
+    ``{"filed": [{id, path}], "already": [{id, path}], "unresolved": [{id,
+    reason}], "unresolved_lines": [str]}``."""
+    text = stdout or ""
+    return {
+        "filed": [{"id": m.group(1), "path": m.group(2)} for m in LETTER_FILED_RE.finditer(text)],
+        "already": [{"id": m.group(1), "path": m.group(2)} for m in LETTER_ALREADY_RE.finditer(text)],
+        "unresolved": [{"id": m.group(1), "reason": m.group(2)}
+                       for m in LETTER_UNRESOLVED_RE.finditer(text)],
+        "unresolved_lines": [m.group(0) for m in LETTER_UNRESOLVED_RE.finditer(text)],
+    }
+
+
 #: The phase line shape, named so the skill and the tests read one definition.
 PHASE_PREFIX = "intake:"
 
@@ -446,6 +469,17 @@ def render_report(record: dict) -> str:
     source = filing.get("source_path")
     if source:
         lines.append(f"  source     {source}   {base}/source-actions?ref={quote(source)}")
+    on_file = [row.get("id") for row in (filing.get("letters_filed") or [])
+               + (filing.get("letters_already") or [])]
+    unresolved = [row.get("id") for row in (filing.get("letters_unresolved") or [])]
+    if on_file or unresolved:
+        parts = []
+        if on_file:
+            parts.append("on file: " + ", ".join(on_file))
+        if unresolved:
+            parts.append("not found: " + ", ".join(unresolved)
+                         + " (python3 system/lifehug.py intake letter <id> once the archive is here)")
+        lines.append(f"  letters    {' · '.join(parts)}")
     filed = landmarks.get("filed_units") or []
     summary = (f"{landmarks.get('revised', 0)} revised, {landmarks.get('new', 0)} new"
                if filed else "none filed")
@@ -656,13 +690,21 @@ class Intake:
         if result.returncode != 0:
             raise IntakeError("write_failure",
                               f"ingest-story failed: {_detail(result)}")
-        match = re.search(r":\s+(sources/[^\s]+\.md)\s*$", result.stdout, re.M)
+        match = INGESTED_RE.search(result.stdout)
         if not match:
             raise IntakeError("write_failure",
                               f"ingest-story did not name the filed source: {result.stdout.strip()[:200]!r}")
         source_path = match.group(1)
         source_id = f"manual:{Path(source_path).stem}"
-        self.finish("filing", source_path, source_path=source_path, source_id=source_id)
+        letters = letter_lines(result.stdout)
+        for line in letters["unresolved_lines"]:
+            self.say(f"{PHASE_PREFIX} {line.lstrip('! ')} — the memo is filed without it")
+        detail = source_path
+        if letters["filed"] or letters["already"]:
+            detail += f"; {len(letters['filed']) + len(letters['already'])} letter(s) on file"
+        self.finish("filing", detail, source_path=source_path, source_id=source_id,
+                    letters_filed=letters["filed"], letters_already=letters["already"],
+                    letters_unresolved=letters["unresolved"])
         return "done"
 
     def phase_reading(self, completions: Path | None = None) -> str:
@@ -1214,6 +1256,66 @@ def run_updates(vault_root: Path, folder: Path, *, plan: bool = False, yes: bool
     return summary
 
 
+# --------------------------------------------------------------------------
+# intake letter <id>: get it from family letters (v401, letters D1)
+# --------------------------------------------------------------------------
+
+def file_letters(vault_root: Path, refs: list[str], *, letters_root: Path | None = None,
+                 commit: bool = True, push: bool = True, runner: Runner | None = None,
+                 say=print, now: str | None = None) -> dict:
+    """File letters straight from the family-letters archive, no memo needed.
+
+    Each id is filed once as ``sources/letters/<collection>--<letter>.md``
+    (`family_letters.file_letter`; a letter already on file is left alone),
+    and every record memo whose ``record_ref`` names a filed letter gets it in
+    its ``cites``. Then ONE commit of exactly those paths and the source
+    manifest, and a push — unless ``commit``/``push`` say not to. Nothing is
+    classified here: the next classify run reads a new source like any other.
+    """
+    import family_letters as fl  # noqa: PLC0415
+
+    runner = runner or Runner(vault_root)
+    root = Path(letters_root).expanduser() if letters_root else fl.letters_dir()
+    say(f"{PHASE_PREFIX} letters from {root}")
+    with runner.writer_lock():
+        result = fl.file_and_link(refs, root=root, now=now)
+    for outcome in result["letters"]:
+        say(f"{PHASE_PREFIX} {fl.outcome_line(outcome).lstrip('✓! ').strip()}")
+    for rel in result["linked"]:
+        say(f"{PHASE_PREFIX} linked {rel} (cites)")
+    written = [o["path"] for o in result["letters"] if o.get("status") == "filed"]
+    paths = written + list(result["linked"])
+    committed = pushed = False
+    if paths and commit:
+        manifest = "state/source_manifest.json"
+        with runner.writer_lock():
+            runner.git("add", "--", *paths, *([manifest] if (Path(vault_root) / manifest).exists() else []))
+            staged = runner.git("diff", "--cached", "--quiet")
+            if staged.returncode != 0:
+                ids = ", ".join(o["id"] for o in result["letters"] if o.get("status") == "filed") \
+                    or "cites"
+                done = runner.git("commit", "-m", f"Intake: letter {ids}")
+                if done.returncode != 0:
+                    raise IntakeError("write_failure", f"git commit failed: {_detail(done)}")
+                committed = True
+        if committed and push:
+            for _ in range(PUSH_ATTEMPTS):
+                if runner.git("push").returncode == 0:
+                    pushed = True
+                    break
+                if runner.git("pull", "--rebase", "--autostash").returncode != 0:
+                    break
+    if not paths:
+        note = "nothing new"
+    elif not commit:
+        note = "written, not committed"
+    else:
+        note = ("pushed — " + CONVERGES_LINE if pushed
+                else "committed, not pushed" if committed else "nothing to commit")
+    say(f"{PHASE_PREFIX} letters done ({note})")
+    return {**result, "committed": committed, "pushed": pushed}
+
+
 def terminal_ask(card: dict) -> bool:
     """A y/n prompt for a plain terminal; used only when stdin is a TTY."""
     print(f"[{card['kind']}] {card['text']}")
@@ -1266,6 +1368,17 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--all-new", dest="all_new", action="store_true")
     c.add_argument("--none", action="store_true", help="file no landmark")
 
+    lt = sub.add_parser("letter", help="get it from family letters: file letters by id "
+                                       "(no memo) and link the memos that cite them")
+    lt.add_argument("ids", nargs="+", metavar="ID",
+                    help="<collection>/<letter>, or family-letters:<id>[,<id>]")
+    lt.add_argument("--dir", default=None,
+                    help="the family-letters archive (default: $LIFEHUG_FAMILY_LETTERS_DIR, "
+                         "config family_letters_dir, ~/Workspace/family-letters)")
+    lt.add_argument("--no-commit", dest="no_commit", action="store_true",
+                    help="write the sources; leave committing to you")
+    lt.add_argument("--no-push", dest="no_push", action="store_true")
+
     st = sub.add_parser("status", help="one intake's record")
     st.add_argument("intake_id")
     sub.add_parser("list", help="every intake on this machine")
@@ -1298,6 +1411,12 @@ def main(argv: list[str] | None = None) -> int:
                 plan=args.plan, yes=args.yes, no_serve=args.no_serve,
                 no_push=args.no_push, cap=args.cap, ask=ask)
             return 0
+        if args.verb == "letter":
+            result = file_letters(root, list(args.ids),
+                                  letters_root=Path(args.dir) if args.dir else None,
+                                  commit=not args.no_commit, push=not args.no_push)
+            return 0 if all(o.get("status") in ("filed", "already")
+                            for o in result["letters"]) else 1
         if args.verb == "continue":
             record = load_intake(root, args.intake_id)
             ask = terminal_ask if sys.stdin.isatty() and not (args.units or args.all_new or args.none) else None
@@ -1333,7 +1452,8 @@ __all__ = [
     "card_counts", "card_kind", "cards_from_proposal", "decide_units",
     "intake_dir", "list_intakes", "load_intake", "new_record", "render_report",
     "save_intake", "scope_tasks", "start", "run_updates", "update_outcome",
-    "landmark_card_count", "synthesis_prompt", "viewer_base",
+    "landmark_card_count", "synthesis_prompt", "viewer_base", "file_letters",
+    "letter_lines",
 ]
 
 

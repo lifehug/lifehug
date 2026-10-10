@@ -593,7 +593,105 @@ def capture_context(vault_root: str | Path, source_path: object) -> dict:
         found["captured"] = captured
     if question:
         found["question_text"] = question
+    letter = letter_context(metadata)
+    if letter:
+        found["letter"] = letter
     return found
+
+
+#: v401 (letters-in-the-vault D1). The source type `family_letters` files a
+#: cited letter under, and the marker the ONE synthetic event of a letter
+#: source carries. The marker is honoured only when the source's own
+#: frontmatter says it is a letter (:func:`capture_context`), so a classifier
+#: response can never claim a printed date by writing the key itself.
+LETTER_SOURCE_TYPE = "letter"
+LETTER_EVENT_MARKER = "record_document"
+
+#: The letter's ``date_precision`` -> how much of its ``date`` is said. A
+#: ``date`` finer than its precision is cut back to it, never the reverse.
+LETTER_PRECISION_CHARS = {"day": 10, "month": 7, "year": 4}
+
+
+def letter_context(metadata: object) -> dict:
+    """The facts a LETTER source states about itself, read from its
+    frontmatter (`family_letters.render_source` wrote them from the
+    transcript header). ``{}`` for any other source, and for a letter with no
+    usable date — an undated letter is still a source, it just has no moment
+    of its own until somebody dates it."""
+    row = metadata if isinstance(metadata, dict) else {}
+    if collapsed_text(row.get("type")) != LETTER_SOURCE_TYPE:
+        return {}
+    date = collapsed_text(row.get("date"))
+    width = LETTER_PRECISION_CHARS.get(collapsed_text(row.get("date_precision")) or "day")
+    if not width or len(date) < width:
+        return {}
+    date = date[:width]
+    if chrono.parse_edtf(date, basis="document") is None:
+        return {}
+    return {
+        "source_id": collapsed_text(row.get("source_id")),
+        "date": date,
+        "date_text": collapsed_text(row.get("date_text")),
+        "from": collapsed_text(row.get("from")),
+        "to": collapsed_text(row.get("to")),
+        "summary": collapsed_text(row.get("summary")),
+        "title": collapsed_text(row.get("title")),
+    }
+
+
+def letter_event(capture: object) -> dict | None:
+    """The moment "the letter": somebody wrote to somebody, on the letter's
+    own date. Deterministic, from the frontmatter alone — the classifier's
+    events from the same letter are the stories told INSIDE it.
+
+    Its subject is the WRITER, raw, so whose axis it lands on is the existing
+    axis rules' decision over who wrote it (no rule is added here)."""
+    letter = (capture if isinstance(capture, dict) else {}).get("letter")
+    if not isinstance(letter, dict) or not letter.get("date"):
+        return None
+    writer = letter.get("from") or "someone"
+    to = letter.get("to")
+    title = f"{_short_name(writer)}'s letter" + (f" to {_short_name(to)}" if to else "")
+    return {
+        "title": title[: tc.MAX_EVENT_MENTION_CHARS],
+        "description": letter.get("summary") or letter.get("title") or title,
+        "subject": writer,
+        "date": {"stated": letter["date"]},
+        LETTER_EVENT_MARKER: LETTER_SOURCE_TYPE,
+    }
+
+
+def _short_name(value: object) -> str:
+    """A transcript's ``from``/``to`` without its parenthetical gloss:
+    "Nan (signed 'Nan + Pop')" -> "Nan". The whole field stays the subject."""
+    text = re.sub(r"\s*\([^)]*\)", "", collapsed_text(value)).strip(" ,")
+    return text or collapsed_text(value)
+
+
+def letter_reading(event: object, capture: object = None) -> dict | None:
+    """The letter's own date as a ``document``-basis ``date`` reading — the
+    package's highest-weight basis (`chronology.BASIS_WEIGHT`), rendered
+    "printed on …". Only for the event :func:`letter_event` minted, and only
+    when the source really is a letter."""
+    row = event if isinstance(event, dict) else {}
+    letter = (capture if isinstance(capture, dict) else {}).get("letter")
+    if row.get(LETTER_EVENT_MARKER) != LETTER_SOURCE_TYPE or not isinstance(letter, dict):
+        return None
+    record = chrono.parse_edtf(letter.get("date"), basis="document")
+    if record is None:
+        return None
+    provenance = {"basis": "document",
+                  "claim": letter.get("date_text") or letter["date"]}
+    if letter.get("source_id"):
+        provenance["source"] = letter["source_id"]
+    value = record.to_dict()
+    value["provenance"] = [provenance]
+    return {
+        "claim_type": "date",
+        "temporal_value": value,
+        "basis": "explicit",
+        "confidence": lp.CONFIDENCE_SCORE.get(record.confidence, 0.45),
+    }
 
 
 def recency_reading(event: object, capture: object = None) -> dict | None:
@@ -717,6 +815,10 @@ def temporal_reading(event: object, capture: object = None) -> dict:
     what it was, which is what keeps this change additive.
     """
     row = event if isinstance(event, dict) else {}
+    # v401: the letter's own date, printed on it (:func:`letter_reading`).
+    letter = letter_reading(row, capture)
+    if letter is not None:
+        return letter
     claim = chrono.possible_date_claim(row.get("date"))
     if claim:
         stated = optional_text(claim.get("stated"))
@@ -1400,6 +1502,12 @@ def migrate_classifier_moments(
         report["skipped_empty_description"] += len(
             (data or {}).get("events") or ()
         ) - len(events)
+        # v401 (letters D1): a letter source is also the moment "the letter",
+        # dated by the letter itself; the classifier's events are the stories
+        # told inside it.
+        letter_moment = letter_event(capture)
+        if letter_moment is not None:
+            events = [letter_moment, *events]
         report["events"] += len(events)
         deduped_here = 0
         current_claim_ids: set[str] = set()

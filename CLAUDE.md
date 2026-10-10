@@ -707,6 +707,24 @@ conflict waits for the owner even under `--yes`; a finished file moves to
 value:** no change …` or `kind: flag` front matter) writes nothing and prints
 its question each run. A re-run over a finished folder changes nothing.
 
+**A cited letter is filed as a letter (v401, letters-in-the-vault D1).** A
+`family-letters:<collection>/<letter>` record (either door above) also files
+each cited letter, once, as an immutable `sources/letters/<collection>--<letter>.md`:
+`type: letter` (an `external_record`, `authority: third_party_record`,
+sensitivity `family`, `source_id: letters:<id>`), the transcript header's
+date/precision/evidence, from, to, people, places and summary in the
+frontmatter, the body verbatim; the memo gets `cites: ["letters:<id>"]`. The
+archive is `$LIFEHUG_FAMILY_LETTERS_DIR`, else config `family_letters_dir`,
+else `~/Workspace/family-letters`; a missing archive or letter is one line
+and the memo files as before, the id named in the receipt. `intake letter
+<id>… [--no-commit] [--no-push]` files letters with no memo and links every
+memo whose `record_ref` already names them. A classified letter is the moment
+"<writer>'s letter to <recipient>" on the letter's own date, basis `document`
+(`classifier_claims.letter_event`); its subject is the writer, so the existing
+axis rules decide whose timeline it is on. `sources/letters/` is user data,
+never `framework_files`. D2–D6 of `docs/pr-specs/letters-in-the-vault.md`
+are not built.
+
 ### External Evidence Connectors (v106 — Gmail first)
 
 Connectors ingest external archives as **selective evidence and discovery**, never bulk import. The invariant: **the ledger is permanent; relevance is recomputed.** `connector-fetch` appends metadata-only lines (no bodies) to `state/connectors/gmail_ledger.jsonl`; `connector-excavate` re-scores the ENTIRE ledger against the current wiki/rosters/sources and delta-promotes. A thread sub-threshold today promotes on a later run once its correspondent gains a roster/wiki entry — without any re-fetch. This is a rare excavation (quarterly/yearly), not a sync service, and it is loop-adjacent: manual, owner-triggered, outside the daily/weekly/monthly rhythms.

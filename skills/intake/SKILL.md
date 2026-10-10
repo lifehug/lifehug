@@ -30,6 +30,7 @@ every bound will carry (v397, `landmark-offer --evidence`):
 | a third-party document (an itinerary, a bishop's letter, a proposal file from the family-letters archive) | `--record <ref>` | `external_record`, `authority: third_party_record` | `document` (7.0 — outranks a remembered date; the memory stays as an alternate) |
 
 `<ref>` names the document, e.g. `family-letters:dave-mission-2001/travel-itinerary`.
+A `family-letters:` ref also files each cited letter itself (v401, below).
 When unsure whether something is a witness or a record, ask the owner one
 line: *"Is this Dad's own account, or a document?"*
 
@@ -156,3 +157,38 @@ Kinds come from structure only: optional front matter (`kind:
 landmark|record|flag`, `letters:`, `question:`) — the family-letters answer
 pass will emit it — else the `**Proposed value:**` field and backticked
 `group/letter` ids.
+
+## The letter itself (v401, letters-in-the-vault D1)
+
+A `family-letters:<collection>/<letter>[,<id>]` record — `--record` or a
+`--from-updates` file — files each cited letter ONCE as
+`sources/letters/<collection>--<letter>.md` before the memo: `type: letter`
+(an external_record, authority third_party_record, sensitivity `family`,
+`source_id: letters:<id>`), the transcript's header fields in the frontmatter
+and its body verbatim. The memo gets `cites: ["letters:<id>", …]`. Filing
+prints one line per letter:
+
+```
+✓ Filed letter memory-box-1974/nan-and-pop: sources/letters/memory-box-1974--nan-and-pop.md
+  letter memory-box-1974/tippets-charles already filed: sources/letters/…
+! letter box/x not filed (missing_letter): …   → intake: … — the memo is filed without it
+```
+
+Relay a `not filed` line to the owner as it is; the report names the id under
+`letters`. The archive is `$LIFEHUG_FAMILY_LETTERS_DIR`, else config
+`family_letters_dir`, else `~/Workspace/family-letters`.
+
+**"Get it from family letters"** — the owner names a letter and there is no
+memo:
+
+```bash
+python3 system/lifehug.py intake letter memory-box-1974/nan-and-pop [more ids…]   # files, commits, pushes
+python3 system/lifehug.py intake letter <id> --no-commit                          # files; you commit
+```
+
+It files each letter (one already on file is left alone — a record is never
+rewritten) and adds the letter to `cites` on every memo whose `record_ref`
+already names it. It does not classify: the next classify run reads the new
+source like any other, and the letter becomes the moment "<writer>'s letter
+to <recipient>" dated by the letter itself (basis `document`).
+
