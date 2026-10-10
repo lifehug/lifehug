@@ -351,6 +351,19 @@ as an alias of that row rather than skipped; more than one such row, or one
 stating a different relationship, is reported as contested and nothing is
 written.
 
+Since v402 it reads only STANDING entries: one a refile or retire withdrew
+(its identity claim superseded — `landmark_projection.withdrawn_source_ids`,
+the drawing's own reading) introduces nobody. A `partnerships` entry
+introduces a spouse only when it names a PERSON in the owner's own
+partnership — never a company or a fund (`organization_is_not_a_partner`) and
+never another person's partner (an entry whose subject is his sister). A row
+this pass minted (`source: landmark:family`) that nothing introduces any more,
+and that nothing else answers to (no Focus, fold, verdict, word he gave it,
+counted answer or claim phrase), RETIRES on the same pass: it moves, whole,
+into the roster's `retired_rows` ledger with a receipt naming the entries and
+why, and comes back if an entry introduces it again. A refresh keeps the
+ledger. Never hand-delete a roster row; refile the entry that minted it.
+
 ### Owner verdicts (ADR 0013)
 
 `entity-verdict <type> <slug> graduate|never|clear` writes one of two

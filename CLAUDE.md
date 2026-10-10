@@ -98,7 +98,12 @@ spouse, siblings, children and grandparents; his baptism once mentioned
 (`system/cornerstones.py`). Nothing else is ever asked below a month, however
 much it would place (`temporal_work_items.A_DAY_IS_ASKED_ONLY_OF_A_CORNERSTONE`);
 a cornerstone-type event about anyone else is asked once and accepted at any
-grain. When you talk to the owner about a date, show a day only if he or a
+grain. A wedding or divorce is HIS cornerstone only when the people it is about
+are he and/or his spouse; his sister's divorce is hers and shows only in
+Others, and each Spouse row shows only its own couple's wedding and divorce
+(v402, `cornerstones.A_WEDDING_OR_DIVORCE_BELONGS_TO_ITS_OWN_COUPLE`). A
+wedding claim never dates a divorce episode a bind swept it into
+(`episode_fold.A_TRANSITION_NEVER_DATES_ANOTHER_TRANSITION`). When you talk to the owner about a date, show a day only if he or a
 document gave it; a day you worked out is its month.
 A date he saves on the person form (`person-edit`) is his answer to that
 milestone: it supersedes every reading that cannot be true beside it, undoably
@@ -126,6 +131,18 @@ on stdout names both — ask the owner which, never pick. A landmark name the
 roster already answers to (a `partnerships`/`family`/`children` entry) joins
 that row as an alias on the next `entity-roster --ensure-introduced`.
 Counts move with `entity-roster --type <t> --recount` (no model).
+Since v402 that daily pass (the hosted `roster_introductions` step) reads only
+STANDING entries — a refiled or retired entry introduces nobody
+(`entity_roster.A_WITHDRAWN_ENTRY_INTRODUCES_NOBODY`, through
+`landmark_projection.A_WITHDRAWN_ENTRY_SAYS_NOTHING`, the drawing's own
+reading); a `partnerships` entry introduces a spouse only when it names a
+PERSON in the owner's own partnership, never a company or fund and never his
+sister's husband (`A_SPOUSE_IS_A_PERSON_IN_THE_OWNERS_OWN_PARTNERSHIP`); and a
+row it minted that nothing introduces any more RETIRES on the same pass
+(`A_ROW_RETIRES_WITH_THE_ENTRIES_THAT_INTRODUCED_IT`) into the roster's
+`retired_rows` ledger with a receipt, never deleted, restored if an entry
+introduces it again. To take a wrong spouse off the roster, refile the entry
+(`landmark-refile`) — never hand-delete the row.
 
 **The graph's joins (v376, issue #434).** A Focus's page is decided by the
 compiler's one category→page rule, `system/focus_pages.py`

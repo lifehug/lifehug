@@ -2986,6 +2986,58 @@ def _as_int(value: object) -> int:
 # --------------------------------------------------------------------------
 
 
+#: v402 (owner, 2026-10-10). The ONE reading of "this entry still stands":
+#: a landmark source stands while it holds an ACTIVE identity claim
+#: (:func:`project_landmark_entries`' step 1). A refile and a retire both
+#: supersede that claim (:func:`retire_entry`, :func:`file_landmark_refile`),
+#: so an entry with a refile or retire receipt over it no longer stands — and
+#: every reader that asks "does this entry still say something?" (the drawing,
+#: the roster's introducer) asks it here, never by re-reading the refile files.
+A_WITHDRAWN_ENTRY_SAYS_NOTHING = (
+    "a landmark entry stands while it holds an active identity claim; one "
+    "whose identity claim was superseded or retracted - refiled, retired - "
+    "is withdrawn: it is not drawn and it introduces nobody"
+)
+
+
+def standing_source_ids(claims_by_source: object) -> frozenset[str]:
+    """The source ids that still stand, from ``{source_id: [active claim, ...]}``
+    (:data:`A_WITHDRAWN_ENTRY_SAYS_NOTHING`). PURE."""
+    return frozenset(
+        source_id for source_id, claims in (claims_by_source or {}).items()
+        if any(isinstance(claim, dict) and claim.get("claim_type") == "identity"
+               for claim in claims or ()))
+
+
+def withdrawn_source_ids(active_index: object) -> frozenset[str]:
+    """The landmark sources the substrate has WITHDRAWN: it holds an identity
+    claim for them and none of those is active any more — refiled or retired
+    (:data:`A_WITHDRAWN_ENTRY_SAYS_NOTHING`). A source the substrate holds no
+    claim for at all is not withdrawn (nothing ever retired it). PURE."""
+    index = active_index if isinstance(active_index, dict) else {}
+    active = {row.get("claim_id") for row in store.active_claims(index)}
+    filed: set[str] = set()
+    standing: set[str] = set()
+    for row in index.get("claims") or ():
+        if not isinstance(row, dict) or row.get("claim_type") != "identity":
+            continue
+        ref = row.get("source_ref")
+        source_id = collapsed_text(ref.get("source_id")) if isinstance(ref, dict) else ""
+        if not source_id:
+            continue
+        filed.add(source_id)
+        if row.get("claim_id") in active:
+            standing.add(source_id)
+    return frozenset(filed - standing)
+
+
+def standing_landmark_sources(sources: object, active_index: object) -> list[dict]:
+    """``sources`` without the withdrawn ones, in their own order. PURE."""
+    withdrawn = withdrawn_source_ids(active_index)
+    return [row for row in (sources or ()) if isinstance(row, dict)
+            and collapsed_text(row.get("source_id")) not in withdrawn]
+
+
 def project_landmark_entries(active_index: object, *, sources: object,
                              owner_names: object = (), with_refs: bool = False) -> dict:
     """Draw ``state/landmarks.json`` from the active claims. PURE.
@@ -3061,11 +3113,12 @@ def project_landmark_entries(active_index: object, *, sources: object,
 
     slots = stay_slots(sources)
     stated_birth = owner_stated_birth(sources)
+    standing_ids = standing_source_ids(by_source)
     groups: dict[tuple[str, str, int], dict] = {}
     order: list[tuple[str, str, int]] = []
     for source in sources or ():
         claims = by_source.get(source["source_id"]) or []
-        if not any(claim.get("claim_type") == "identity" for claim in claims):
+        if source["source_id"] not in standing_ids:
             continue
         # THE `birth` DOMAIN IS THE OWNER'S OWN BIRTH (v339). A relative's
         # birth filed here keys on the same empty `entry_key` as the owner's

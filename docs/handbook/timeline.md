@@ -122,8 +122,12 @@ asks you for a year.
   You / Spouse / Children / Parents / Siblings / Grandparents, with born,
   married, divorced and died, each `exact` (a day), `needs_day`,
   `disagreement` (an open contradiction on it) or `missing`; a death nobody
-  has told is `not_owed`, never asked. Each person is shown by what you call
-  them ("Dad", "Mom", "AJ"). A row that needs settling carries its Play: the
+  has told is `not_owed`, never asked. A wedding or divorce fills your row
+  and a Spouse row only when it is about you and/or that spouse — each Spouse
+  row shows only its own couple's; a relative's (your sister's divorce) is
+  hers and shows only in Others (v402,
+  `cornerstones.A_WEDDING_OR_DIVORCE_BELONGS_TO_ITS_OWN_COUPLE`). Each person
+  is shown by what you call them ("Dad", "Mom", "AJ"). A row that needs settling carries its Play: the
   open work item on it, else its landmarks ladder. **A date saved on the
   person form settles its cell** (v366, owner 2026-09-27: the row's pencil
   opens the form, and saving a date there IS the settlement): every active

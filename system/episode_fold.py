@@ -130,6 +130,42 @@ AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES = (
     "node is ever drawn at an id node_aliases has already redirected"
 )
 
+#: v402 (owner, 2026-10-10). A bind joins a TELLING to an episode; a
+#: whole-message telling (the general listener's, keyed on the message alone)
+#: holds every fact that message said. The owner's reply about his sister —
+#: "Jacque married Brett around 1998 … She divorced him around 2024 … She
+#: married Lorin Cook May 13th 2025" — was one such telling, bound (R2, 2026-09-28)
+#: to the `divorced` episode "Jacque Cooke's prior marriage as Jacque
+#: Fergusen". The divorce-from-Brett claim in it was later superseded by the
+#: owner's own 🗑, so the only claim of the telling left standing was
+#: `married` Lorin Cook 2025-05-13 — and the fold drew it INTO the divorce:
+#: the divorce took her second wedding's date and Lorin as its counterpart, and
+#: the Cornerstones view put "div. 13 May 2025" on the owner's row.
+#:
+#: THE RULE. A claim that tells one relationship transition (`married`) never
+#: dates an episode that IS a different one (`divorced`), whatever bound its
+#: telling there: it stands aside and folds as its own fact, at its own key.
+#: Read off the episode's canonical kind (its create envelope's, never a
+#: claim's) and `identity_resolution.RELATIONSHIP_EVENT_KINDS`.
+A_TRANSITION_NEVER_DATES_ANOTHER_TRANSITION = (
+    "a claim that tells one relationship transition - a wedding - never joins "
+    "or dates an episode that is a different transition - a divorce - even "
+    "when a bind put its telling there; it folds as its own fact"
+)
+
+
+def another_transition(claim_kind: object, canonical_kind: object) -> bool:
+    """Is ``claim_kind`` a relationship transition other than the episode's
+    own ``canonical_kind`` (also a transition)? PURE."""
+    import identity_resolution as ident  # noqa: PLC0415
+
+    claim = collapsed_text(claim_kind)
+    canonical = collapsed_text(canonical_kind)
+    return bool(claim and canonical and claim != canonical
+                and ident.is_relationship_event(claim)
+                and ident.is_relationship_event(canonical))
+
+
 #: v353, and the second half of the same lesson: a node's KIND is the node's,
 #: not its first claim's.
 #:
@@ -634,6 +670,13 @@ class EpisodeIdentity:
             self._carried.pop(key, None)
         self._aliases = None
         return dict(self._carried_for)
+
+    def stands_aside(self, event_kind: object, node_id: object) -> bool:
+        """:data:`A_TRANSITION_NEVER_DATES_ANOTHER_TRANSITION` — does a claim
+        of ``event_kind`` stand aside from the episode node ``node_id``?"""
+        episode_id = self.episode_of(node_id)
+        view = self.episodes.get(episode_id) if episode_id else None
+        return another_transition(event_kind, view.canonical_event_kind if view else None)
 
     def carried_node_for(self, claim: object) -> str:
         """The episode node this claim follows, or ``""`` — :meth:`plan_carries`'
