@@ -2691,6 +2691,10 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
         )
         alias_key = "" if (stay or own_key in seeded) else own_key
         episode_node = identity.episode_node_for(claim) if identity is not None else ""
+        # v402, `episode_fold.A_TRANSITION_NEVER_DATES_ANOTHER_TRANSITION`: a
+        # wedding claim a bind swept into a divorce episode stands aside.
+        if episode_node and identity.stands_aside(event_kind, episode_node):
+            episode_node = ""
         readings.append((claim, subject, event_kind, own_key, alias_key, episode_node))
 
     # v342, `episode_fold.AN_ALIAS_NEVER_NAMES_A_NODE_THE_DRAWING_PUBLISHES`.
@@ -2713,7 +2717,7 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
         node_id = episode_node or own_key
         if identity is not None and not episode_node:
             carried = identity.carried_node_for(claim)
-            if carried:
+            if carried and not identity.stands_aside(event_kind, carried):
                 node_id = episode_node = carried
         group = groups.get(node_id)
         if group is None:

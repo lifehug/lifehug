@@ -517,6 +517,66 @@ class Relations:
         return SELF if found else None
 
 
+#: v402 (owner, 2026-10-10): "Under my cornerstone it says div. or divorced. I
+#: haven't been divorced." `cornerstone_nodes` keyed EVERY wedding and divorce
+#: cornerstone to the owner, so the divorce of his sister Jacque (a node whose
+#: subjects were "Jacque Cooke" and a roster row wrongly marked spouse) filled
+#: his own divorced cell and every Spouse row's.
+A_WEDDING_OR_DIVORCE_BELONGS_TO_ITS_OWN_COUPLE = (
+    "a wedding or a divorce is the owner's cornerstone only when the people it "
+    "is about are the owner and/or his spouse (his couple); a relative's or "
+    "anyone else's wedding or divorce is THAT person's and shows only in "
+    "Others; a row in the Spouse group shows only its own couple's wedding and "
+    "divorce"
+)
+
+#: Who may stand beside the couple on a telling of THEIR wedding without
+#: making it somebody else's: a parent (his own reception "in mother-in-law's
+#: backyard" names his mother).
+_COUPLE_GUESTS = frozenset({"parent"})
+
+
+def owners_couple(node: object, relations: "Relations") -> tuple[bool, str]:
+    """``(is the owner's couple, spouse key or "")`` for a wedding/divorce node
+    (:data:`A_WEDDING_OR_DIVORCE_BELONGS_TO_ITS_OWN_COUPLE`). PURE.
+
+    His couple when its subjects name the owner and/or a spouse and nobody
+    else — any other named person, known or not, makes it that person's
+    (a parent is the one tolerated guest). The spouse is the one its subjects
+    name; else the one whose given name its label carries ("Married Katie");
+    else the only spouse he has; else ``""`` (his couple, spouse unsaid)."""
+    row = node if isinstance(node, dict) else {}
+    owner = False
+    spouses: dict[str, Person] = {}
+    for subject in row.get("subject_refs") or ():
+        key = normalized_mention_key(subject)
+        if key in ir.OWNER_COUPLE_SUBJECT_WORDS:
+            owner = True
+            continue
+        person = relations.person_for(subject)
+        if person == SELF:
+            owner = True
+        elif isinstance(person, Person) and person.relationship == "spouse":
+            spouses[person.key] = person
+        elif isinstance(person, Person) and person.relationship in _COUPLE_GUESTS:
+            continue
+        elif key:
+            return False, ""
+    if not owner and not spouses:
+        return False, ""
+    if len(spouses) == 1:
+        return True, next(iter(spouses))
+    if spouses:
+        return True, ""
+    every = [p for p in relations.people if p.relationship == "spouse"
+             and not p.key.startswith("relation:")]
+    tokens = set(_tokens(row.get("label")))
+    named = [p for p in every if tokens & set(_tokens(p.name)[:1])]
+    if len(named) == 1:
+        return True, named[0].key
+    return True, (every[0].key if len(every) == 1 else "")
+
+
 def status_of(milestone: object, whose: object) -> str:
     """:data:`CORNERSTONE`, :data:`OUTSIDE_THE_SET` or :data:`NOT_A_CORNERSTONE`."""
     name = collapsed_text(milestone)
@@ -554,7 +614,12 @@ def node_status(node: object, relations: Relations) -> tuple[str, str, object]:
         named = relations.person_for(lead) if lead else None
         if isinstance(named, Person) and named.relationship:
             whose = named
-    return status_of(milestone, whose), milestone, whose
+    status = status_of(milestone, whose)
+    # v402, :data:`A_WEDDING_OR_DIVORCE_BELONGS_TO_ITS_OWN_COUPLE`.
+    if status == CORNERSTONE and milestone in ("wedding", "divorce") \
+            and not owners_couple(row, relations)[0]:
+        status = OUTSIDE_THE_SET
+    return status, milestone, whose
 
 
 def is_known_person(whose: object) -> bool:
@@ -601,7 +666,8 @@ def cornerstone_nodes(nodes: object, relations: Relations) -> dict:
             continue
         if milestone in ("wedding", "divorce"):
             # One couple, two ends: the owner's wedding to his spouse is ONE
-            # cornerstone whichever of the two a telling names.
+            # cornerstone whichever of the two a telling names — and only HIS
+            # couple's reaches here (`node_status`, v402).
             whose = SELF
         grouped.setdefault((milestone, _whose_key(whose)), []).append(node)
     return {key: sorted(rows, key=_rank) for key, rows in sorted(grouped.items())}
@@ -667,7 +733,8 @@ def _grain(record: object) -> str | None:
 
 
 __all__ = [
-    "A_CORNERSTONE_IS_TITLED_BY_ITS_OWN_NAME", "cornerstone_title", "name_words_of",
+    "A_CORNERSTONE_IS_TITLED_BY_ITS_OWN_NAME", "A_WEDDING_OR_DIVORCE_BELONGS_TO_ITS_OWN_COUPLE",
+    "owners_couple", "cornerstone_title", "name_words_of",
     "names_only_the_milestone",
     "CORNERSTONE", "CORNERSTONES", "CORNERSTONES_ARE_THE_FIXED_DAYS",
     "CORNERSTONE_GRAIN", "FINEST_GRAIN_FOR_EVERYTHING_ELSE", "MILESTONES",

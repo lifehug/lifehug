@@ -932,6 +932,9 @@ def write_roster(entity_type: str, entities: list[dict], *, source: str | None =
     previous = read_json(roster_file(entity_type), default=None)
     if isinstance(previous, dict) and previous.get(ir.RELATION_QUERIES_KEY):
         payload[ir.RELATION_QUERIES_KEY] = previous[ir.RELATION_QUERIES_KEY]
+    # v402: so is the retired ledger — a refresh never un-retires a row.
+    if isinstance(previous, dict) and previous.get(ROSTER_RETIRED_KEY):
+        payload[ROSTER_RETIRED_KEY] = previous[ROSTER_RETIRED_KEY]
     payload, _report = roster_relations.convert_legacy_roster(payload, entity_type=entity_type)
     if source:
         payload["source"] = source
@@ -1143,7 +1146,116 @@ def _rows_answering_to(name: str, roster: object) -> tuple[list[dict], bool]:
     return unique(shared), False
 
 
-def landmark_introduction_plan(landmark_entries: object, *, roster: object = ()) -> dict:
+# --------------------------------------------------------------------------
+# v402 (owner, 2026-10-10) — a withdrawn entry introduces nobody; an
+# organization is never a spouse; a row the introducer minted retires with
+# the entries that minted it
+# --------------------------------------------------------------------------
+#
+# THE INCIDENT. The Cornerstones view drew "Castle / Castle Island Ventures —
+# married 11 Jan 2007 — div. 13 May 2025" under Spouse. Two `partnerships`
+# entries named the venture fund (2024-04, 2025-05); both were REFILED on
+# 2026-09-26 (`organization_is_not_a_partner`, refiled as moments). The
+# 2026-10-04 daily sweep (`entity-roster --ensure-introduced`, the hosted
+# `roster_introductions` step) still minted `castle-island-ventures` as a
+# SPOUSE: this plan read every entry `load_landmark_sources` returns, refiled
+# or not, and "Castle Island Ventures" is three capitalised words. Once
+# minted, the row was a settled identity fact every refresh kept — which is
+# why erasing it never stuck. The same pass made "Lorin Cook" — his sister
+# Jacque's husband, a `partnerships` entry whose subject is Jacque — the
+# owner's spouse too.
+#
+# THE RULES, one per defect, all on this one daily pass:
+
+#: (a) Only a STANDING entry speaks (`landmark_projection
+#: .A_WITHDRAWN_ENTRY_SAYS_NOTHING` — the projection's own one reading).
+A_WITHDRAWN_ENTRY_INTRODUCES_NOBODY = (
+    "a landmark entry with a refile or retire receipt over it - its identity "
+    "claim superseded - introduces nobody to the roster"
+)
+
+#: (b) A `partnerships` entry introduces the owner's SPOUSE only when it names
+#: a PERSON — never a company or a fund, read through the one vocabulary the
+#: refile already decides by (`landmark_projection.misfiled_landmark`,
+#: `organization_is_not_a_partner`) — and only when the partnership is HIS
+#: (no subject, or the owner named as subject). Another person's partnership
+#: (his sister's) belongs in Others, never on his roster as his spouse —
+#: `cornerstones.Relations` already reads a `partnerships` entry this way.
+A_SPOUSE_IS_A_PERSON_IN_THE_OWNERS_OWN_PARTNERSHIP = (
+    "a partnerships entry introduces a spouse only when it names a person - "
+    "never a company or a fund - in the owner's own partnership; another "
+    "person's partnership introduces nobody as his spouse"
+)
+
+#: Why an entry no longer introduces the row it once minted.
+INTRODUCER_WITHDRAWN = "entry_withdrawn"
+INTRODUCER_NOT_A_PERSON = "organization_is_not_a_partner"
+INTRODUCER_NOT_HIS_PARTNERSHIP = "not_the_owners_partnership"
+
+#: (c) The SAME daily pass retires a row it introduced once nothing introduces
+#: it any more — fold-style, reversible, with a receipt (ADR 0041: a row is
+#: retired to a pointer, never removed). The row is "its": `source` is the
+#: introducer's door (`entity_verdict.ENSURED_SOURCE`) and its slug is the slug
+#: an entry's name mints. "Nothing else answers to it": no Focus, no fold in or
+#: out, no owner verdict, no word or handle he gave it, no counted answer
+#: (`unique_answers`), and no claim's relationship phrase would introduce it
+#: again. A retired row comes back the moment a standing entry introduces it
+#: again (:func:`entity_verdict.restore_retired_row`).
+A_ROW_RETIRES_WITH_THE_ENTRIES_THAT_INTRODUCED_IT = (
+    "a roster row the landmark introducer minted retires, on the same daily "
+    "pass, once every entry that introduced it is withdrawn or no longer "
+    "introduces it and nothing else on the vault answers to it; it is moved "
+    "to the roster's retired ledger with a receipt, never deleted, and "
+    "restored when an entry introduces it again"
+)
+RETIRE_REASON = "introducer_withdrawn"
+
+#: The roster key retired rows live under (:data:`A_ROW_RETIRES_WITH_THE_ENTRIES_THAT_INTRODUCED_IT`).
+ROSTER_RETIRED_KEY = "retired_rows"
+
+#: Row fields an OWNER act wrote; a row carrying one is never retired by rule.
+_OWNER_GIVEN_FIELDS = ("owner_verdict", "relation_word", "grandparent_side")
+
+
+def _is_owner_text(text: object, owner_names: object = ()) -> bool:
+    key = ir.normalized_mention_key(text)
+    return bool(key) and (key in ir.OWNER_SUBJECT_MENTIONS or key in {
+        ir.normalized_mention_key(name) for name in owner_names or ()})
+
+
+def introduction_refusal(row: object, *, owner_names: object = (),
+                         organizations: object = ()) -> str:
+    """Why a `partnerships` entry introduces NOBODY as the owner's spouse
+    (:data:`A_SPOUSE_IS_A_PERSON_IN_THE_OWNERS_OWN_PARTNERSHIP`), or ``""``.
+    Every other domain: ``""`` (its own rules stand). PURE."""
+    import landmark_projection as lp  # noqa: PLC0415
+
+    if not isinstance(row, dict):
+        return ""
+    domain = roster_relations.collapsed_text_of(row.get("domain"))
+    record = row.get("record") if isinstance(row.get("record"), dict) else {}
+    if domain != PARTNERSHIPS_RELATION_DOMAIN:
+        return ""
+    if lp.misfiled_landmark(domain, record, organizations=organizations) == \
+            lp.ORGANIZATION_IS_NOT_A_PARTNER:
+        return INTRODUCER_NOT_A_PERSON
+    subject = roster_relations.collapsed_text_of(record.get("subject"))
+    if subject and not _is_owner_text(subject, owner_names):
+        return INTRODUCER_NOT_HIS_PARTNERSHIP
+    return ""
+
+
+def _entry_name(record: dict) -> str:
+    return roster_relations.collapsed_text_of(
+        record.get("who") or record.get("label") or record.get("subject"))
+
+
+def _entry_slug(name: str) -> str:
+    return ir.normalized_mention_key(name).replace(" ", "-")
+
+
+def landmark_introduction_plan(landmark_entries: object, *, roster: object = (),
+                              owner_names: object = ()) -> dict:
     """Every person a `family`/`children`/`partnerships` LANDMARK ENTRY names,
     decided against the roster — the ONE reading both
     :func:`landmark_relationship_introductions` (the mints) and
@@ -1164,7 +1276,10 @@ def landmark_introduction_plan(landmark_entries: object, *, roster: object = ())
       Everett Taylor"). Reported, never guessed; nothing written.
     """
     import identity_resolution as ir  # noqa: PLC0415
+    import landmark_projection as lp  # noqa: PLC0415
 
+    organizations = lp.organizations_named_in(
+        [r for r in landmark_entries or () if isinstance(r, dict)])
     mints: dict[str, dict] = {}
     folds: dict[tuple[str, str], dict] = {}
     contested: dict[str, dict] = {}
@@ -1178,6 +1293,9 @@ def landmark_introduction_plan(landmark_entries: object, *, roster: object = ())
             continue
         record = row.get("record")
         if not isinstance(record, dict) or record.get("none"):
+            continue
+        # v402, :data:`A_SPOUSE_IS_A_PERSON_IN_THE_OWNERS_OWN_PARTNERSHIP`.
+        if introduction_refusal(row, owner_names=owner_names, organizations=organizations):
             continue
         relationship = DOMAIN_RELATIONSHIPS.get(domain) or roster_relations.collapsed_text_of(
             record.get("relation"))
@@ -1254,7 +1372,8 @@ def landmark_introduction_plan(landmark_entries: object, *, roster: object = ())
 
 
 def landmark_relationship_introductions(landmark_entries: object, *,
-                                        roster: object = ()) -> tuple[dict, ...]:
+                                        roster: object = (),
+                                        owner_names: object = ()) -> tuple[dict, ...]:
     """Every person a `children`/`family`/`partnerships` LANDMARK ENTRY
     introduces and the roster lacks, one row per slug — the landmark-sourced
     half of :func:`ensure_introduced_relatives`. Pure: entries and a roster
@@ -1265,7 +1384,71 @@ def landmark_relationship_introductions(landmark_entries: object, *,
     to undated. A name the roster already answers to is never a new row —
     since v383 it is a FOLD (:func:`landmark_introduction_plan`).
     """
-    return tuple(landmark_introduction_plan(landmark_entries, roster=roster)["mint"])
+    return tuple(landmark_introduction_plan(landmark_entries, roster=roster,
+                                            owner_names=owner_names)["mint"])
+
+
+def withdrawn_introductions(roster: object, landmark_entries: object, *,
+                            withdrawn: object = (), owner_names: object = ()) -> list[dict]:
+    """Every roster row the landmark introducer minted that NOTHING introduces
+    any more (:data:`A_ROW_RETIRES_WITH_THE_ENTRIES_THAT_INTRODUCED_IT`), with
+    the entries that once did and why each no longer does. PURE; sorted by slug.
+
+    ``landmark_entries`` is EVERY entry, withdrawn ones included — they are the
+    provenance; ``withdrawn`` is the source ids the substrate withdrew
+    (`landmark_projection.withdrawn_source_ids`). The claim-sourced check
+    ("would a relationship phrase introduce it again?") needs the claim
+    substrate and is the caller's (:func:`ensure_introduced_relatives`).
+    """
+    import entity_verdict  # noqa: PLC0415
+    import landmark_projection as lp  # noqa: PLC0415
+
+    rows = [r for r in landmark_entries or () if isinstance(r, dict)]
+    gone = {roster_relations.collapsed_text_of(s) for s in withdrawn or ()}
+    organizations = lp.organizations_named_in(
+        [r for r in rows if roster_relations.collapsed_text_of(r.get("source_id")) not in gone])
+    entities = roster_relations.roster_entities(roster)
+    pointed_at = {ir.folded_into_of(e) for e in entities} - {""}
+    out: list[dict] = []
+    for entity in entities:
+        slug = roster_relations.collapsed_text_of(entity.get("slug"))
+        if not slug or entity.get("source") != entity_verdict.ENSURED_SOURCE:
+            continue
+        if ir.has_home(entity) or slug in pointed_at or ir.handle_of(entity):
+            continue
+        if any(roster_relations.collapsed_text_of(entity.get(f)) for f in _OWNER_GIVEN_FIELDS):
+            continue
+        if int(entity.get("unique_answers") or 0) > 0:
+            continue
+        seat = _seat(entity.get("relationship"))
+        introducers: list[dict] = []
+        still = False
+        for row in rows:
+            domain = roster_relations.collapsed_text_of(row.get("domain"))
+            record = row.get("record")
+            if domain not in LANDMARK_RELATION_DOMAINS or not isinstance(record, dict) \
+                    or record.get("none"):
+                continue
+            name = _entry_name(record)
+            if not name or not _looks_like_a_full_name(name) or _entry_slug(name) != slug:
+                continue
+            relationship = DOMAIN_RELATIONSHIPS.get(domain) or \
+                roster_relations.collapsed_text_of(record.get("relation"))
+            if seat and _seat(relationship) != seat:
+                continue
+            source_id = roster_relations.collapsed_text_of(row.get("source_id"))
+            why = INTRODUCER_WITHDRAWN if source_id in gone else introduction_refusal(
+                row, owner_names=owner_names, organizations=organizations)
+            if not why:
+                still = True
+                break
+            introducers.append({"source_id": source_id, "domain": domain, "why": why})
+        if still or not introducers:
+            continue
+        out.append({"slug": slug, "name": entity.get("name"),
+                    "relationship": entity.get("relationship"),
+                    "introduced_by": sorted(introducers, key=lambda r: r["source_id"])})
+    return sorted(out, key=lambda r: r["slug"])
 
 
 # --------------------------------------------------------------------------
@@ -1598,6 +1781,15 @@ def first_name_aliases(*, dry_run: bool = False) -> dict:
     return {"added": added, "collisions": collisions}
 
 
+def entity_roster_snapshot_without(roster: object, slugs: object) -> object:
+    """``roster`` minus the rows ``slugs`` names (a retired row is no longer read)."""
+    gone = set(slugs or ())
+    if not gone:
+        return roster
+    rows = [e for e in roster_relations.roster_entities(roster) if e.get("slug") not in gone]
+    return {**roster, "entities": rows} if isinstance(roster, dict) else rows
+
+
 def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
     """File a roster row for every person the claim substrate INTRODUCES.
 
@@ -1642,11 +1834,16 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
     from lifehug_core import REPO_DIR  # noqa: PLC0415
 
     roster, owner_names = pub.owner_identity_inputs(REPO_DIR)
-    claims = store.active_claims(store.read_active_index(REPO_DIR))
+    index = store.read_active_index(REPO_DIR)
+    claims = store.active_claims(index)
     try:
-        landmark_entries = lp.load_landmark_sources(REPO_DIR)
+        all_entries = list(lp.load_landmark_sources(REPO_DIR))
     except Exception:  # noqa: BLE001  — a vault we cannot read records nothing
-        landmark_entries = ()
+        all_entries = []
+    # v402, :data:`A_WITHDRAWN_ENTRY_INTRODUCES_NOBODY` — the projection's own
+    # reading of "this entry still stands", never a second reading of refiles.
+    withdrawn = lp.withdrawn_source_ids(index)
+    landmark_entries = lp.standing_landmark_sources(all_entries, index)
     try:
         correction_texts = [correction.reason for correction
                             in store.load_temporal_corrections(REPO_DIR)]
@@ -1658,12 +1855,13 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
     )
     rows = list(batch["rows"])
     have_slugs = {row["slug"] for row in rows}
-    plan = landmark_introduction_plan(landmark_entries, roster=roster)
+    plan = landmark_introduction_plan(landmark_entries, roster=roster, owner_names=owner_names)
     for row in plan["mint"]:
         if row["slug"] not in have_slugs:
             rows.append(row)
             have_slugs.add(row["slug"])
     skipped: list[dict] = []
+    restored: list[str] = []
     filed = 0
     for row in rows:
         aliases = []
@@ -1677,6 +1875,10 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
             aliases.append(alias)
         if dry_run:
             continue
+        # v402: a row this pass once retired comes back whole when an entry
+        # introduces it again — never a second, fresh row.
+        if entity_verdict.restore_retired_row("person", row["slug"]) is not None:
+            restored.append(row["slug"])
         entity_verdict.apply_verdict(
             "person", row["slug"], "clear",
             aliases=aliases,
@@ -1715,7 +1917,33 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
                               "candidates": []})
             continue
         folded.append(row)
-    own_name = relationship_from_own_name(roster, dry_run=dry_run)
+    # v402, :data:`A_ROW_RETIRES_WITH_THE_ENTRIES_THAT_INTRODUCED_IT`. Read off
+    # the roster as this run found it; a row a relationship phrase would
+    # introduce again is not retired (something else answers to it).
+    retired: list[dict] = []
+    for candidate in withdrawn_introductions(roster, all_entries, withdrawn=withdrawn,
+                                             owner_names=owner_names):
+        without = {**(roster if isinstance(roster, dict) else {}),
+                   "entities": [e for e in roster_relations.roster_entities(roster)
+                                if e.get("slug") != candidate["slug"]]}
+        again = roster_relations.relationship_introduction_batch(
+            claims, roster=without, owner_names=owner_names,
+            landmark_entries=landmark_entries, correction_texts=correction_texts)
+        if any(row.get("slug") == candidate["slug"] for row in again["rows"]):
+            continue
+        receipt = {"verdict": "retire", "reason": RETIRE_REASON,
+                   "rule": A_ROW_RETIRES_WITH_THE_ENTRIES_THAT_INTRODUCED_IT,
+                   "relationship": candidate.get("relationship"),
+                   "introduced_by": candidate["introduced_by"]}
+        if not dry_run:
+            try:
+                if entity_verdict.retire_row("person", candidate["slug"], receipt=receipt) is None:
+                    continue
+            except entity_verdict.EntityVerdictError:
+                continue
+        retired.append({**candidate, "receipt": receipt})
+    own_name = relationship_from_own_name(
+        entity_roster_snapshot_without(roster, [r["slug"] for r in retired]), dry_run=dry_run)
     # v384 (ADR 0041, D4): the name people actually say. Runs on the roster as
     # the passes above left it, BEFORE the recount, so the alias counts at once.
     first_names = first_name_aliases(dry_run=dry_run)
@@ -1724,6 +1952,7 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
     return {"introduced": list(rows), "filed": filed, "skipped_aliases": skipped,
             "findings": list(batch["findings"]), "own_name": own_name["updated"],
             "folded": folded, "contested": contested,
+            "retired": retired, "restored": restored,
             "first_names": first_names["added"],
             "first_name_collisions": first_names["collisions"]}
 
@@ -1814,6 +2043,13 @@ def main() -> int:
             names = ", ".join(str(c.get("slug")) for c in row.get("candidates") or ())
             print(f"    ↯ “{row.get('mention') or row.get('name')}” — {row['reason']} "
                   f"({names or '—'}); left alone")
+        for row in result.get("retired") or ():
+            verb = "would retire" if args.dry_run else "retired"
+            why = "; ".join(f"{r['source_id']} {r['why']}" for r in row["introduced_by"])
+            print(f"  {row['slug']}: {verb} ({row.get('relationship') or '—'}) — "
+                  f"nothing introduces it any more: {why}")
+        for slug in result.get("restored") or ():
+            print(f"  {slug}: restored from the retired ledger — an entry introduces it again")
         return 0
 
     if args.show:

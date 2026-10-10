@@ -1122,6 +1122,10 @@ def cornerstones_view(nodes: object, relations: object, *, roster: object = (),
             elif milestone in ("wedding", "divorce"):
                 if relationship in ("self", "spouse"):
                     members = list(held.get((milestone, cs.SELF)) or ())
+                    if relationship == "spouse":
+                        # v402: a Spouse row shows only ITS couple's milestones.
+                        members = [n for n in members
+                                   if cs.owners_couple(n, relations)[1] == key]
                     record = members[0].get("best_temporal_value") if members else None
                     owed = milestone == "wedding"
                 elif relationship == "parent" and milestone == "wedding":
@@ -1257,7 +1261,7 @@ def milestone_nodes(nodes: object, relations: object) -> dict:
             continue
         if milestone in ("wedding", "divorce"):
             whose = cs.SELF if _is_the_owners_couple(node, relations) else \
-                relations.whose(node.get("subject_refs") or ())
+                _whose_couple(node, relations)
         if whose != cs.SELF and not (isinstance(whose, cs.Person) and cs.is_known_person(whose)):
             continue
         key = cs.SELF if whose == cs.SELF else whose.key
@@ -1266,12 +1270,28 @@ def milestone_nodes(nodes: object, relations: object) -> dict:
             for key, rows in sorted(grouped.items())}
 
 
-def _is_the_owners_couple(node: dict, relations: object) -> bool:
-    for subject in node.get("subject_refs") or ():
+def _whose_couple(node: dict, relations: object) -> object:
+    """Whose wedding or divorce a node that is NOT the owner's couple is: the
+    one person it is about (`Relations.whose`), else the one of its two people
+    who is his family — his sister, not the man she married (v402,
+    `cornerstones.A_WEDDING_OR_DIVORCE_BELONGS_TO_ITS_OWN_COUPLE`)."""
+    subjects = node.get("subject_refs") or ()
+    whose = relations.whose(subjects)
+    if whose is not None:
+        return whose
+    family = {}
+    for subject in subjects:
         person = relations.person_for(subject)
-        if person == cs.SELF or (isinstance(person, cs.Person) and person.relationship == "spouse"):
-            return True
-    return False
+        if isinstance(person, cs.Person) and person.relationship \
+                and person.relationship != "spouse":
+            family[person.key] = person
+    return next(iter(family.values())) if len(family) == 1 else None
+
+
+def _is_the_owners_couple(node: dict, relations: object) -> bool:
+    """v402: `cornerstones.owners_couple` — his couple only when the people it
+    is about are he and/or his spouse (a parent tolerated as a guest)."""
+    return cs.owners_couple(node, relations)[0]
 
 
 def _parents_wedding(nodes: object, relations: object, landmark_domains: object) -> tuple[list, object]:

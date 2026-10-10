@@ -135,6 +135,7 @@ from entity_roster import (  # noqa: E402
     apply_owner_verdict,
     base_page_eligible,
     read_roster_payload,
+    ROSTER_RETIRED_KEY as _ROSTER_RETIRED_KEY,
 )
 from lifehug_core import write_json  # noqa: E402
 
@@ -633,6 +634,68 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
 
     write_json(path, data)
     return target
+
+
+#: v402: the retired ledger (`entity_roster.ROSTER_RETIRED_KEY`).
+ROSTER_RETIRED_KEY = _ROSTER_RETIRED_KEY
+
+
+def retire_row(entity_type: str, slug: str, *, receipt: dict) -> dict | None:
+    """Move the row ``slug`` into the roster's retired ledger with ``receipt``,
+    atomically (ONE roster write). Returns the ledger entry, or ``None`` when
+    there is no such live row — a no-op, so a second run writes nothing.
+
+    Refused (``EntityVerdictError``) for a row another row is folded into or
+    that holds a Focus: retiring it would orphan a pointer or a page."""
+    path, data = read_roster_payload(entity_type)
+    entities = data.get("entities") if isinstance(data, dict) else None
+    if not isinstance(entities, list):
+        return None
+    target = next((e for e in entities if isinstance(e, dict) and e.get("slug") == slug), None)
+    if target is None:
+        return None
+    if ir.has_home(target) or any(
+            isinstance(e, dict) and ir.folded_into_of(e) == slug for e in entities):
+        raise EntityVerdictError(
+            f"refusing: {slug!r} has a Focus or a row folded into it — never retired")
+    data["entities"] = [e for e in entities if e is not target]
+    entry = {"slug": slug, "row": target, "receipt": dict(receipt)}
+    ledger = [row for row in (data.get(ROSTER_RETIRED_KEY) or ())
+              if isinstance(row, dict) and row.get("slug") != slug]
+    ledger.append(entry)
+    data[ROSTER_RETIRED_KEY] = sorted(ledger, key=lambda row: str(row.get("slug")))
+    write_json(path, data)
+    return entry
+
+
+def retired_rows(entity_type: str = "person") -> list[dict]:
+    """The roster's retired ledger (:data:`ROSTER_RETIRED_KEY`)."""
+    _path, data = read_roster_payload(entity_type)
+    rows = data.get(ROSTER_RETIRED_KEY) if isinstance(data, dict) else None
+    return [row for row in rows or () if isinstance(row, dict)]
+
+
+def restore_retired_row(entity_type: str, slug: str) -> dict | None:
+    """Undo :func:`retire_row`: the row goes back to ``entities`` exactly as it
+    was retired, and leaves the ledger. ``None`` when nothing is retired under
+    ``slug`` or a live row already holds it (never a duplicate)."""
+    path, data = read_roster_payload(entity_type)
+    if not isinstance(data, dict):
+        return None
+    ledger = [row for row in (data.get(ROSTER_RETIRED_KEY) or ()) if isinstance(row, dict)]
+    entry = next((row for row in ledger if row.get("slug") == slug), None)
+    entities = data.get("entities") if isinstance(data.get("entities"), list) else []
+    if entry is None or not isinstance(entry.get("row"), dict) or any(
+            isinstance(e, dict) and e.get("slug") == slug for e in entities):
+        return None
+    data["entities"] = [*entities, entry["row"]]
+    remaining = [row for row in ledger if row is not entry]
+    if remaining:
+        data[ROSTER_RETIRED_KEY] = remaining
+    else:
+        data.pop(ROSTER_RETIRED_KEY, None)
+    write_json(path, data)
+    return entry["row"]
 
 
 def attach_focus(slug: str, focus_slug: str) -> dict:
