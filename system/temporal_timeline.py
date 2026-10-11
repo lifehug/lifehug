@@ -402,7 +402,14 @@ from temporal_claims import (  # noqa: E402
 #: besides the owner drops him from its subjects
 #: (`identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`). The same claims
 #: calculate to different subjects and findings.
-CALCULATION_RULE_VERSION = "timeline-rules:30"
+#: timeline-rules:31 (v415, the owner's republish of 2026-10-10): the
+#: remembered-story pass reads every moment on his axis whose inferred opening
+#: is at or before his birth, phrase or no phrase, and a subject that is the
+#: owner with a note ("narrator (as a kid)"); a locator in the telling (a
+#: grade, a place named outright, one house a cited moment names, a neighbour)
+#: REPLACES the inferred band; a negated grade and a spine line are never
+#: context. The same claims calculate to different bounds and findings.
+CALCULATION_RULE_VERSION = "timeline-rules:31"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -7947,7 +7954,7 @@ def derive_calculated_timeline(
     # its better context and opens no earlier than his earliest-memory age
     # (`remembered_story.BETTER_CONTEXT_BEATS_THE_BAND`,
     # `remembered_story.A_REMEMBERED_STORY_OPENS_AFTER_INFANCY`).
-    _apply_remembered_story_floor(
+    remembered_rows = _apply_remembered_story_floor(
         groups, placed, owner=owner, birth=owner_birth, stays=stays,
         roster_snapshot=roster_snapshot, config=rs.load_config(remembered_story),
         diagnostics=diagnostics)
@@ -8452,6 +8459,9 @@ def derive_calculated_timeline(
         landmark_sufficiency=dict(sufficiency),
         diagnostics={
             "findings": diagnostics,
+            # v415: what the remembered-story pass moved and what it declined,
+            # by itself, so a vault can verify the pass from its own files.
+            "remembered_story": remembered_rows,
             "claims": len(claims),
             "nodes": len(nodes),
             "memberships": len(memberships),
@@ -8541,7 +8551,7 @@ _REMEMBERED_STORY_BASES = frozenset({"anchor", "order"})
 #: Kinds that are not a memory of something that happened to him: he lived
 #: somewhere from the day he was born, and a birth or an era is no story.
 _NOT_A_REMEMBERED_STORY_KINDS = frozenset({"residence", "birth", "death",
-                                           "named_era", "age_frame"})
+                                           "named_era", "age_frame", "period"})
 
 
 def _stay_pieces(stays: list[dict], ids: object) -> list:
@@ -8593,21 +8603,54 @@ def _names_tied_to_stays(groups: dict, stays: list[dict]) -> dict:
 
 def _people_in_memory(texts: list[str], roster_snapshot: object) -> list[dict]:
     """The roster people a telling names, each by a spelling no other row
-    shares (an alias two people answer to names nobody)."""
+    shares (an alias two people answer to names nobody). A spelling is three
+    letters or more, or two capitals ("BJ")."""
     rows = axm.roster_person_rows(roster_snapshot)
     spellings: dict[str, list[int]] = {}
+
+    def usable(word: str) -> bool:
+        return len(word) >= 3 or (len(word) == 2 and word.isupper())
+
     for position, row in enumerate(rows):
         for word in [row.get("name"), *(row.get("aliases") or ())]:
-            key = collapsed_text(word).lower()
-            if len(key) >= 3 and position not in spellings.setdefault(key, []):
+            text = collapsed_text(word)
+            key = text.lower()
+            if usable(text) and position not in spellings.setdefault(key, []):
                 spellings[key].append(position)
     found = []
     for position, row in enumerate(rows):
-        own = [word for word in [row.get("name"), *(row.get("aliases") or ())]
+        own = [collapsed_text(word) for word in [row.get("name"), *(row.get("aliases") or ())]
                if spellings.get(collapsed_text(word).lower()) == [position]]
         if own and rs.mentions(texts, own):
             found.append(row)
     return found
+
+
+#: v415. Single capitalized words that are never a home's name.
+_NOT_A_HOME_WORD = frozenset({
+    "when", "after", "before", "during", "while", "every", "witnessing", "june",
+    "july", "august", "september", "october", "november", "december", "january",
+    "february", "march", "april", "friday", "saturday", "sunday", "monday",
+    "tuesday", "wednesday", "thursday", "grandma", "grandpa", "mom", "dad",
+    "the", "our", "my", "his", "her", "their", "neighbor", "neighbors",
+})
+
+
+def _one_house_named(texts: list[str], stays: list[dict]) -> tuple[str, list] | None:
+    """``(word, [stay id])`` for the first capitalized word or name in these
+    texts that is exactly ONE house stay of his ("Horsepool" in a related
+    moment the resolver cited), or ``None``."""
+    import landmark_identity as lid  # noqa: PLC0415
+
+    for text in texts:
+        candidates = sorted(rs.proper_names([text]), key=len, reverse=True) + [
+            word for word in re.findall(r"\b[A-Z][a-z'\u2019]{3,}\b", str(text))
+            if word.lower().rstrip("'\u2019s") not in _NOT_A_HOME_WORD]
+        for word in candidates:
+            found = lid.resolve_place(re.sub(r"['\u2019]s$", "", word), stays)
+            if found and found.get("level") == "house" and len(found.get("ids") or ()) == 1:
+                return word, list(found["ids"])
+    return None
 
 
 def _remembered_story_contexts(node_id: str, group: dict, record, *, texts: list[str],
@@ -8615,38 +8658,52 @@ def _remembered_story_contexts(node_id: str, group: dict, record, *, texts: list
                                name_index: dict, roster_snapshot: object) -> list[dict]:
     """:data:`BETTER_CONTEXT_BEATS_THE_BAND`'s ladder, in
     `remembered_story.CONTEXTS` order, as `remembered_story.place_story` reads
-    it. Every rung is reported, found or not."""
+    it. Every rung is reported, found or not. ``texts`` are every text of the
+    telling a reader may quote — his own words and a resolver's citations of
+    the story or of a related moment, never its spine lines; ``own`` are his."""
     import landmark_identity as lid  # noqa: PLC0415
 
     contexts: list[dict] = []
-    # 1. A stated grade ("in third grade") is his age on the school calendar.
+    # 1. A stated grade ("in third grade") is his age on the school calendar —
+    #    unless the sentence says it did NOT happen then (v415).
     grade_row = {"context": "stated_grade", "text": "", "pieces": []}
-    for text in own:
+    for text in texts:
         found = chrono.school_grade_of(text)
-        if found and found.get("speaker") in (None, "narrator"):
-            piece = chrono.school_year_record(birth, found["grade"], part=found.get("part"),
-                                              grade_high=found.get("grade_high"))
-            if piece is not None:
-                grade_row = {"context": "stated_grade", "text": found["phrase"],
-                             "pieces": [piece]}
-                break
+        if not found or found.get("speaker") not in (None, "narrator"):
+            continue
+        if rs.negated(text):
+            grade_row = {"context": "stated_grade", "text": found["phrase"],
+                         "outcome": "negated"}
+            continue
+        piece = chrono.school_year_record(birth, found["grade"], part=found.get("part"),
+                                          grade_high=found.get("grade_high"))
+        if piece is not None:
+            grade_row = {"context": "stated_grade", "text": found["phrase"],
+                         "pieces": [piece]}
+            break
     contexts.append(grade_row)
-    # 2. A named stay — already applied by the place anchors, or a home he
-    #    named in so many words ("at Harbor Lane").
+    # 2. A named stay — already applied by the place anchors, a place he named
+    #    in so many words ("in San Diego", "at Harbor Lane"), or one house a
+    #    cited related moment names ("Witnessing Horsepool brothers…").
     provenance = getattr(record, "provenance", ()) or ()
     applied = [row for row in provenance
                if isinstance(row, dict) and row.get("rule") == "place_anchor"]
     stay_row = {"context": "named_stay", "text": "", "pieces": []}
     if applied:
-        stay_row = {"context": "named_stay", "already": True,
+        stay_row = {"context": "named_stay", "outcome": "already_applied",
                     "text": collapsed_text(applied[0].get("text"))}
     else:
-        for place in rs.named_places(texts):
+        for place in rs.named_places(own or texts):
             found = lid.resolve_place(place, stays)
             if found and found.get("ids"):
-                stay_row = {"context": "named_stay", "text": f"your stays at {place}",
+                stay_row = {"context": "named_stay", "text": f"your stays in {place}",
                             "pieces": _stay_pieces(stays, found["ids"])}
                 break
+        else:
+            house = _one_house_named(texts, stays)
+            if house is not None:
+                stay_row = {"context": "named_stay", "text": f"your stay at {house[0]}",
+                            "pieces": _stay_pieces(stays, house[1])}
     contexts.append(stay_row)
     # 3. A name the vault ties to exactly one stay — a neighbour is at the home
     #    where they were neighbours. Ties this telling made itself do not count.
@@ -8662,10 +8719,11 @@ def _remembered_story_contexts(node_id: str, group: dict, record, *, texts: list
         contexts.append({"context": "name_tied_to_one_stay",
                          "text": f"{', '.join(sorted(names))} at {label}",
                          "pieces": _stay_pieces(stays, [stay])})
+    elif tied:
+        contexts.append({"context": "name_tied_to_one_stay", "outcome": "ambiguous",
+                         "text": "names tied to more than one stay"})
     else:
-        contexts.append({"context": "name_tied_to_one_stay",
-                         "text": ("names tied to more than one stay"
-                                  if tied else ""), "pieces": []})
+        contexts.append({"context": "name_tied_to_one_stay", "text": "", "pieces": []})
     # 4. A person in the memory was alive in it: never before their birth (a
     #    sister younger than him), never after their death unless it says so.
     after = before = None
@@ -8685,8 +8743,8 @@ def _remembered_story_contexts(node_id: str, group: dict, record, *, texts: list
             who.append(f"{collapsed_text(row.get('name'))} died {died.latest}")
     if after or before:
         piece = chrono.DateRecord(
-            best=f"{after or record.earliest}/{before or record.latest}",
-            earliest=after or record.earliest, latest=before or record.latest,
+            best=f"{after or birth.earliest}/{before or '9999'}",
+            earliest=after or birth.earliest, latest=before or "9999",
             granularity="range", confidence="inferred", basis="anchor")
         contexts.append({"context": "person_lifetime", "text": "; ".join(who),
                          "pieces": [piece]})
@@ -8697,27 +8755,58 @@ def _remembered_story_contexts(node_id: str, group: dict, record, *, texts: list
 
 def _apply_remembered_story_floor(groups: dict, placed: dict, *, owner: str, birth,
                                   stays: list[dict], roster_snapshot: object,
-                                  config: dict, diagnostics: list) -> None:
+                                  config: dict, diagnostics: list) -> list[dict]:
     """:data:`BETTER_CONTEXT_BEATS_THE_BAND`, then
-    :data:`A_REMEMBERED_STORY_OPENS_AFTER_INFANCY`, over every placed story on
-    his own axis that his words date only by a life stage. In place; one
-    `remembered_story.FINDING` per story read."""
+    :data:`A_REMEMBERED_STORY_OPENS_AFTER_INFANCY`. In place.
+
+    v415 widened the set to the one the owner's republish showed: every placed
+    moment on his axis (his own subject, or a mention that is the owner with a
+    note — "narrator (as a kid)") that names a life stage OR whose inferred
+    opening is at or before his birth. Returns one row per candidate — moved
+    (`remembered_story.FINDING`) or declined with its reason
+    (`remembered_story.DECLINED_FINDING`) — and appends the same rows to the
+    findings, so the published projection and its receipt can say what the
+    pass did."""
+    rows: list[dict] = []
     if birth is None or not getattr(birth, "earliest", None):
-        return
+        return rows
+    origin = chrono._ordinal(birth.earliest, end=False)  # noqa: SLF001
     name_index = None
     for node_id in sorted(placed):
         group = groups.get(node_id)
-        if group is None or not _is_owner_subject(group, owner):
+        if group is None:
             continue
-        if collapsed_text(group.get("event_kind")) in _NOT_A_REMEMBERED_STORY_KINDS:
+        if not (_is_owner_subject(group, owner) or rs.names_the_owner(group)):
+            continue
+        if collapsed_text(group.get("event_kind")) in _NOT_A_REMEMBERED_STORY_KINDS \
+                or collapsed_text(group.get("node_kind")) == "period":
             continue
         record = placed[node_id]
         parsed = record if isinstance(record, chrono.DateRecord) else chrono.from_dict(record)
-        if parsed is None or parsed.basis not in _REMEMBERED_STORY_BASES:
+        if parsed is None or not parsed.earliest:
             continue
+        quotes, titles = rs.group_quotes(group), rs.group_titles(group)
+        stage = rs.life_stage(quotes, titles)
+        at_origin = chrono._ordinal(parsed.earliest, end=False) <= origin  # noqa: SLF001
+        if stage is None and not at_origin:
+            continue
+        if stage is None:
+            stage = {"stage": rs.REMEMBERED_STAGE, "phrase": "",
+                     "remembered": rs.remembered_moment(quotes, titles)}
         texts, own = rs.group_texts(group)
-        stage = rs.life_stage(rs.group_quotes(group), rs.group_titles(group))
-        if stage is None or rs.states_its_own_date(own):
+        reason = ""
+        if parsed.basis not in _REMEMBERED_STORY_BASES:
+            reason = "stated_basis"
+        elif rs.states_its_own_date(own):
+            reason = "states_its_own_date"
+        elif stage["stage"] == rs.REMEMBERED_STAGE and not stage["remembered"]:
+            reason = "third_person_fact"
+        if reason:
+            row = {"finding": rs.DECLINED_FINDING, "node_id": node_id, "reason": reason,
+                   "stage": stage["stage"], "basis": parsed.basis,
+                   "interval": f"{parsed.earliest}/{parsed.latest}"}
+            rows.append(row)
+            diagnostics.append(row)
             continue
         if name_index is None:
             name_index = _names_tied_to_stays(groups, stays)
@@ -8728,7 +8817,12 @@ def _apply_remembered_story_floor(groups: dict, placed: dict, *, owner: str, bir
                                        contexts=contexts, config=config)
         if moved is not None:
             placed[node_id] = moved
-        diagnostics.append({"finding": rs.FINDING, "node_id": node_id, **detail})
+        row = {"finding": rs.FINDING, "node_id": node_id, **detail}
+        if moved is None:
+            row.setdefault("interval", f"{parsed.earliest}/{parsed.latest}")
+        rows.append(row)
+        diagnostics.append(row)
+    return rows
 
 
 def _rival_readings(calculated_row: dict) -> str:

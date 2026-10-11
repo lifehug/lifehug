@@ -780,6 +780,25 @@ calculating placement against a spine**:
   `earliest_memory_age: <n>` in `profile.yaml` or `config.yaml`. The moved bound
   carries provenance rules `better_context` and `remembered_story_floor`, beside
   `origin_floor`.
+- **The remembered-story floor, widened** (v415, `timeline-rules:31`, the
+  owner's republish of 2026-10-10 moved one of his ten examples). A moment on
+  his axis whose inferred opening is at or before his birth is read as his
+  memory whether or not it names a life stage ("Birthday Sizzler tradition with
+  Grandma" opens at his 4th birthday), unless every sentence of it is somebody
+  else's fact (`remembered_story_declined`, reason `third_person_fact`); his
+  subject said with a note — "narrator (as a kid)", "Narrator's family" — is
+  his (`remembered_story.owner_handle`, through
+  `identity_resolution.OWNER_SUBJECT_MENTIONS`). A **locator** in the telling
+  replaces the inferred band rather than narrowing it: a stated grade, a place
+  named outright ("in San Diego" → his San Diego stay, even when the resolver's
+  band never touched it), one house a cited related moment names ("Witnessing
+  Horsepool brothers being mean"), a neighbour tied to one stay. A grade the
+  sentence negates ("in 4th or 5th grade we just never went out") and a
+  resolver's `spine:` citation are never context. Every candidate — moved,
+  unmoved or declined with its reason — is published in the projection's
+  `diagnostics.remembered_story` and summarized in the generation's receipt
+  (`temporal_receipts.remembered_story_summary`: `moved`, `unmoved`,
+  `declined`, `declined_nodes`), so the pass is verifiable from the vault alone.
 - **An estimate is capped at about five years**
   (`resolver.AN_ESTIMATE_WIDER_THAN_FIVE_YEARS_STAYS_A_WINDOW`): a wider one
   stays the probable window and is asked about only when hot

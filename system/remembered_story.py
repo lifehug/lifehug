@@ -73,6 +73,38 @@ BETTER_CONTEXT_RULE = "better_context"
 #: The diagnostic finding, one per story the rule read.
 FINDING = "remembered_story_placed"
 
+#: v415: the finding for a candidate the rule looked at and left alone, with
+#: its reason (:data:`DECLINE_REASONS`), so a vault can say why a story kept
+#: its birth-day opening.
+DECLINED_FINDING = "remembered_story_declined"
+DECLINE_REASONS = ("stated_basis", "states_its_own_date", "third_person_fact")
+
+#: v415 (owner's republish of 2026-10-10): the stage of a remembered moment
+#: that names no life stage at all but whose inferred opening is at or before
+#: his birth — "Birthday Sizzler tradition with Grandma" 1981-07-11→2000-08.
+#: It reads the earliest-memory age as its band floor.
+REMEMBERED_STAGE = "remembered"
+
+#: v415. The locator contexts — the telling's own words saying WHEN or WHERE.
+#: A locator REPLACES an inferred band (the resolver's "1981-07-11→1988-06"
+#: for a story told "in San Diego" is simply wrong); the person-lifetime
+#: context only bounds.
+LOCATOR_CONTEXTS = ("stated_grade", "named_stay", "name_tied_to_one_stay")
+
+#: A sentence that says the thing did NOT happen in that grade ("in 4th or
+#: 5th grade we just never went out") is not where the story happened.
+_NEGATION_RE = re.compile(r"\b(?:never|no\s+longer|stopped|didn['\u2019]?t|did\s+not|"
+                          r"wasn['\u2019]?t|weren['\u2019]?t|not\s+anymore)\b", re.IGNORECASE)
+
+#: A citation a system reader wrote from the owner's LIFE SHAPE, not from the
+#: story (``spine: (Ridgeview): June 1990–June 1991``). It names the stretch
+#: the reader guessed, never context the telling gave.
+_SPINE_CITATION_RE = re.compile(r"^\s*spine\b[\w.:-]*:\s", re.IGNORECASE)
+
+#: "narrator (as a kid)", "Narrator's family": the owner, said with a note.
+_PARENTHETICAL_RE = re.compile(r"\(([^)]*)\)")
+_OWNER_HANDLE_TAIL_RE = re.compile(r"['\u2019]s\s+(?:family|household)$", re.IGNORECASE)
+
 #: The declarative table: the earliest-memory age and the bands.
 CONFIG_PATH = Path(__file__).with_name("remembered_story.json")
 
@@ -102,8 +134,11 @@ STAGE_PATTERNS: tuple[tuple[str, tuple[re.Pattern, ...]], ...] = (
         re.compile(r"\bas\s+(?:a\s+)?(?:little\s+|small\s+)?(?:kid|child|boy|girl)s?\b",
                    re.IGNORECASE),
         re.compile(r"\bas\s+(?:little\s+)?children\b", re.IGNORECASE),
-        re.compile(r"\bwhen\s+(?:I|we)\s+(?:was|were)\s+(?:little|small|"
-                   r"a\s+(?:little\s+)?(?:kid|child|boy|girl)|kids|children)\b",
+        # v415: "when I was really young" (the owner's own words about a
+        # neighbour) — an intensifier before little/young/small.
+        re.compile(r"\bwhen\s+(?:I|we)\s+(?:was|were)\s+(?:(?:really|very|so|pretty|quite)\s+)?"
+                   r"(?:little|small|young|"
+                   r"a\s+(?:little\s+|young\s+)?(?:kid|child|boy|girl)|kids|children)\b",
                    re.IGNORECASE),
         re.compile(r"\blittle\s+kids?\b", re.IGNORECASE),
     )),
@@ -242,6 +277,8 @@ def _texts_of(claim: dict) -> list[str]:
         for part in (quote.split(" | ") if system else [quote]):
             part = " ".join(part.split())
             if system:
+                if _SPINE_CITATION_RE.match(part):
+                    continue
                 part = _CITATION_PREFIX_RE.sub("", part, count=1)
             if part:
                 out.append(part)
@@ -272,7 +309,47 @@ def group_titles(group: dict) -> list[str]:
             title = " ".join(str(claim.get("event_mention") or "").split())
             if title and title not in out:
                 out.append(title)
+            # v415: "narrator (as a kid)" — the note on a subject is a title.
+            for note in _PARENTHETICAL_RE.findall(str(claim.get("subject_mention") or "")):
+                note = " ".join(note.split())
+                if note and note not in out:
+                    out.append(note)
     return out
+
+
+def owner_handle(text: object) -> bool:
+    """v415. Is this subject mention the owner said with a note — "narrator
+    (as a kid)", "Narrator's family", "Self"? Read through
+    `identity_resolution.OWNER_SUBJECT_MENTIONS`, the one owner-mention table."""
+    import identity_resolution as ident  # noqa: PLC0415
+
+    body = _PARENTHETICAL_RE.sub(" ", str(text or ""))
+    body = _OWNER_HANDLE_TAIL_RE.sub("", " ".join(body.split()).strip(" ,.;"))
+    key = ident.normalized_mention_key(body)
+    return bool(key) and (key in ident.OWNER_SUBJECT_MENTIONS
+                          or key in getattr(ident, "OWNER_COUPLE_SUBJECT_WORDS", ()))
+
+
+def names_the_owner(group: dict) -> bool:
+    """Does any claim's subject mention name the owner (:func:`owner_handle`)?"""
+    return any(isinstance(claim, dict) and owner_handle(claim.get("subject_mention"))
+               for claim in group.get("claims") or ())
+
+
+def remembered_moment(texts: object, titles: object = ()) -> bool:
+    """v415. A moment naming no life stage is the owner's memory unless EVERY
+    sentence it is told in is somebody else's fact ("Dad worked nights at the
+    cannery")."""
+    sentences = _sentences([str(t) for t in texts or ()]) or \
+        _sentences([str(t) for t in titles or ()])
+    if not sentences:
+        return True
+    return not all(_third_person_fact(sentence) for sentence in sentences)
+
+
+def negated(text: object) -> bool:
+    """Does the sentence say the thing did not happen then?"""
+    return bool(_NEGATION_RE.search(str(text or "")))
 
 
 def group_quotes(group: dict) -> list[str]:
@@ -357,7 +434,8 @@ def named_places(texts: object) -> list[str]:
     out: list[str] = []
     for text in texts or ():
         for match in _NAMED_PLACE_RE.finditer(str(text)):
-            place = match.group("place").strip(" .,;")
+            # A place never runs across a sentence end ("Seabright. Our").
+            place = re.split(r"[.!?]\s", match.group("place"))[0].strip(" .,;")
             if place and place not in out:
                 out.append(place)
     return out
@@ -405,57 +483,89 @@ def _hull_within(record: chrono.DateRecord, pieces: list) -> tuple[str, str] | N
     return earliest, latest
 
 
+def _envelope(pieces: list) -> tuple[str, str] | None:
+    lows = [p.earliest for p in pieces if p.earliest]
+    highs = [p.latest for p in pieces if p.latest]
+    if not lows or not highs:
+        return None
+    return (min(lows, key=lambda v: _ord(v, end=False)),
+            max(highs, key=lambda v: _ord(v, end=True)))
+
+
+def band_floor(stage: dict, config: dict) -> int:
+    """The age a stage's band opens at (:data:`REMEMBERED_STAGE` reads the
+    earliest-memory age)."""
+    bands = config["bands"]
+    if stage["stage"] in bands:
+        return bands[stage["stage"]][0]
+    return config["earliest_memory_age"]
+
+
 def place_story(record: object, *, stage: dict, birth: object, contexts: object,
                 config: dict) -> tuple[chrono.DateRecord | None, dict]:
-    """The record narrowed by better context and floored at the memory age.
+    """The record placed by better context and floored at the memory age.
 
     ``contexts`` is ``[{"context", "text", "pieces": [DateRecord, …]}]`` in
     :data:`CONTEXTS` order (the fold gathers them; a context whose pieces are
-    empty was looked for and not found). Returns ``(new record or None, finding
-    detail)``; ``None`` means nothing moved.
+    empty was looked for and not found, and ``outcome`` may be preset —
+    ``already_applied``, ``negated``, ``ambiguous``). A LOCATOR
+    (:data:`LOCATOR_CONTEXTS`) replaces the inferred band with its own window
+    — the first one found; a later locator only narrows that, and is
+    ``disjoint`` when it cannot. ``person_lifetime`` only bounds. Returns
+    ``(new record or None, finding detail)``; ``None`` means nothing moved.
     """
     parsed = record if isinstance(record, chrono.DateRecord) else chrono.from_dict(record)
     birth_record = birth if isinstance(birth, chrono.DateRecord) else chrono.from_dict(birth)
     tried: list[dict] = []
-    detail = {"stage": stage["stage"], "phrase": stage["phrase"],
+    detail = {"stage": stage["stage"], "phrase": stage.get("phrase") or "",
               "remembered": stage["remembered"], "contexts_tried": tried}
     if parsed is None or birth_record is None or not parsed.earliest or not parsed.latest:
         return None, detail
     current = parsed
-    narrowed = False
+    located = False
     for row in contexts or ():
         name = row.get("context")
         pieces = [p for p in row.get("pieces") or () if p is not None]
         entry = {"context": name, "text": row.get("text") or ""}
-        if row.get("already"):
-            entry["outcome"] = "already_applied"
-            narrowed = True
-            tried.append(entry)
+        tried.append(entry)
+        if row.get("outcome"):
+            entry["outcome"] = row["outcome"]
+            located = located or row["outcome"] == "already_applied"
             continue
         if not pieces:
             entry["outcome"] = "not_found"
-            tried.append(entry)
+            continue
+        if name in LOCATOR_CONTEXTS and not located:
+            window = _envelope(pieces)
+            if window is None:
+                entry["outcome"] = "not_found"
+                continue
+            located = True
+            if window == (current.earliest, current.latest):
+                entry["outcome"] = "no_change"
+                continue
+            entry["outcome"] = "replaced_inferred"
+            current = _with_bounds(current, window[0], window[1], {
+                "rule": BETTER_CONTEXT_RULE, "context": name,
+                "text": f"from {row.get('text') or name}",
+                "was": f"{parsed.earliest}/{parsed.latest}"})
             continue
         hull = _hull_within(current, pieces)
         if hull is None:
             entry["outcome"] = "disjoint"
         elif hull == (current.earliest, current.latest):
             entry["outcome"] = "no_change"
-            narrowed = True
         else:
             entry["outcome"] = "narrowed"
             current = _with_bounds(current, hull[0], hull[1], {
                 "rule": BETTER_CONTEXT_RULE, "context": name,
                 "text": f"from {row.get('text') or name}",
                 "was": f"{parsed.earliest}/{parsed.latest}"})
-            narrowed = True
-        tried.append(entry)
+        if name in LOCATOR_CONTEXTS and entry["outcome"] != "disjoint":
+            located = True
     age = config["earliest_memory_age"]
-    if stage["remembered"]:
-        low = age if narrowed else config["bands"][stage["stage"]][0]
-    else:
-        low = None  # a third-person fact keeps the existing bands
-    detail["band_applied"] = bool(stage["remembered"] and not narrowed)
+    low = (age if located else band_floor(stage, config)) if stage["remembered"] else None
+    detail["band_applied"] = bool(stage["remembered"] and not located)
     if low is not None:
         floor_record = chrono.from_age_band(birth_record, low, low)
         floor = floor_record.earliest if floor_record is not None else None
@@ -466,10 +576,12 @@ def place_story(record: object, *, stage: dict, birth: object, contexts: object,
                 # disagreement to surface, never a bound to slide.
                 detail["outcome"] = "before_earliest_memory"
             else:
+                said = (f"a memory told “{stage['phrase']}”" if stage.get("phrase")
+                        else "a memory of yours")
                 current = _with_bounds(current, floor, current.latest, {
                     "rule": REMEMBERED_STORY_FLOOR_RULE,
-                    "text": (f"a memory told “{stage['phrase']}” opens no earlier "
-                             f"than your {_ordinal_word(low)} birthday"),
+                    "text": (f"{said} opens no earlier than your "
+                             f"{_ordinal_word(low)} birthday"),
                     "was": current.earliest, "floor": floor, "age": low})
     if current is parsed:
         return None, detail
