@@ -29,7 +29,9 @@ from __future__ import annotations
 import collections
 import hashlib
 import sys
+import contextlib
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -187,13 +189,27 @@ def the_bind(claims) -> dict:
     return {"operations": [envelope["operation"]], "bindings": envelope["bindings"]}
 
 
+@contextlib.contextmanager
+def before_v414():
+    """The fold as it read before v414
+    (`identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`): the turning-point
+    telling stays under ``self``. Since v414 that reading never reaches the
+    seam this module guards, so the incident is reproduced with it switched
+    off — the v340 narrowing must still hold on its own."""
+    with mock.patch.object(tt, "_the_narrator_is_not_the_deceased",
+                           lambda claims, **_kw: (claims, [])), \
+            mock.patch.object(tt, "_birth_group_newborn", lambda group, owner: []):
+        yield
+
+
 class TheAgeAnchorSurvivesABindTests(unittest.TestCase):
     """The 36 lost placements, at the seam that lost them."""
 
     def setUp(self):
         self.claims = age_vault_claims()
-        self.before = derive(self.claims)
-        self.after = derive(self.claims, episode_records=the_bind(self.claims))
+        with before_v414():
+            self.before = derive(self.claims)
+            self.after = derive(self.claims, episode_records=the_bind(self.claims))
 
     # -- the incident, reproduced ----------------------------------------
 
@@ -263,7 +279,8 @@ class TheAgeAnchorSurvivesABindTests(unittest.TestCase):
 
         tt._owner_birth_readings = v339
         try:
-            lost = derive(self.claims, episode_records=the_bind(self.claims))
+            with before_v414():
+                lost = derive(self.claims, episode_records=the_bind(self.claims))
         finally:
             tt._owner_birth_readings = original
         self.assertEqual(best_of(node_named(lost, "Went bankrupt at 26")), (None, None))
@@ -271,6 +288,18 @@ class TheAgeAnchorSurvivesABindTests(unittest.TestCase):
             [node for node in lost.nodes if node.get("event_kind") == "age_frame"], [])
         self.assertIn("age_without_birth_anchor", findings(lost))
         self.assertIn("age_frames_ambiguous_birth", findings(lost))
+
+    def test_since_v414_the_sons_birth_never_names_the_owner(self):
+        """`identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`: with the
+        reading on, the turning point is the son's birth, the owner is not
+        among its subjects, and his age placement stands."""
+        after = derive(self.claims, episode_records=the_bind(self.claims))
+        son = [node for node in after.nodes if node.get("event_kind") == "birth"
+               and "Wren Ashgrove" in (node.get("subject_refs") or ())]
+        self.assertEqual(len(son), 1)
+        self.assertNotIn("self", son[0]["subject_refs"])
+        self.assertEqual(best_of(node_named(after, "Went bankrupt at 26")),
+                         ("2007~", "age"))
 
     def test_an_ambiguous_reading_is_refused_out_loud(self):
         """The narrowing is not a licence to pick. A vault that really does hold

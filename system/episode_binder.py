@@ -1595,8 +1595,10 @@ def _span_settings_of(rows: Sequence[object], mentions: Sequence[str],
 
 def narrator_resubjected(claims: Sequence[object], event_kind: object,
                          subject_mentions: Sequence[str]) -> str:
-    """The deceased a death telling filed under the narrator names, or ``""``
-    (`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`).
+    """The deceased a death telling — or, since v414, the newborn a birth
+    telling — filed under the narrator names, or ``""``
+    (`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`,
+    `identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`).
 
     The binder's half of the fold's reading: when every subject the telling
     was filed under is the owner and its own title names whose death it was
@@ -1610,20 +1612,25 @@ def narrator_resubjected(claims: Sequence[object], event_kind: object,
         or tt.is_owner_reference_only(text) for text in subject_mentions)
     if not owner_only:
         return ""
+    # v414, `identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`: the same
+    # reading for a birth ("Harvey's birth as turning point").
+    readings = ((ir.deceased_named_in, ir.DEATH_EVENT_KINDS, "death"),
+                (ir.newborn_named_in, ir.BIRTH_EVENT_KINDS, "birth"))
     for claim in claims or ():
         row = claim if isinstance(claim, dict) else {}
-        deceased = ir.deceased_named_in(row.get("event_mention"))
-        if not deceased:
-            continue
-        kind = collapsed_text(row.get("event_kind")) or collapsed_text(event_kind)
-        if kind in ir.DEATH_EVENT_KINDS:
-            return deceased
-        if kind in ("", KIND_WILDCARD):
-            import cornerstones as cs  # noqa: PLC0415 - avoids an import cycle
+        for named_in, kinds, milestone in readings:
+            named = named_in(row.get("event_mention"))
+            if not named:
+                continue
+            kind = collapsed_text(row.get("event_kind")) or collapsed_text(event_kind)
+            if kind in kinds:
+                return named
+            if kind in ("", KIND_WILDCARD):
+                import cornerstones as cs  # noqa: PLC0415 - avoids an import cycle
 
-            if cs.milestone_of_label(row.get("event_mention"),
-                                     subject_words=(deceased,)) == "death":
-                return deceased
+                if cs.milestone_of_label(row.get("event_mention"),
+                                         subject_words=(named,)) == milestone:
+                    return named
     return ""
 
 
@@ -2421,8 +2428,66 @@ def overmerge_audit(views: Mapping[str, TellingView], units: Mapping[str, Candid
             "finding": "disjoint_stated_bounds",
             "reason": OVERMERGE_DISJOINT_REASON,
             "identity_rule_version": RULE_VERSION,
+            # v414 (:data:`A_POSSIBLE_OVERMERGE_NAMES_ITSELF`).
+            "episode_label": _episode_label(candidate, views),
+            "dates": _contradicting_pair(sorted(dated), views),
         })
     return found
+
+
+#: v414 (the owner's binder dry run, 2026-10-10): four `possible_overmerge`
+#: warnings named only an item id, and nothing in the vault said which row or
+#: which dates — so nobody could act on one. A possible overmerge names its
+#: episode (the label its tellings most often give it) and the first two of its
+#: tellings whose stated dates cannot both be true, each with its own words and
+#: date, in the plan, the dry-run line and the binder receipt.
+A_POSSIBLE_OVERMERGE_NAMES_ITSELF = (
+    "a possible_overmerge names its episode's label and the two tellings whose "
+    "stated dates contradict, each with its words and its date, in the plan, "
+    "the dry-run report and the binder receipt"
+)
+
+
+def _episode_label(candidate: Candidate, views: Mapping[str, TellingView]) -> str:
+    """The label its member tellings most often give it (then the shortest)."""
+    counts: dict[str, int] = {}
+    for ref in candidate.members:
+        label = collapsed_text(views[ref].label) if ref in views else ""
+        if label:
+            counts[label] = counts.get(label, 0) + 1
+    if not counts:
+        return ""
+    return sorted(counts, key=lambda text: (-counts[text], len(text), text))[0]
+
+
+def _contradicting_pair(dated: Sequence[tuple], views: Mapping[str, TellingView]) -> list:
+    """The first two dated members whose stated bounds cannot both be true."""
+    for position, (left, a) in enumerate(dated):
+        for right, b in dated[position + 1:]:
+            if not chrono.dates_agree(a, b):
+                return [{"telling_ref": ref, "label": collapsed_text(views[ref].label),
+                         "date": chrono.to_edtf(record)}
+                        for ref, record in ((left, a), (right, b))]
+    return []
+
+
+def overmerge_receipt_rows(result: "BinderPlan") -> list:
+    """The binder receipt's own record of each warning
+    (:data:`A_POSSIBLE_OVERMERGE_NAMES_ITSELF`)."""
+    return [{key: row.get(key) for key in ("item_id", "episode_id", "episode_label",
+                                           "telling_refs", "dates")}
+            for row in result.overmerges if row.get("finding") == "disjoint_stated_bounds"]
+
+
+def _overmerge_line(row: Mapping) -> str:
+    """One dry-run line a person can act on (:data:`A_POSSIBLE_OVERMERGE_NAMES_ITSELF`)."""
+    label = collapsed_text(row.get("episode_label"))
+    dates = " vs ".join(f"{d.get('date')} ({d.get('label')!r}, {d.get('telling_ref')})"
+                        for d in row.get("dates") or ())
+    head = f"  ⚠ possible_overmerge {row['item_id']}"
+    if label:
+        head += f" — {label!r} ({row.get('episode_id')})"
+    return f"{head}: {dates + ' — ' if dates else ''}{row['reason']}"
 
 
 def bridge_diagnostics(episode_records: object = ()) -> list:
@@ -3412,6 +3477,20 @@ A_GLUED_TELLING_LENDS_NO_YEAR = (
     "graduation, and never titles the row"
 )
 
+#: v414 (owner's vault after the v411 bindings): "Dad graduated" 1987 stood
+#: apart from the folded row because its telling is the WHOLE residence-summary
+#: message ("Events: Brittney born, Kristine 10, Dad graduated (1987)"), one
+#: telling holding three events. Binding that telling to the graduation would
+#: drag the birth and the age along, so R2e never binds a telling of several
+#: events; its graduation claim joins the folded row in the fold instead
+#: (`temporal_timeline.A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW`), when subject, year
+#: and kind agree.
+A_WHOLE_MESSAGE_TELLING_IS_NEVER_BOUND_BY_ITS_GRADUATION = (
+    "R2e never binds a telling of several events to the graduation one of them "
+    "tells; that claim joins the folded row in the fold when subject, year and "
+    "kind agree"
+)
+
 #: The graduation clause reader is `identity_resolution.graduation_clause` —
 #: ONE definition, read here and by the fold's title rule, which may not
 #: import the binder.
@@ -3443,11 +3522,17 @@ def graduation_subject(view: TellingView, reading: GraduationReading,
                 return refs[0]
             if refs:
                 return ""
-        return "words:" + " ".join(words)
+    # v414: a lead the roster index cannot read ("Dad" — too short to be a
+    # key) is the person the telling is filed under, when that is one roster
+    # person; a family or group handle ("narrator's family") is nobody, and
+    # the lead's own words stand for :func:`graduation_readings` to unify.
     people = sorted(ref for ref in view.subject_entities
                     if collapsed_text(ref).startswith(PERSON_ENTITY_PREFIX))
     if len(people) == 1:
         return people[0]
+    if lead:
+        return "words:" + " ".join(rw.canonical_gendered_word(token) or token
+                                   for token in lead)
     return ""
 
 
@@ -3467,20 +3552,46 @@ def _year_record(year: str) -> object:
 def graduation_readings(views: Mapping[str, TellingView], index: object = None) -> dict:
     """``{telling_ref: (subject key, GraduationReading)}`` for every eligible
     telling that tells one person's graduation (not the owner's)."""
+    import relation_words as rw  # noqa: PLC0415 - avoids an import cycle
+
     out: dict = {}
+    lead_refs: dict[str, set] = {}
     for telling_ref in sorted(views):
         view = views[telling_ref]
         if not view.eligible:
             continue
-        kind = collapsed_text(view.event_kind)
-        if kind not in ("", KIND_WILDCARD) and not kinds_compatible(kind, "graduation"):
+        if len(view.node_refs) > 1:
+            # :data:`A_WHOLE_MESSAGE_TELLING_IS_NEVER_BOUND_BY_ITS_GRADUATION`:
+            # a telling of several events ("Events: Brittney born, Kristine
+            # 10, Dad graduated") is never bound whole to one of them; its
+            # graduation claim follows the folded row in the fold instead.
             continue
         reading = graduation_clause(view.label)
         if reading is None:
             continue
+        kind = collapsed_text(view.event_kind)
+        if not reading.glued and kind not in ("", KIND_WILDCARD) \
+                and not kinds_compatible(kind, "graduation"):
+            # A GLUED telling's kind is as often the other event's ("got San
+            # Diego job" -> job); it is read by its graduation clause and
+            # fenced by :data:`A_GLUED_TELLING_LENDS_NO_YEAR`.
+            continue
         subject = graduation_subject(view, reading, index)
-        if subject:
-            out[telling_ref] = (subject, reading)
+        if not subject:
+            continue
+        out[telling_ref] = (subject, reading)
+        words = " ".join(rw.canonical_gendered_word(token) or token for token in reading.lead
+                         if token not in OWNER_SUBJECT_MENTIONS)
+        if words and not subject.startswith("words:"):
+            lead_refs.setdefault(words, set()).add(subject)
+    # v414: "Dad" in a telling filed under a family handle is the one roster
+    # person every other telling's "Dad" of a graduation resolved to — the
+    # roster's answer, read through the tellings that could ask it.
+    for telling_ref, (subject, reading) in list(out.items()):
+        if subject.startswith("words:"):
+            refs = lead_refs.get(subject.removeprefix("words:"), set())
+            if len(refs) == 1:
+                out[telling_ref] = (next(iter(refs)), reading)
     return out
 
 
@@ -4380,7 +4491,7 @@ def describe(result: BinderPlan, *, applied: bool = False) -> list:
         f"{name}={counts['verdicts'].get(name, 0)}" for name in VERDICTS
     ))
     for row in result.overmerges:
-        lines.append(f"  ⚠ possible_overmerge {row['item_id']}: {row['reason']}")
+        lines.append(_overmerge_line(row))
     for row in result.bridges:
         if row["finding"] == "bridge":
             lines.append(f"  ⚠ bridge: {row['operation_id']} alone holds "
@@ -4742,6 +4853,8 @@ def _write_receipt_after_apply(vault_root: str | Path, *, result: BinderPlan,
     receipt["vault_head"] = _vault_head(vault_root)
     receipt["summary"] = {
         "report": _compact_report_summary(report),
+        # :data:`A_POSSIBLE_OVERMERGE_NAMES_ITSELF`: what each warning is about.
+        "possible_overmerges": overmerge_receipt_rows(result),
         "counts": dict(result.counts),
         "filed": dict(filed),
         "frames": frames,
@@ -5164,7 +5277,9 @@ def binder_step(vault_root: str | Path, *, now: object = None,
             "counts": dict(last.get("counts") or {}),
             "report": outcome["report"],
             "questions": [],
-            "overmerges": [],
+            # The last full pass's warnings, so a nothing-new run still says
+            # what each one is (:data:`A_POSSIBLE_OVERMERGE_NAMES_ITSELF`).
+            "overmerges": list(last.get("possible_overmerges") or []),
             block_name: [],
             "containment_diagnostics": [],
             "containment_ambiguities": [],

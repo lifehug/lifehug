@@ -492,7 +492,9 @@ class TheOwnersAgeAnchorSurvivesADisplayWordedBirthTest(unittest.TestCase):
         """THE LOSS, seen. With the single-word reading restored the owner's
         two birth groups are indistinguishable, the anchor is refused, and the
         age placement falls to unplaced — out loud, which is v340's own gain."""
-        with _v340_narrowing():
+        # v414's reading would keep the turning point off the owner upstream
+        # of the seam; switched off so the v340 loss is still seen.
+        with _v340_narrowing(), self.fixture.before_v414():
             result = self.fixture.derive(self.claims, episode_records=self.bind)
         self.assertEqual(
             self.fixture.best_of(self.fixture.node_named(result,

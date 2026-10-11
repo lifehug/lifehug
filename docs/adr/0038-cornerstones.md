@@ -174,3 +174,27 @@ say what was read instead. "While he narrates" is every vault today — nothing
 writes a death claim about the owner (`temporal_timeline._owner_death` is a
 contract only); one written in future will be its own explicitly-ruled record.
 
+## Amendment (v414, owner 2026-10-10) — the narrator is not the newborn
+
+The birth sibling of v411's amendment. The owner's son's birth node carried
+subject_refs `['Harvey Rex', 'person/harvey', 'self']`: three of its tellings
+("Harvey's birth as turning point", a resolver reading of it, and "Harvey's
+birth during COVID isolation") were filed under `subject_mention: "self"`,
+because he is the subject of the turning point and the birth is what turned it.
+v344's `A_BIRTH_BELONGS_TO_THE_PERSON_BORN` already gave the node Harvey as its
+subject; it left the owner standing among its subjects, so he was a subject of
+two births.
+
+The rule (`identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`): a birth or
+child_born telling filed under the owner whose own title names who was born
+(`newborn_named_in` — the death reader over `BIRTH_WORDS`; "birthday" is
+deliberately not a birth word, v403) is re-subjected to that person through the
+roster, or to the words themselves; a birth node naming anybody besides the
+owner drops him from its subjects. His relation to his child's birth is carried
+by the `child_born` kind and the family axis, never by `self`. A birth naming
+only him ("I was born in Redlands", "My birth") keeps its subject, and an age
+he filed on a birth stays his. The binder reads the same in its view of the
+telling; the binder's `RULE_VERSION` does not move (a filed binding names the
+`R2` family, and the view change only adds a person to an R2b bucket the
+telling's own title already names).
+

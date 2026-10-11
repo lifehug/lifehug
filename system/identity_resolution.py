@@ -3041,9 +3041,24 @@ def deceased_named_in(event_mention: object, *, owner_names: object = ()) -> str
     that are never somebody ("Nearly died", "Begins processing father's
     death") name nobody, and nor does a title with no death word at all.
     """
+    return _person_named_by(event_mention, DEATH_WORDS, owner_names=owner_names)
+
+
+def _person_named_by(event_mention: object, milestone_words: frozenset, *,
+                     owner_names: object = ()) -> str:
+    """Who a milestone title names: the run before its milestone word
+    (possessive, or standing directly before it), or the run after
+    "<milestone> of". ONE reader for :func:`deceased_named_in` and
+    :func:`newborn_named_in`."""
     text = collapsed_text(event_mention)
     if not text:
         return ""
+
+    def is_milestone(token: str) -> bool:
+        word = _bare(token)[0].casefold()
+        return word in milestone_words or any(part in milestone_words
+                                              for part in word.split("-"))
+
     tokens = _DEATH_TOKEN_RE.findall(text)
     if not tokens:
         return ""
@@ -3062,7 +3077,7 @@ def deceased_named_in(event_mention: object, *, owner_names: object = ()) -> str
         key = normalized_mention_key(word)
         if not key or is_owner(word) or key in _DECEASED_DETERMINERS:
             return False
-        if key in _NOT_A_DECEASED or _is_death_word(word):
+        if key in _NOT_A_DECEASED or is_milestone(word):
             return False
         if relation_word_stem(key) or IN_LAW_RE.search(word):
             return True
@@ -3070,7 +3085,7 @@ def deceased_named_in(event_mention: object, *, owner_names: object = ()) -> str
             return False
         return possessive or word[:1].isupper()
 
-    first = next((index for index, token in enumerate(tokens) if _is_death_word(token)), None)
+    first = next((index for index, token in enumerate(tokens) if is_milestone(token)), None)
     if first is None:
         return ""
     # WHOSE: the run before the death word, determiners and the owner's own
@@ -3143,6 +3158,58 @@ def deceased_ref(mention: object, roster: object, *, evidence_ref: object = "",
     holders = [ref for ref, relation in index.relationship_of.items()
                if collapsed_text(relation) in wanted]
     return holders[0] if len(holders) == 1 else ""
+
+
+# --------------------------------------------------------------------------
+# v414: the narrator is not the newborn
+# --------------------------------------------------------------------------
+
+#: v414 (owner, 2026-10-10), the sibling of :data:`THE_NARRATOR_IS_NOT_THE_DECEASED`.
+#: His son's birth was drawn with subject_refs ``['<son> Rex', 'person/<son>',
+#: 'self']`` because three of its tellings — "<Son>'s birth as turning point"
+#: (a classifier reading and a resolver reading of it) and "<Son>'s birth
+#: during COVID isolation" — were filed under ``subject_mention: "self"``: the
+#: owner is the subject of the turning point, not of the birth. His own birth
+#: is a separate node, so nothing merged them, but he stood as a subject of two
+#: births.
+#:
+#: THE RULE. A birth or child_born telling filed under the owner whose own
+#: title names who was born (:func:`newborn_named_in`: "<Name>'s birth …",
+#: "<Name> born", "The birth of <Name>", "My son's birth") is about that person:
+#: re-subjected through the roster (:func:`deceased_ref`, the one resolver for
+#: both milestones), or to the words themselves when the roster cannot say
+#: who — and the owner is dropped from the birth node's subjects. His relation
+#: to his child's birth is carried by the `child_born` kind and the family
+#: axis, never by ``self`` among its subjects. A birth naming nobody but him
+#: ("I was born in Redlands", "Born in Redlands", "My birth") keeps its
+#: subject: that is his own birth. An AGE filed under him stays his. A reading,
+#: like its sibling: the receipt keeps what the extractor wrote.
+THE_NARRATOR_IS_NOT_THE_NEWBORN = (
+    "a birth or child_born telling filed under the owner whose own words name "
+    "who was born (\"Harvey's birth as turning point\", \"the birth of <Name>\") "
+    "is re-subjected to that person through the roster, or to the words "
+    "themselves when the roster cannot say who, and the owner is dropped from "
+    "the birth's subjects; his relation to his child's birth is the child_born "
+    "kind and the family axis, never self in the subject set; a birth naming "
+    "only the owner keeps its subject"
+)
+
+#: The event kinds :data:`THE_NARRATOR_IS_NOT_THE_NEWBORN` reads as a birth.
+BIRTH_EVENT_KINDS = ("birth", "child_born")
+
+#: Words that say a birth happened. "birthday" is deliberately absent: a
+#: birthday is an anniversary until it can be a birth (v403).
+BIRTH_WORDS = frozenset({"birth", "births", "born"})
+
+
+def newborn_named_in(event_mention: object, *, owner_names: object = ()) -> str:
+    """The words a birth title names its newborn by, or ``""``
+    (:data:`THE_NARRATOR_IS_NOT_THE_NEWBORN`) — :func:`deceased_named_in`'s
+    reader over :data:`BIRTH_WORDS`. "Otis's birth as turning point" ->
+    ``Otis``; "Otis Rex born" -> ``Otis Rex``; "The birth of Otis Hale" ->
+    ``Otis Hale``; "I was born in Redlands" and "Otis's birthday party" ->
+    ``""``."""
+    return _person_named_by(event_mention, BIRTH_WORDS, owner_names=owner_names)
 
 
 # --------------------------------------------------------------------------
@@ -3237,6 +3304,10 @@ __all__ = [
     "DEATH_EVENT_KINDS",
     "DEATH_WORDS",
     "THE_NARRATOR_IS_NOT_THE_DECEASED",
+    "THE_NARRATOR_IS_NOT_THE_NEWBORN",
+    "BIRTH_EVENT_KINDS",
+    "BIRTH_WORDS",
+    "newborn_named_in",
     "GRADUATION_WORDS",
     "GraduationReading",
     "graduation_clause",

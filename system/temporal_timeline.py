@@ -396,7 +396,13 @@ from temporal_claims import (  # noqa: E402
 #: many ways is titled by its cleanest telling
 #: (:data:`A_GRADUATION_IS_TITLED_BY_ITS_CLEANEST_TELLING`). The same claims
 #: calculate to different subjects, labels, cards and findings.
-CALCULATION_RULE_VERSION = "timeline-rules:29"
+#: timeline-rules:30 (v414, owner 2026-10-10, "the narrator is not the
+#: newborn"): a birth telling filed under the narrator whose own title names who
+#: was born is read as that person's birth, and a birth node naming anybody
+#: besides the owner drops him from its subjects
+#: (`identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`). The same claims
+#: calculate to different subjects and findings.
+CALCULATION_RULE_VERSION = "timeline-rules:30"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -1391,6 +1397,114 @@ def _owner_birth_telling(group: dict, *, owner: str, owner_names: object,
     return named_birth and dated > 0
 
 
+#: v414 (owner's vault after the v411 bindings). The binder folded his
+#: father's graduation into one row, and "Dad graduated" (1987) still stood
+#: beside it: its telling is the whole residence-summary message, three events
+#: in one telling, which the binder never binds whole
+#: (the binder's `A_WHOLE_MESSAGE_TELLING_IS_NEVER_BOUND_BY_ITS_GRADUATION`).
+#: The claim is what agrees, so the claim follows: a node that is nothing but
+#: one person's graduation, bound to no episode, joins the ONE folded graduation
+#: row (an episode) of the same person whose stated year its every dated claim
+#: agrees with — never one naming another school, never a glued telling's, and
+#: never when two rows could take it. Its old id is published as a redirect.
+A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW = (
+    "a node that is nothing but one person's graduation and that no bind could "
+    "reach joins the one folded graduation row of that person whose stated "
+    "year its dates agree with; another school, a glued telling, an undated "
+    "node or two possible rows leave it where it is"
+)
+
+#: Reported, never raised: a loose graduation node folded into its row.
+DIAGNOSTIC_GRADUATION_TELLING_FOLDED = "graduation_telling_folded"
+
+
+def _graduation_reading_of_group(group: dict) -> dict | None:
+    """``{person, year, schools, glued}`` when every claim of the group tells
+    one person's graduation; ``None`` otherwise."""
+    kind = collapsed_text(group.get("event_kind"))
+    if kind not in ("graduation", "school", KIND_WILDCARD_MOMENT, ""):
+        return None
+    people: set = set()
+    years: set = set()
+    schools: set = set()
+    glued = False
+    dated = []
+    for claim in group.get("claims") or ():
+        text = collapsed_text(claim.get("event_mention"))
+        if not text:
+            continue
+        reading = ident.graduation_clause(text)
+        if reading is None:
+            return None
+        glued = glued or reading.glued
+        schools |= set(reading.institution)
+        ref = collapsed_text(claim.get("subject_ref"))
+        if ref.startswith("person/"):
+            people.add(ref)
+        record = chrono.from_dict(claim.get("temporal_value")) \
+            if isinstance(claim.get("temporal_value"), dict) else None
+        if record is not None:
+            dated.append(record)
+            if not reading.glued and record.earliest and \
+                    str(record.earliest)[:4] == str(record.latest or "")[:4]:
+                years.add(str(record.earliest)[:4])
+    people |= {ref for ref in group.get("subjects") or () if collapsed_text(ref).startswith("person/")}
+    if len(people) != 1:
+        return None
+    return {"person": next(iter(people)), "years": years, "schools": schools,
+            "glued": glued, "dated": dated}
+
+
+def _fold_loose_graduations(groups: dict) -> tuple[dict, list]:
+    """:data:`A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW`, in place on the groups.
+    Returns ``({old node id: row node id}, findings)``."""
+    rows = {}
+    loose = {}
+    for node_id in sorted(groups):
+        group = groups[node_id]
+        reading = _graduation_reading_of_group(group)
+        if reading is None:
+            continue
+        if group.get("episode_id"):
+            if len(reading["years"]) == 1:
+                rows[node_id] = reading
+        elif not reading["glued"] and reading["dated"]:
+            loose[node_id] = reading
+    aliases: dict = {}
+    findings: list = []
+    for node_id, reading in loose.items():
+        fits = []
+        for row_id, row in rows.items():
+            if row["person"] != reading["person"] or row_id == node_id:
+                continue
+            year = next(iter(row["years"]))
+            record = chrono.parse_stated_date(year)
+            if not all(chrono.dates_agree(other, record) for other in reading["dated"]):
+                continue
+            if reading["schools"] and row["schools"] and not (reading["schools"] & row["schools"]):
+                continue
+            fits.append(row_id)
+        if len(fits) != 1:
+            continue
+        target = fits[0]
+        home, group = groups[target], groups.pop(node_id)
+        seen = {collapsed_text(c.get("claim_id")) for c in home["claims"]}
+        for claim in group["claims"]:
+            if collapsed_text(claim.get("claim_id")) not in seen:
+                home["claims"].append(claim)
+        for subject in group.get("subjects") or ():
+            if subject not in home["subjects"]:
+                home["subjects"].append(subject)
+        home["claims"].sort(key=lambda row: collapsed_text(row.get("claim_id")))
+        home["subjects"].sort()
+        aliases[node_id] = target
+        findings.append({"finding": DIAGNOSTIC_GRADUATION_TELLING_FOLDED, "node_id": target,
+                         "was_node_id": node_id, "subject": reading["person"],
+                         "year": next(iter(rows[target]["years"])),
+                         "rule": A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW})
+    return aliases, findings
+
+
 def _fold_owner_birth_tellings(groups: dict, *, owner: str, owner_names: object,
                                births: KnownBirths) -> tuple[dict, list]:
     """:data:`ONE_OWNER_BIRTH`, applied to the drawn groups IN PLACE.
@@ -1724,6 +1838,15 @@ DIAGNOSTIC_DEATH_RESUBJECTED = "death_resubjected_from_the_narrator"
 #: subjects, and the subject the node is drawn for instead.
 DIAGNOSTIC_OWNER_DROPPED_FROM_A_DEATH = "owner_dropped_from_death_subjects"
 
+#: v414. Reported, never raised: one birth telling the extractor filed under
+#: the narrator, re-subjected to the newborn its own words name
+#: (`identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`).
+DIAGNOSTIC_BIRTH_RESUBJECTED = "birth_resubjected_from_the_narrator"
+
+#: v414. Reported, never raised: the owner dropped from the subjects of a
+#: birth node that names somebody else.
+DIAGNOSTIC_OWNER_DROPPED_FROM_A_BIRTH = "owner_dropped_from_birth_subjects"
+
 #: v411. Reported, never raised: a death node whose tellings name nobody but
 #: the narrator ("Nearly died in the crash"). It is titled and asked in its own
 #: words, never as "your death" and never as "When did you die?".
@@ -1754,11 +1877,36 @@ def _reads_as_a_death(claim: dict, deceased: str) -> bool:
                                  subject_words=(deceased,)) == "death"
 
 
+def _reads_as_a_birth(claim: dict, newborn: str) -> bool:
+    """A birth or child_born kind, or a `moment` whose title the cornerstones'
+    own strict reading calls a birth ("Otis's birth")."""
+    kind = collapsed_text(claim.get("event_kind"))
+    if kind in ident.BIRTH_EVENT_KINDS:
+        return True
+    if kind not in ("", KIND_WILDCARD_MOMENT):
+        return False
+    return cs.milestone_of_label(claim.get("event_mention"),
+                                 subject_words=(newborn,)) == "birth"
+
+
+#: The two narrator readings, one row each: (title reader, kind test,
+#: finding, rule). v414 generalised v411's death reading to its sibling.
+_NARRATOR_READINGS = (
+    ("deceased_mention", ident.deceased_named_in, _reads_as_a_death,
+     DIAGNOSTIC_DEATH_RESUBJECTED, ident.THE_NARRATOR_IS_NOT_THE_DECEASED),
+    ("newborn_mention", ident.newborn_named_in, _reads_as_a_birth,
+     DIAGNOSTIC_BIRTH_RESUBJECTED, ident.THE_NARRATOR_IS_NOT_THE_NEWBORN),
+)
+
+
 def _the_narrator_is_not_the_deceased(claims: list, *, owner: str, roster_snapshot: object,
                                       owner_names: object = (), now: object = None
                                       ) -> tuple[list, list]:
-    """`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`, over the
-    resolved claims: ``(claims, findings)``.
+    """`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED` and, since v414,
+    `identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`, over the resolved
+    claims: ``(claims, findings)``. A birth telling whose title names who was
+    born is read the same way a death telling is; a birth naming only the
+    owner ("I was born in Redlands") names nobody and keeps its subject.
 
     A death claim whose subject is the owner and whose own title names the
     deceased (`identity_resolution.deceased_named_in`) is handed on with
@@ -1790,28 +1938,30 @@ def _the_narrator_is_not_the_deceased(claims: list, *, owner: str, roster_snapsh
             # read his age as the dead man's.
             out.append(claim)
             continue
-        deceased = ident.deceased_named_in(claim.get("event_mention"),
-                                           owner_names=owner_names)
-        if not deceased or not _reads_as_a_death(claim, deceased):
+        for field_name, named_in, reads_as, finding, rule in _NARRATOR_READINGS:
+            named = named_in(claim.get("event_mention"), owner_names=owner_names)
+            if named and reads_as(claim, named):
+                break
+        else:
             out.append(claim)
             continue
-        person = ident.deceased_ref(deceased, roster_snapshot,
+        person = ident.deceased_ref(named, roster_snapshot,
                                     evidence_ref=_source_key(claim) or claim.get("claim_id"),
                                     now=now)
         if person and person in own_refs:
             out.append(claim)
             continue
-        now_subject = person or deceased
+        now_subject = person or named
         out.append({**claim, "subject_ref": now_subject})
         findings.append({
-            "finding": DIAGNOSTIC_DEATH_RESUBJECTED,
+            "finding": finding,
             "claim_id": collapsed_text(claim.get("claim_id")),
             "event_mention": collapsed_text(claim.get("event_mention")),
             "was": ref or mention,
             "now": now_subject,
-            "deceased_mention": deceased,
+            field_name: named,
             "resolved": bool(person),
-            "rule": ident.THE_NARRATOR_IS_NOT_THE_DECEASED,
+            "rule": rule,
         })
     return out, findings
 
@@ -1822,7 +1972,10 @@ def _death_group_deceased(group: dict, owner: str) -> list:
     roster person it names (else its first other subject). Returns the
     findings. A death group naming nobody but the owner is marked to be
     titled and asked in its own words (:data:`DIAGNOSTIC_NARRATOR_DEATH_IN_ITS_OWN_WORDS`)."""
-    if collapsed_text(group.get("event_kind")) not in ident.DEATH_EVENT_KINDS:
+    kind = collapsed_text(group.get("event_kind"))
+    if kind in ident.BIRTH_EVENT_KINDS:
+        return _birth_group_newborn(group, owner)
+    if kind not in ident.DEATH_EVENT_KINDS:
         return []
     subjects = list(group.get("subjects") or ())
     others = [ref for ref in subjects if not _is_owner_handle(ref, owner)]
@@ -1856,6 +2009,31 @@ def _death_group_deceased(group: dict, owner: str) -> list:
                              "node_id": node_id, "dropped": [], "subject": wanted,
                              "rule": ident.THE_NARRATOR_IS_NOT_THE_DECEASED})
     return findings
+
+
+def _birth_group_newborn(group: dict, owner: str) -> list:
+    """`identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN` on one group, in
+    place: a birth group that names anybody besides the owner loses the owner
+    from its subjects, and its subject is the one roster person it names (else
+    its own subject when that is not him, else its first other subject). A
+    birth naming nobody but the owner is his own and is left alone — the
+    owner's relation to his child's birth is the `child_born` kind and the
+    family axis, never ``self`` among its subjects."""
+    subjects = list(group.get("subjects") or ())
+    others = [ref for ref in subjects if not _is_owner_handle(ref, owner)]
+    if not others or len(others) == len(subjects) and \
+            not _is_owner_handle(group.get("subject"), owner):
+        return []
+    node_id = collapsed_text(group.get("node_id"))
+    group["subjects"] = sorted(others)
+    people = sorted({ref for ref in others if ref.startswith("person/")})
+    subject = collapsed_text(group.get("subject"))
+    wanted = (people[0] if len(people) == 1
+              else subject if subject in others else sorted(others)[0])
+    group["subject"] = wanted
+    return [{"finding": DIAGNOSTIC_OWNER_DROPPED_FROM_A_BIRTH, "node_id": node_id,
+             "dropped": sorted(set(subjects) - set(others)), "subject": wanted,
+             "rule": ident.THE_NARRATOR_IS_NOT_THE_NEWBORN}]
 
 
 def _is_owner_birth_group(group: dict, owner: str) -> bool:
@@ -7515,6 +7693,11 @@ def derive_calculated_timeline(
     owner_birth_aliases, owner_birth_findings = _fold_owner_birth_tellings(
         groups, owner=owner, owner_names=owner_names, births=births)
     diagnostics.extend(owner_birth_findings)
+    # v414, `A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW`: a graduation claim no bind
+    # could reach joins the one folded graduation row it agrees with.
+    graduation_aliases, graduation_findings = _fold_loose_graduations(groups)
+    owner_birth_aliases = {**owner_birth_aliases, **graduation_aliases}
+    diagnostics.extend(graduation_findings)
     # v345. The node id a re-read landmark entry used to be drawn at, redirected
     # to the id it is drawn at now — computed AFTER grouping, so a key the
     # drawing still publishes is never made an alias of anything.
