@@ -351,6 +351,7 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
                   grandparent_side: str | None = None,
                   relation_word: str | None = None,
                   spouse_of: str | None = None,
+                  child_of: str | None = None,
                   fold_into: str | None = None,
                   focus: str | None = None,
                   retract_aliases: Sequence[str] = (),
@@ -574,7 +575,9 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
     for field_name, value in ((GRANDPARENT_SIDE_FIELD, grandparent_side),
                               (RELATION_WORD_FIELD, relation_word),
                               # v407: an introduced in-law points at the relative.
-                              ("spouse_of", spouse_of)):
+                              ("spouse_of", spouse_of),
+                              # v419: an introduced nephew/niece/grandchild.
+                              ("child_of", child_of)):
         if value is None:
             continue
         if value:
