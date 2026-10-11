@@ -148,7 +148,12 @@ claim joins the one folded row it agrees with
 (`temporal_timeline.A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW`), a glued telling under
 a family handle is read by its graduation clause, and a binder
 `possible_overmerge` names its episode and its two contradicting dates
-(`episode_binder.A_POSSIBLE_OVERMERGE_NAMES_ITSELF`).
+(`episode_binder.A_POSSIBLE_OVERMERGE_NAMES_ITSELF`). Since v417 one event read
+under its old and new node id is one event, not several
+(`episode_binder.ONE_EVENT_UNDER_TWO_IDS_IS_ONE_EVENT`), and the binder dry run
+prints one `· skipped <telling> [<rung>]: <reason>` line for every telling it
+passed over (`episode_binder.A_SKIPPED_TELLING_SAYS_WHY`) — read those lines
+before concluding the binder never saw a telling.
 
 **The owner never dies on his own timeline; one graduation is one row (v411,
 owner 2026-10-10).** He narrates his vault, so a death in it is never his: a

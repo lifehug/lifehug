@@ -897,6 +897,9 @@ class TellingView:
     #: deceased this death telling's own words name, when it was filed under
     #: the narrator and is read as about them instead; ``""`` otherwise.
     narrator_resubjected: str = ""
+    #: v417. The telling's distinct event mentions, normalized — what
+    #: :func:`tells_several_events` counts.
+    event_mentions: frozenset = frozenset()
 
     def as_dict(self) -> dict:
         return {
@@ -1068,6 +1071,8 @@ class BinderPlan:
     proposals: list = field(default_factory=list)
     questions: list = field(default_factory=list)
     overmerges: list = field(default_factory=list)
+    #: v417 (:data:`A_SKIPPED_TELLING_SAYS_WHY`).
+    skipped: list = field(default_factory=list)
     bridges: list = field(default_factory=list)
     reaudits: list = field(default_factory=list)
     #: I2b (§13.5). The containment rung's own report — one block per
@@ -1162,6 +1167,7 @@ class BinderPlan:
                 for row in self.exact_envelopes
             ],
             "overmerges": list(self.overmerges),
+            "skipped": list(self.skipped),
             "bridges": list(self.bridges),
             "reaudits": list(self.reaudits),
             "containment_authority": self.containment_authority,
@@ -1773,6 +1779,9 @@ def telling_views(claims: object, *, manifest: object = None,
                      else ec.span_from_claims(rows_here, require_stated=False)[0]),
             landmark_words=words_by_telling.get(telling_ref, ()),
             narrator_resubjected=deceased,
+            event_mentions=frozenset(
+                normalized_mention_key(row.get("event_mention")) for row in rows_here
+                if isinstance(row, dict) and normalized_mention_key(row.get("event_mention"))),
             created_at=max(
                 (collapsed_text(row.get("created_at")) for row in rows_here), default=""
             ),
@@ -3549,10 +3558,54 @@ def _year_record(year: str) -> object:
     return chrono.parse_stated_date(year)
 
 
-def graduation_readings(views: Mapping[str, TellingView], index: object = None) -> dict:
+#: v417 (owner's vault at v415). "Dad graduated, got San Diego job" — a
+#: resolver telling — never reached R2e and appeared nowhere in the dry run.
+#: The resolver files every reading of one node under one ``resolver:<hex>``
+#: source, and after the node was re-keyed that telling held readings naming
+#: its OLD id and its NEW one; v414's guard counted node ids, so one event
+#: under two ids read as "several events" and the telling was passed over in
+#: silence. A telling tells several events when its claims tell several THINGS
+#: — more than one distinct event mention over more than one node — never
+#: when one thing has had two ids.
+ONE_EVENT_UNDER_TWO_IDS_IS_ONE_EVENT = (
+    "a telling tells several events only when its claims name more than one "
+    "node AND more than one distinct event mention; one event read under its "
+    "old and its new node id is one event"
+)
+
+#: v417. The dry run names every telling the binder passed over and why, so a
+#: telling that took part in nothing is never silent again
+#: (:attr:`BinderPlan.skipped`): an ineligible telling, and a telling whose
+#: title tells a graduation that R2e did not read.
+A_SKIPPED_TELLING_SAYS_WHY = (
+    "every telling the binder passes over — ineligible, or titled as a "
+    "graduation R2e did not read — is one dry-run line with its reason"
+)
+
+
+def tells_several_events(view: TellingView) -> bool:
+    """:data:`ONE_EVENT_UNDER_TWO_IDS_IS_ONE_EVENT`."""
+    return len(view.node_refs) > 1 and len(view.event_mentions) > 1
+
+
+def _tells_a_graduation(view: TellingView) -> bool:
+    return any(token in GRADUATION_WORDS
+               for text in (view.event_mentions or {normalized_mention_key(view.label)})
+               for token in text.split())
+
+
+def graduation_readings(views: Mapping[str, TellingView], index: object = None, *,
+                        skipped: list | None = None) -> dict:
     """``{telling_ref: (subject key, GraduationReading)}`` for every eligible
-    telling that tells one person's graduation (not the owner's)."""
+    telling that tells one person's graduation (not the owner's). ``skipped``,
+    when given, collects one row per graduation-titled telling passed over
+    (:data:`A_SKIPPED_TELLING_SAYS_WHY`)."""
     import relation_words as rw  # noqa: PLC0415 - avoids an import cycle
+
+    def skip(telling_ref: str, reason: str) -> None:
+        if skipped is not None:
+            skipped.append({"telling_ref": telling_ref, "rung": RULE_ID_GRADUATION,
+                            "reason": reason})
 
     out: dict = {}
     lead_refs: dict[str, set] = {}
@@ -3560,14 +3613,20 @@ def graduation_readings(views: Mapping[str, TellingView], index: object = None) 
         view = views[telling_ref]
         if not view.eligible:
             continue
-        if len(view.node_refs) > 1:
+        if tells_several_events(view):
             # :data:`A_WHOLE_MESSAGE_TELLING_IS_NEVER_BOUND_BY_ITS_GRADUATION`:
             # a telling of several events ("Events: Brittney born, Kristine
             # 10, Dad graduated") is never bound whole to one of them; its
             # graduation claim follows the folded row in the fold instead.
+            if _tells_a_graduation(view):
+                skip(telling_ref, "tells several events; its graduation claim follows "
+                                  "the folded row in the fold")
             continue
         reading = graduation_clause(view.label)
         if reading is None:
+            if _tells_a_graduation(view):
+                skip(telling_ref, "its title is about something near a graduation, "
+                                  "not the graduation")
             continue
         kind = collapsed_text(view.event_kind)
         if not reading.glued and kind not in ("", KIND_WILDCARD) \
@@ -3575,9 +3634,12 @@ def graduation_readings(views: Mapping[str, TellingView], index: object = None) 
             # A GLUED telling's kind is as often the other event's ("got San
             # Diego job" -> job); it is read by its graduation clause and
             # fenced by :data:`A_GLUED_TELLING_LENDS_NO_YEAR`.
+            skip(telling_ref, f"its kind {kind!r} is not a schooling kind")
             continue
         subject = graduation_subject(view, reading, index)
         if not subject:
+            skip(telling_ref, "names nobody but the owner (his own graduations are "
+                              "never folded) or nobody the roster can say")
             continue
         out[telling_ref] = (subject, reading)
         words = " ".join(rw.canonical_gendered_word(token) or token for token in reading.lead
@@ -3593,6 +3655,19 @@ def graduation_readings(views: Mapping[str, TellingView], index: object = None) 
             if len(refs) == 1:
                 out[telling_ref] = (next(iter(refs)), reading)
     return out
+
+
+def skipped_tellings(views: Mapping[str, TellingView], index: object = None) -> list:
+    """:data:`A_SKIPPED_TELLING_SAYS_WHY` — ``[{telling_ref, rung, reason}]``."""
+    rows = [{"telling_ref": ref, "rung": "all",
+             "reason": f"ineligible: {views[ref].ineligible_reason or 'not a binding target'}"}
+            for ref in sorted(views) if not views[ref].eligible]
+    readings = graduation_readings(views, index, skipped=rows)
+    for ref in sorted(readings):
+        if views[ref].bounds is None:
+            rows.append({"telling_ref": ref, "rung": RULE_ID_GRADUATION,
+                         "reason": "undated: it could be either of two graduations"})
+    return sorted(rows, key=lambda row: (row["telling_ref"], row["rung"]))
 
 
 def graduation_links(views: Mapping[str, TellingView], *, index: object = None,
@@ -4284,6 +4359,7 @@ def plan(claims: object, *, episode_records: object = (), frames: object = (),
                                         if row not in filing]
 
     result.overmerges = overmerge_audit(views, units)
+    result.skipped = skipped_tellings(views, entity_index)
     result.bridges = bridge_diagnostics(episode_records)
     # DIRECTIONAL on purpose: a re-audit is "this bound telling has a new
     # candidate", which is a statement about one telling and one episode. The
@@ -4492,6 +4568,8 @@ def describe(result: BinderPlan, *, applied: bool = False) -> list:
     ))
     for row in result.overmerges:
         lines.append(_overmerge_line(row))
+    for row in result.skipped:
+        lines.append(f"  · skipped {row['telling_ref']} [{row['rung']}]: {row['reason']}")
     for row in result.bridges:
         if row["finding"] == "bridge":
             lines.append(f"  ⚠ bridge: {row['operation_id']} alone holds "
@@ -5424,6 +5502,8 @@ __all__ = [
     "label_stem",
     "label_tokens",
     "overmerge_audit",
+    "skipped_tellings",
+    "tells_several_events",
     "part_of_proposal",
     "plan",
     "plan_counts",

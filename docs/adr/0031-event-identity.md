@@ -555,6 +555,26 @@ contradicting dates (`episode_binder.A_POSSIBLE_OVERMERGE_NAMES_ITSELF`), in the
 plan, the dry run and the binder receipt. The binder's `RULE_VERSION` does not
 move.
 
+## R2e follow-up (v417) — one event under two ids, and saying what was skipped
+
+On the owner's vault at v415, "Dad graduated, got San Diego job" (1987/1988,
+subject "narrator's family") still stood apart, and its resolver telling was
+named nowhere in a 536k-line dry run. The resolver files every reading of one
+node under one `resolver:<hex>` source; that node had been re-keyed, so its
+telling held readings naming the old node id and the new one. v414's
+whole-message guard counted node ids and read one event under two ids as
+several events. The decision (`episode_binder.ONE_EVENT_UNDER_TWO_IDS_IS_ONE_EVENT`):
+a telling tells several events only when its claims name more than one node
+AND more than one distinct event mention. The glued telling then reaches R2e by
+its graduation clause and folds into the 1987 row; `A_GLUED_TELLING_LENDS_NO_YEAR`
+still keeps it from supplying the year or titling the row. And a telling the
+binder passes over is never silent again (`episode_binder.A_SKIPPED_TELLING_SAYS_WHY`):
+the plan carries `skipped`, one row per ineligible telling and per
+graduation-titled telling R2e did not read, and the dry run prints each as one
+line with its reason. The binder's `RULE_VERSION` and the fold's
+`CALCULATION_RULE_VERSION` do not move: the fold's rules are unchanged, and a
+new binding is the ordinary way a vault's drawing changes.
+
 ## Consequences
 
 * Two new record families and two new directories; two modules after I2b
