@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "_comment": "v410 remembered_story: the ages a first-person memory dated only by a life-stage phrase may open and close at. earliest_memory_age is the owner's earliest-memory age (a 4th birthday by default); a vault overrides it with `earliest_memory_age: <n>` in profile.yaml or config.yaml. A band's low of null means 'the earliest-memory age'. Ages are whole years, both ends inclusive (12 = up to the 13th birthday). Read and validated by system/remembered_story.py; tests/test_v410_remembered_story_floor.py pins the defaults.",
+  "earliest_memory_age": 4,
+  "bands": {
+    "teens": [13, 19],
+    "growing_up": [null, 18],
+    "kid": [null, 12],
+    "childhood": [null, 12]
+  }
+}

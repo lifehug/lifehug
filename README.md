@@ -367,6 +367,15 @@ real page on a real vault.
   sentence carrying one, so no template can emit an id even by accident. The
   shape is derived from the minter's own `ID_RE`, not from a hand list of
   prefixes.
+- **A remembered story never opens at the birth** (`timeline-rules:28`, v410).
+  A kid's story is not a newborn's: a story he tells "as a kid", "growing up"
+  or "as a teenager", with no date of its own, is narrowed by better context in
+  the telling — a grade, a home, a neighbour the vault ties to one home, a
+  sister's birth or a grandmother's death — and then opens no earlier than his
+  earliest-memory age (a 4th birthday; teen stories at 13). The ages live in
+  `system/remembered_story.json`; set `earliest_memory_age:` in `profile.yaml`
+  to change your own. A fact about somebody else dated by your childhood, and
+  any date you stated, are left alone.
 - **Whose moments ride the owner's axis** (`timeline-rules:10`, v334, amended
   v338). One deterministic rule at fold time: *he lived it* → his timeline,
   whoever else it is about. An **immediate family** member's own event during

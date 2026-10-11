@@ -117,6 +117,20 @@ by the existing `entity-roster --ensure-introduced`
 (`roster_relations.A_RELATIVE_TOLD_WITH_A_BIRTHDAY_JOINS_THE_ROSTER`); never
 add such a row by hand.
 
+**A remembered story never opens at the birth (v410, owner 2026-10-10).** A
+story on the owner's axis that his words date only by a life-stage phrase ("as
+a kid", "growing up", "childhood", "as a teenager") is narrowed by better
+context first — a stated grade, a named stay, a name the vault ties to one stay
+(a neighbour is at the home where they were neighbours), a roster person's
+lifetime (`remembered_story.BETTER_CONTEXT_BEATS_THE_BAND`) — and, told as his
+own memory, opens no earlier than his earliest-memory age, a 4th birthday by
+default (`remembered_story.A_REMEMBERED_STORY_OPENS_AFTER_INFANCY`; ages in
+`system/remembered_story.json`, a vault's own `earliest_memory_age` in its
+profile). A fold-time reading (`timeline-rules:28`), In the Loop by
+construction: every publish applies it with no vault edit. Never date a kid's
+story from the birth by hand, and never change the `childhood` age frame (0–12)
+to get the same effect.
+
 **Cornerstones (v360, owner 2026-09-25, ADR 0038).** Beside landmarks (the
 skeleton) and keystones (the computed highest-leverage gap) sits a FIXED set of
 dates asked to the day: the owner's birth; his children's, parents', siblings'
