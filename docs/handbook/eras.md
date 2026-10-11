@@ -386,8 +386,20 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:30 -->
-`timeline-rules:30` — the narrator is not the newborn (v414, owner
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:31 -->
+`timeline-rules:31` — the remembered-story floor reaches what the owner's
+republish showed it missing (v415): any moment on his axis whose inferred
+opening is at or before his birth is a remembered moment and opens at his
+earliest-memory age, life-stage phrase or not, unless every sentence of it is
+somebody else's fact; a subject that is the owner with a note ("narrator (as a
+kid)", "Narrator's family") counts as his; "when I was really young" is a kid;
+a locator in the telling — a grade, a place named outright ("in San Diego"),
+one house a cited related moment names, a neighbour tied to one stay —
+replaces the inferred band rather than narrowing it; a negated grade ("we
+never went out in 4th grade") and a resolver's spine line are never context;
+and what the pass moved and declined is published in
+`diagnostics.remembered_story` and the generation's receipt.
+Before it, `timeline-rules:30` — the narrator is not the newborn (v414, owner
 2026-10-10): a birth or child_born telling filed under the narrator whose own
 title names who was born ("Harvey's birth as turning point") is read as that
 person's birth, re-subjected through the roster or to the words themselves, and

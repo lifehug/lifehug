@@ -188,7 +188,10 @@ class TheInferredFloor(unittest.TestCase):
         result = tt.derive_calculated_timeline(
             index_of(self.owner_birth(), self.wide()), now=NOW)
         value = self.span_of(result)
-        self.assertEqual(value["earliest"], BIRTHDAY)
+        # v415 (`remembered_story`): a moment of his whose inferred opening
+        # the origin floor put on the birth is then floored at his
+        # earliest-memory age. The origin floor still moved it first.
+        self.assertEqual(value["earliest"], "1985-07-11")
         self.assertEqual(value["latest"], "1995")
         self.assertIn({"rule": tt.ORIGIN_FLOOR_RULE, "was": "1975",
                        "origin": BIRTHDAY}, value["provenance"])

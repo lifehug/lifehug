@@ -170,6 +170,14 @@ row (`episode_binder.A_GLUED_TELLING_LENDS_NO_YEAR`). Both are READINGS applied
 on every publish and every binder sweep (`timeline-rules:29`), In the Loop with
 no vault edit; never fix such a row by hand.
 
+**The remembered-story floor reads every birth-day opening (v415).** Any
+moment on his axis whose inferred opening is at or before his birth opens at
+his earliest-memory age, phrase or not, unless it is wholly somebody else's
+fact; a locator the telling gives (grade, a place named outright, one house a
+cited moment names, a neighbour's stay) replaces the inferred band. Check what
+the pass did in the projection's `diagnostics.remembered_story` or the
+publication receipt's `remembered_story` block — never by re-deriving by hand.
+
 **Cornerstones (v360, owner 2026-09-25, ADR 0038).** Beside landmarks (the
 skeleton) and keystones (the computed highest-leverage gap) sits a FIXED set of
 dates asked to the day: the owner's birth; his children's, parents', siblings'

@@ -258,7 +258,7 @@ def diff_projections(before: dict | None, after: dict) -> dict:
                 {"node_id": node_id, "before": interval_before, "after": interval_after}
             )
 
-    return {
+    receipt = {
         "generation": _generation_of(after),
         "previous_generation": (
             _generation_of(before) if isinstance(before, dict) else None
@@ -272,6 +272,44 @@ def diff_projections(before: dict | None, after: dict) -> dict:
             "narrowed": len(narrowed),
             "widened": len(widened),
         },
+    }
+    remembered = remembered_story_summary(after)
+    if remembered:
+        receipt["remembered_story"] = remembered
+    return receipt
+
+
+def remembered_story_summary(after: object) -> dict | None:
+    """v415: what `temporal_timeline`'s remembered-story pass did in this
+    generation — every story it moved (``was`` → ``now``, the contexts tried)
+    and every candidate it declined with its reason — read from the
+    projection's own ``diagnostics.remembered_story``. ``None`` when the pass
+    read nothing, so a receipt for a vault it never touched is unchanged."""
+    diagnostics = after.get("diagnostics") if isinstance(after, dict) else None
+    rows = diagnostics.get("remembered_story") if isinstance(diagnostics, dict) else None
+    if not isinstance(rows, list) or not rows:
+        return None
+    moved = [row for row in rows if isinstance(row, dict) and row.get("now")]
+    declined = [row for row in rows if isinstance(row, dict)
+                and row.get("finding") == "remembered_story_declined"]
+    reasons: dict = {}
+    for row in declined:
+        reasons[str(row.get("reason"))] = reasons.get(str(row.get("reason")), 0) + 1
+    return {
+        "read": len(rows),
+        "moved": sorted(
+            ({"node_id": row.get("node_id"), "was": row.get("was"), "now": row.get("now"),
+              "stage": row.get("stage"),
+              "contexts": [f"{c.get('context')}:{c.get('outcome')}"
+                           for c in row.get("contexts_tried") or ()]}
+             for row in moved), key=lambda r: str(r["node_id"])),
+        "unmoved": sorted(str(row.get("node_id")) for row in rows
+                          if isinstance(row, dict) and not row.get("now")
+                          and row.get("finding") != "remembered_story_declined"),
+        "declined": dict(sorted(reasons.items())),
+        "declined_nodes": sorted(
+            ({"node_id": row.get("node_id"), "reason": row.get("reason")} for row in declined),
+            key=lambda r: str(r["node_id"])),
     }
 
 

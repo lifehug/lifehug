@@ -214,7 +214,7 @@ class BetterContextBeatsTheBand(RememberedVault):
                          (FOURTH_BIRTHDAY, "1986-06"))
         row = self.finding(projection, "Tobin Vance's older brother seemed scary")
         tried = {c["context"]: c for c in row["contexts_tried"]}
-        self.assertEqual(tried["name_tied_to_one_stay"]["outcome"], "narrowed")
+        self.assertEqual(tried["name_tied_to_one_stay"]["outcome"], "replaced_inferred")  # v415: a locator replaces the band
         self.assertIn("Juniper Court", tried["name_tied_to_one_stay"]["text"])
         self.assertFalse(row["band_applied"])
 
@@ -317,7 +317,7 @@ class ThePhrasesAndTheTable(unittest.TestCase):
             self.assertGreater(len(rule), 40)
 
     def test_the_rule_version_moved(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:30")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:31")
 
 
 if __name__ == "__main__":

@@ -542,7 +542,7 @@ class OneDefinitionManyHosts(unittest.TestCase):
         work-item derivation and therefore takes `:6`."""
         import temporal_timeline as tt  # noqa: PLC0415
 
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:30")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:31")
 
 
 if __name__ == "__main__":
