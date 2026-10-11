@@ -663,7 +663,11 @@ calculating placement against a spine**:
   `axis_membership_reason` (`lived` | `immediate_family_in_lifetime` |
   `pre_birth` | `not_family` | `subject_unresolved` | `relationship_unknown`),
   derived at fold time by
-  one pure rule (`system/axis_membership.py`) from the person roster's
+  one pure rule (`system/axis_membership.py`; v407, `A_NAMED_OTHER_SUBJECT_IS_NEVER_THE_OWNERS`:
+  a birth or other once-per-subject event of a NAMED person other than the owner
+  is never `owner` — `family` if resolved immediate family, else
+  `subject_unresolved`, with a `stranger_subject_unresolved` diagnostic naming
+  them) from the person roster's
   `relationship` field and the owner's birth date — never from a judgement
   about who the words say was present. He lived it → his axis, whoever else it
   is about. An immediate family member's own event during his lifetime

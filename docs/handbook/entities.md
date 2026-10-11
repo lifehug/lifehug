@@ -351,6 +351,18 @@ as an alias of that row rather than skipped; more than one such row, or one
 stating a different relationship, is reported as contested and nothing is
 written.
 
+Since v407 it also reads a HOUSEHOLD MEMO: a "Name — date" list line whose first
+parenthetical is "(Dave's younger sister; …)" or "(my brother)" — any relation
+word the table knows, curly apostrophe folded, owner name from `profile.yaml`
+— introduces that name like a leading relation word does
+(`roster_relations.A_PARENTHETICAL_RELATION_INTRODUCES_ITS_LINES_NAME`). A
+"(husband)/(wife)/(spouse)" line directly under an introduced sibling or child
+files that relative's spouse as `relationship: other`, `relationship_word:
+brother-in-law` (etc.) and `spouse_of: <slug>` — the roster has no in-law
+value, and never the owner's own spouse. An unlabeled line sharing the
+household's surname (a son? a nephew?) is NOT guessed: nothing is filed and
+the `--dry-run` says who was left unintroduced and why, so the owner can say.
+
 Since v402 it reads only STANDING entries: one a refile or retire withdrew
 (its identity claim superseded — `landmark_projection.withdrawn_source_ids`,
 the drawing's own reading) introduces nobody. A `partnerships` entry

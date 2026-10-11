@@ -5922,6 +5922,34 @@ def _subject_appositions(group: dict) -> tuple[str, ...]:
     return tuple(found)
 
 
+#: v407: the diagnostic naming a person a once-per-subject event is about whom
+#: nobody has identified (`axis_membership.A_NAMED_OTHER_SUBJECT_IS_NEVER_THE_OWNERS`).
+DIAGNOSTIC_STRANGER_SUBJECT_UNRESOLVED = "stranger_subject_unresolved"
+
+
+def _names_a_stranger(group: dict, *, entries: object, owner: str,
+                      owner_names: object = ()) -> bool:
+    """Does this once-per-subject node (a birth, a death, ...) name a PERSON
+    other than the owner whom nobody has identified?
+    (:data:`axis_membership.A_NAMED_OTHER_SUBJECT_IS_NEVER_THE_OWNERS`.)
+
+    Only the zero-candidate, zero-entry fallback can mis-scope such a node as
+    the owner's, so that is the only shape that answers yes: unresolved, no
+    landmark entry behind it, a subject that is a capitalised personal name
+    and is not the owner's (`_names_the_owner`), not a landmark domain word.
+    """
+    if collapsed_text(group.get("event_kind")) not in ident.ONCE_PER_SUBJECT_EVENT_KINDS:
+        return False
+    if group.get("resolved") or entries:
+        return False
+    subject = collapsed_text(group.get("subject"))
+    words = subject.split()
+    if not words or lp.is_birth_domain_word(subject) \
+            or _names_the_owner(subject, owner=owner, owner_names=owner_names):
+        return False
+    return all(word[:1].isalpha() and word[:1].isupper() for word in words)
+
+
 def _family_tier(group: dict, *, tier_index: dict) -> tuple[str, str]:
     """``(tier, basis)`` — is this node's subject the owner's IMMEDIATE FAMILY?
 
@@ -7651,10 +7679,25 @@ def derive_calculated_timeline(
                     groups[node_id], tier_index=family_tiers,
                 )[0],
                 before_owner_birth=_before_birth(placed.get(node_id), origin_best),
+                # v407, `axm.A_NAMED_OTHER_SUBJECT_IS_NEVER_THE_OWNERS`.
+                named_other_subject=_names_a_stranger(
+                    groups[node_id], entries=_group_entries(groups[node_id], entry_index),
+                    owner=owner, owner_names=owner_names),
             ),
         }
         for node_id in sorted(groups)
     }
+    for node_id in sorted(relevance):
+        if relevance[node_id].get(axm.AXIS_MEMBERSHIP_REASON_FIELD) == "subject_unresolved" \
+                and _names_a_stranger(groups[node_id],
+                                      entries=_group_entries(groups[node_id], entry_index),
+                                      owner=owner, owner_names=owner_names):
+            diagnostics.append({
+                "finding": DIAGNOSTIC_STRANGER_SUBJECT_UNRESOLVED,
+                "node_ids": [node_id],
+                "subject": collapsed_text(groups[node_id].get("subject")),
+                "event_kind": collapsed_text(groups[node_id].get("event_kind")),
+            })
 
     possibilities = {
         node_id: _within_only_possibility(

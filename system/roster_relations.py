@@ -1793,6 +1793,140 @@ def _told_relation(name: str, lines: object) -> dict | None:
     return next(iter(found.values()))
 
 
+# --------------------------------------------------------------------------
+# v407 (owner, 2026-10-10) — a household memo introduces its people
+# --------------------------------------------------------------------------
+#
+# WHERE IT WAS SEEN: `sources/manual/2026-09-15-<sister>-household-birthdays.md`
+# lists "- <Sister> <Surname> — December 17, 1987 (<Owner>’s younger sister; born
+# at …)", then "- <Husband> <Surname> — February 28, 1990 (husband)" and two
+# sons with only a date. v403 reads the relation word only as a LEADING header
+# word ("Sister Kristine (Kris) Thompson"), so the sister, whose relation sits
+# in a parenthetical after the date, was never filed — and neither was anyone
+# under her.
+#
+#: (a) The relation a "Name — date" list line states about its own name in a
+#: parenthetical — "(<Owner>'s younger sister; …)" or "(my brother)" — is the
+#: same introduction a leading relation word is. Any word the relation-word
+#: table knows, with the older/younger/half/step qualifiers; never an in-law
+#: compound; the owner's name read through the profile accessor
+#: (`temporal_publication.owner_name_variants`), a curly apostrophe folded.
+A_PARENTHETICAL_RELATION_INTRODUCES_ITS_LINES_NAME = (
+    "a 'Name - date' list line whose first parenthetical is \"(<owner>'s "
+    "<relation>...)\" or \"(my <relation>...)\" introduces that name with that "
+    "relation, exactly as a leading relation word does"
+)
+#: (b) "(husband)" / "(wife)" / "(spouse)" on the line directly under an
+#: introduced sibling or child is THAT relative's spouse: the roster has no
+#: in-law relationship value, so the row is `other` with the in-law word as its
+#: `relationship_word` and a `spouse_of` pointer to the relative's slug —
+#: never the owner's own spouse.
+A_SPOUSE_LINE_UNDER_A_RELATIVE_IS_THAT_RELATIVES_SPOUSE = (
+    "a '(husband)/(wife)/(spouse)' list line directly under an introduced "
+    "sibling or child introduces that relative's spouse (relationship other, "
+    "spouse_of the relative), never the owner's own"
+)
+#: (c) A following unlabeled "Name - date" line in the same list that shares
+#: the surname of the introduced household is NOT guessed (a son, a nephew, a
+#: stepchild?): nothing is filed and the dry run says who was left, and why.
+A_HOUSEHOLD_SURNAME_IS_NOT_A_RELATION = (
+    "an unlabeled list line sharing the introduced household's surname "
+    "introduces nobody; it is reported unintroduced so the owner can say"
+)
+UNINTRODUCED_HOUSEHOLD_REASON = "household_surname_relation_unstated"
+
+_QUALIFIERS = (r"(?:(?:older|younger|elder|oldest|youngest|big|little|half|step|twin)"
+               r"[-\s]+)*")
+_ENTRY_RE = re.compile(
+    rf"^\s*(?:[-*\u2022]|\d+[.)])\s*(?P<name>{_HEADER_NAME}(?:\s+{_HEADER_NAME})+)"
+    rf"\s*[\u2014\u2013:-]+\s*(?P<rest>.*)$")
+_PAREN_RE = re.compile(r"\(([^)]*)\)")
+_SPOUSE_PAREN_RE = re.compile(r"^\s*(husband|wife|spouse)\b", re.IGNORECASE)
+_BULLET_RE = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+")
+_SPOUSE_IN_LAW = {
+    ("sibling", "husband"): "brother-in-law", ("sibling", "wife"): "sister-in-law",
+    ("sibling", "spouse"): "sibling-in-law", ("child", "husband"): "son-in-law",
+    ("child", "wife"): "daughter-in-law", ("child", "spouse"): "child-in-law",
+}
+
+
+def _fold_apostrophes(text: object) -> str:
+    return str(text or "").replace("\u2019", "'").replace("\u2018", "'")
+
+
+def _owner_possessives(owner_names: object) -> tuple[str, ...]:
+    """The owner's whole spellings and first words, longest first."""
+    try:
+        import temporal_publication as pub  # noqa: PLC0415
+
+        names = pub.owner_name_variants(owner_names)
+    except Exception:  # noqa: BLE001
+        names = tuple(owner_names or ())
+    seen = {_fold_apostrophes(n).casefold(): _fold_apostrophes(n) for n in names if collapsed_text_of(n)}
+    return tuple(sorted(seen.values(), key=len, reverse=True))
+
+
+def _entry_of(line: object) -> dict | None:
+    """``{"name", "rest", "paren"}`` for a 'Name - date (...)' list line."""
+    match = _ENTRY_RE.match(_fold_apostrophes(line))
+    if match is None:
+        return None
+    paren = _PAREN_RE.search(match.group("rest"))
+    return {"name": collapsed_text_of(match.group("name")), "rest": match.group("rest"),
+            "paren": collapsed_text_of(paren.group(1)) if paren else ""}
+
+
+def _parenthetical_relation(paren: str, owners: tuple[str, ...]) -> dict | None:
+    import axis_membership as axm  # noqa: PLC0415
+
+    if not paren or axm.IN_LAW_RE.search(paren):
+        return None
+    who = "|".join(["my", "our", *(rf"{re.escape(o)}'s" for o in owners)])
+    match = re.match(
+        rf"^\s*(?:{who})\s+{_QUALIFIERS}(?P<word>{_relation_word_alternation()})(?![\w-])",
+        paren, re.IGNORECASE)
+    if match is None:
+        return None
+    word = match.group("word").casefold()
+    relationship = roster_relationship_for(word)
+    if not relationship:
+        return None
+    return {"word": word, "relationship": relationship}
+
+
+def _told_parenthetical_relation(name: str, lines: object, owners: tuple[str, ...]) -> dict | None:
+    """:data:`A_PARENTHETICAL_RELATION_INTRODUCES_ITS_LINES_NAME`. Two lines
+    that disagree decide nothing."""
+    wanted = [part.casefold() for part in name.split()]
+    found: dict[str, dict] = {}
+    for index, line in enumerate(lines or ()):
+        entry = _entry_of(line)
+        if entry is None or [p.casefold() for p in entry["name"].split()] != wanted:
+            continue
+        told = _parenthetical_relation(entry["paren"], owners)
+        if told is None:
+            continue
+        found.setdefault(told["relationship"], {
+            **told, "name": entry["name"], "nickname": "", "clause": collapsed_text_of(line),
+            "line": index})
+    return next(iter(found.values())) if len(found) == 1 else None
+
+
+def _list_block(lines: list, index: int) -> range:
+    """The contiguous bullet lines around ``index`` — one list."""
+    low = high = index
+    while low > 0 and _BULLET_RE.match(str(lines[low - 1])):
+        low -= 1
+    while high + 1 < len(lines) and _BULLET_RE.match(str(lines[high + 1])):
+        high += 1
+    return range(low, high + 1)
+
+
+def _surname(name: str) -> str:
+    parts = collapsed_text_of(name).split()
+    return parts[-1].casefold() if len(parts) >= 2 else ""
+
+
 def relative_birth_introductions(claims: object, *, roster: object = (),
                                  telling_texts: object = None,
                                  owner_names: object = (),
@@ -1823,7 +1957,10 @@ def relative_birth_introductions(claims: object, *, roster: object = (),
                     or index.has_ref(collapsed_text_of(mention)))
 
     owner_keys = {ir.normalized_mention_key(name) for name in owner_names or ()}
+    owners = _owner_possessives(owner_names)
     out: dict[str, dict] = {}
+    origin: dict[str, tuple] = {}     # slug -> (source_path, line index)
+    later: list[dict] = []            # claims no leading/parenthetical word explains
     for claim in sorted((c for c in claims or () if isinstance(c, dict)),
                         key=lambda c: collapsed_text_of(c.get("claim_id"))):
         if collapsed_text_of(claim.get("subject_ref")):
@@ -1841,9 +1978,15 @@ def relative_birth_introductions(claims: object, *, roster: object = (),
                 or known(name) or lp.is_birth_domain_word(name):
             continue
         source = claim.get("source_ref") if isinstance(claim.get("source_ref"), dict) else {}
-        lines = texts.get(collapsed_text_of(source.get("source_path"))) or ()
+        path = collapsed_text_of(source.get("source_path"))
+        lines = texts.get(path) or ()
         told = _told_relation(name, lines)
+        if told is None:
+            # v407 (a): "(<Owner>'s younger sister; ...)" after the date.
+            told = _told_parenthetical_relation(name, lines, owners)
         if told is None or known(told["name"]):
+            later.append({"name": name, "mention": mention, "record": record,
+                          "source": source, "path": path})
             continue
         slug = ir.normalized_mention_key(told["name"]).replace(" ", "-")
         if not slug or slug in out:
@@ -1860,6 +2003,69 @@ def relative_birth_introductions(claims: object, *, roster: object = (),
             "born": record.best, "born_basis": record.basis or "stated",
             "rule": A_RELATIVE_TOLD_WITH_A_BIRTHDAY_JOINS_THE_ROSTER,
         }
+        origin[slug] = (path, told.get("line"))
+
+    def relative_of(entry_name: str, lines: list) -> tuple[str, str] | None:
+        """``(slug, relationship)`` of an introduced or rostered relative."""
+        slug = ir.normalized_mention_key(entry_name).replace(" ", "-")
+        if slug in out:
+            return slug, out[slug]["relationship"]
+        for entity in find_by_alias(roster, entry_name):
+            return collapsed_text_of(entity.get("slug")), \
+                collapsed_text_of(entity.get("relationship"))
+        return None
+
+    # v407 (b): "(husband)" on the line directly under an introduced sibling/child.
+    unintroduced: list[dict] = []
+    for item in sorted(later, key=lambda i: ir.normalized_mention_key(i["name"])):
+        lines = list(texts.get(item["path"]) or ())
+        wanted = [p.casefold() for p in item["name"].split()]
+        at = next((i for i, line in enumerate(lines)
+                   if (e := _entry_of(line)) is not None
+                   and [p.casefold() for p in e["name"].split()] == wanted), None)
+        if at is None:
+            continue
+        entry = _entry_of(lines[at])
+        spouse = _SPOUSE_PAREN_RE.match(entry["paren"] or "")
+        above = _entry_of(lines[at - 1]) if at > 0 else None
+        record, source = item["record"], item["source"]
+        if spouse is not None and above is not None:
+            of = relative_of(above["name"], lines)
+            word = _SPOUSE_IN_LAW.get((of[1], spouse.group(1).casefold())) if of else None
+            if word:
+                slug = ir.normalized_mention_key(entry["name"]).replace(" ", "-")
+                if slug and slug not in out and not known(entry["name"]):
+                    out[slug] = {
+                        "name": entry["name"], "slug": slug, "relationship": FALLBACK_RELATIONSHIP,
+                        "relationship_word": word, "spouse_of": of[0], "aliases": (),
+                        "source_id": collapsed_text_of(source.get("source_id")),
+                        "mention": item["mention"], "born": record.best,
+                        "born_basis": record.basis or "stated",
+                        "rule": A_SPOUSE_LINE_UNDER_A_RELATIVE_IS_THAT_RELATIVES_SPOUSE,
+                    }
+                    origin[slug] = (item["path"], at)
+                continue
+        item["at"] = at
+    # v407 (c): an unlabeled line sharing the introduced household's surname.
+    for item in sorted(later, key=lambda i: ir.normalized_mention_key(i["name"])):
+        at = item.get("at")
+        if at is None:
+            continue
+        lines = list(texts.get(item["path"]) or ())
+        entry = _entry_of(lines[at])
+        if entry["paren"] and _SPOUSE_PAREN_RE.match(entry["paren"]):
+            continue
+        block = _list_block(lines, at)
+        household = sorted(
+            slug for slug, (path, line) in origin.items()
+            if path == item["path"] and line in block and _surname(out[slug]["name"])
+            == _surname(entry["name"]))
+        if household and ir.normalized_mention_key(entry["name"]).replace(" ", "-") not in out:
+            unintroduced.append({
+                "name": entry["name"], "born": item["record"].best,
+                "source_id": collapsed_text_of(item["source"].get("source_id")),
+                "household_of": household, "reason": UNINTRODUCED_HOUSEHOLD_REASON,
+                "rule": A_HOUSEHOLD_SURNAME_IS_NOT_A_RELATION})
     placed = dict(roster_recorded_relations(roster))
     kept: list[dict] = []
     findings: list[dict] = []
@@ -1874,4 +2080,5 @@ def relative_birth_introductions(claims: object, *, roster: object = (),
             findings.append(verdict["finding"])
         if verdict["row"] is not None:
             kept.append(verdict["row"])
-    return {"rows": tuple(kept), "findings": tuple(findings)}
+    return {"rows": tuple(kept), "findings": tuple(findings),
+            "unintroduced": tuple(unintroduced)}
