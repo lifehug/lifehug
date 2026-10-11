@@ -355,7 +355,9 @@ _SETTLED_IDENTITY_FIELDS = ("relationship", "living", "born", "died", *roster_re
                             relation_words.RELATION_GENDER_BASIS_FIELD,
                             # v360, owner 2026-09-25 (the person form): whose side
                             # a grandparent is on, and the word he calls them.
-                            "grandparent_side", "relation_word")
+                            "grandparent_side", "relation_word",
+                            # v407: whose spouse an introduced in-law is.
+                            "spouse_of")
 _SETTLED_PLACE = object()
 
 #: The two date-shaped settled fields, as a subset of the tuple above. Named
@@ -1870,6 +1872,7 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
             rows.append(row)
             have_slugs.add(row["slug"])
     batch = {**batch, "findings": (*batch["findings"], *told["findings"])}
+    unintroduced = list(told.get("unintroduced") or ())
     plan = landmark_introduction_plan(landmark_entries, roster=roster, owner_names=owner_names)
     for row in plan["mint"]:
         if row["slug"] not in have_slugs:
@@ -1902,6 +1905,7 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
             born_basis=row.get("born_basis"),
             ensure=True,
             name=row["name"],
+            spouse_of=row.get("spouse_of"),
         )
         filed += 1
     # v383 (ADR 0041): a landmark name the roster already answers to is
@@ -1976,6 +1980,7 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
     return {"introduced": list(rows), "filed": filed, "skipped_aliases": skipped,
             "findings": list(batch["findings"]), "own_name": own_name["updated"],
             "folded": folded, "contested": contested,
+            "unintroduced": unintroduced,
             "retired": retired, "restored": restored,
             "first_names": first_names["added"],
             "first_name_collisions": first_names["collisions"]}
@@ -2044,14 +2049,19 @@ def main() -> int:
         for row in result["introduced"]:
             aliases = ", ".join(row.get("aliases") or ()) or "—"
             born = f", born {row['born']}" if row.get("born") else ""
+            spouse = f", spouse of {row['spouse_of']}" if row.get("spouse_of") else ""
             print(f"  {row['slug']}: {row['name']} — {row['relationship']} "
-                  f"(from “{row['relationship_word']}”{born}); aliases: {aliases}")
+                  f"(from “{row['relationship_word']}”{born}{spouse}); aliases: {aliases}")
             for alias in row.get("contested_aliases") or ():
                 print(f"    ↯ “{alias}” names more than one introduced person — bound to neither")
         for row in result.get("findings") or ():
             print(f"    ↯ {row['name']} — introduced as {row['introduced']} "
                   f"(from “{row['introduced_word']}”), but the vault records "
                   f"{row['recorded']} ({row['tier']}): {row['reason']}")
+        for row in result.get("unintroduced") or ():
+            print(f"    ? {row['name']} (born {row['born']}) left unintroduced — shares the "
+                  f"surname of {', '.join(row['household_of'])} but {row['source_id']} states no "
+                  f"relation; say who they are to file them")
         for row in result["skipped_aliases"]:
             print(f"    ↯ “{row['alias']}” already answers to "
                   f"{', '.join(row['taken_by'])} — left alone")

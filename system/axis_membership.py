@@ -341,10 +341,29 @@ def subject_family_tier(subject: object, *, tier_index: dict,
     return UNKNOWN_TIER, "none"
 
 
+#: v407 (owner, 2026-10-10) — the rule as a NAME. A birth (or any other
+#: once-per-subject event, `identity_resolution.ONCE_PER_SUBJECT_EVENT_KINDS`)
+#: whose subject is a NAMED PERSON other than the owner is never ``owner``.
+#: Seen: four household births ("Blair Mason", "Elliot Mason", ...) with bare
+#: names for subjects landed on the owner's axis as his own lived events,
+#: because the zero-candidate fallback reads a name the roster cannot place as
+#: the ordinary shape of his own life. Resolved immediate family in his
+#: lifetime stays ``family``; wholly before his birth stays ``pre_birth``;
+#: everything else is ``subject_unresolved`` (nobody has said who this is),
+#: and the fold's diagnostics name the person so the roster introducer can
+#: pick them up (`temporal_timeline.DIAGNOSTIC_STRANGER_SUBJECT_UNRESOLVED`).
+A_NAMED_OTHER_SUBJECT_IS_NEVER_THE_OWNERS = (
+    "a once-per-subject event (a birth) whose subject is a named person other "
+    "than the owner is never on the owner's axis as his own: family if "
+    "immediate family in his lifetime, else subject_unresolved"
+)
+
+
 def axis_membership(*, occurrence_subject_scope: object,
                     owner_timeline_relation: object,
                     family_tier: object,
-                    before_owner_birth: bool) -> dict:
+                    before_owner_birth: bool,
+                    named_other_subject: bool = False) -> dict:
     """THE rule. ``{axis_membership, axis_membership_reason}``, and nothing else.
 
     Pure, total, and ordered exactly as the owner stated it:
@@ -391,6 +410,13 @@ def axis_membership(*, occurrence_subject_scope: object,
     """
     scope = collapsed_text(occurrence_subject_scope)
     relation = collapsed_text(owner_timeline_relation)
+    if scope == "owner" and named_other_subject:
+        # :data:`A_NAMED_OTHER_SUBJECT_IS_NEVER_THE_OWNERS`.
+        if before_owner_birth:
+            return _row(tp.AXIS_MEMBERSHIP_NONE, tp.AXIS_REASON_PRE_BIRTH)
+        if collapsed_text(family_tier) == IMMEDIATE_FAMILY_TIER:
+            return _row(tp.AXIS_MEMBERSHIP_FAMILY, tp.AXIS_REASON_IMMEDIATE_FAMILY)
+        return _row(tp.AXIS_MEMBERSHIP_NONE, tp.AXIS_REASON_SUBJECT_UNRESOLVED)
     if scope == "owner":
         return _row(tp.AXIS_MEMBERSHIP_OWNER, tp.AXIS_REASON_LIVED)
     if before_owner_birth:
@@ -426,6 +452,7 @@ def on_owner_axis(node_or_row: object) -> bool:
 
 
 __all__ = [
+    "A_NAMED_OTHER_SUBJECT_IS_NEVER_THE_OWNERS",
     "AXIS_MEMBERSHIP_FIELD",
     "AXIS_MEMBERSHIP_REASON_FIELD",
     "DISTANT_RELATIONSHIPS",

@@ -158,6 +158,14 @@ on stdout names both — ask the owner which, never pick. A landmark name the
 roster already answers to (a `partnerships`/`family`/`children` entry) joins
 that row as an alias on the next `entity-roster --ensure-introduced`.
 Counts move with `entity-roster --type <t> --recount` (no model).
+Since v407 that pass also reads a household memo: a "Name — date
+(Dave's younger sister; …)" line introduces the sibling
+(`roster_relations.A_PARENTHETICAL_RELATION_INTRODUCES_ITS_LINES_NAME`), a
+"(husband)" line under them files the in-law with `spouse_of`
+(`A_SPOUSE_LINE_UNDER_A_RELATIVE_IS_THAT_RELATIVES_SPOUSE`), and an unlabeled
+same-surname line is reported unintroduced, never guessed
+(`A_HOUSEHOLD_SURNAME_IS_NOT_A_RELATION`). A named stranger's birth is never
+on the owner's axis (`axis_membership.A_NAMED_OTHER_SUBJECT_IS_NEVER_THE_OWNERS`).
 Since v402 that daily pass (the hosted `roster_introductions` step) reads only
 STANDING entries — a refiled or retired entry introduces nobody
 (`entity_roster.A_WITHDRAWN_ENTRY_INTRODUCES_NOBODY`, through

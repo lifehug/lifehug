@@ -162,6 +162,8 @@ Two different kinds of period, kept as two different facts (ADR 0030,
   `subject_unresolved`, `relationship_unknown`). Only the first two of the
   off-axis reasons are the ruling's DECISIONS and only they suppress a question;
   a relationship nobody has stated is undecided and keeps its questions (v338).
+  A named stranger's birth is never `owner`: it is `subject_unresolved` (or
+  `family` when resolved immediate family), and the diagnostic names them (v407).
   Derived at fold time by one pure rule from the person
   roster's `relationship` field and his birth date — never from a judgement
   about who was present — and published, so a host reads the answer instead of
