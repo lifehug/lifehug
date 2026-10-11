@@ -218,9 +218,13 @@ class FilingTests(unittest.TestCase):
                     "to", "people", "places", "summary", "source_file"):
             self.assertEqual(meta[key], fl.parse_header(TRANSCRIPT)[0][key], key)
         self.assertNotIn("page_confidence", meta)
-        # The body is the transcript's, byte for byte.
-        _header, body = fl.parse_header(TRANSCRIPT)
-        self.assertTrue(letter.read_text(encoding="utf-8").endswith(body.lstrip("\n")))
+        # The body is the transcript's, byte for byte; since v412 it is
+        # followed by exactly one trailer holding the header verbatim, and the
+        # record rebuilds the archive's file.
+        header_text, body = fl.split_exact(TRANSCRIPT)
+        text = letter.read_text(encoding="utf-8")
+        self.assertTrue(text.endswith(body + fl.trailer(header_text)))
+        self.assertEqual(fl.transcript_from_record(text), TRANSCRIPT.encode("utf-8"))
         manifest = json.loads((self.vault / "state" / "source_manifest.json").read_text())
         self.assertEqual(manifest["sources"][fl.source_relpath(LETTER_ID)]["source_id"],
                          fl.source_id(LETTER_ID))

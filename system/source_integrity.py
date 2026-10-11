@@ -46,6 +46,17 @@ from lifehug_core import (
 from vault_paths import validate_contained_path
 
 SCHEMA_VERSION = 1
+#: The source type of a filed letter record (letters D1; written only by
+#: `family_letters.file_letter`).
+LETTER_TYPE = "letter"
+#: Copied into state/source_manifest.json for a letter record (v412), so the
+#: Sources view and the reader can show writer, recipient, written date and
+#: collection without reopening the record. v404's field names.
+LETTER_MANIFEST_FIELDS = (
+    "letter_id", "collection", "date", "date_edtf", "date_precision", "from", "to",
+    "document_type", "authority", "sensitivity", "author_refs", "recipient_refs",
+    "subject_refs", "supersedes", "supersedes_path", "origin",
+)
 LINKED_SOURCE_TYPES = {"source_correction", "source_retraction"}
 # The platform imports source paths as identifiers and Windows still has a
 # conservative path budget.  Keep the *filename* well below either limit;
@@ -431,6 +442,10 @@ def sync_manifest(records: list[dict[str, object]], *, write: bool = True, prune
                         for key in CANDIDATE_RESEARCH_MANIFEST_FIELDS
                     }
                 )
+        if record["type"] == LETTER_TYPE:
+            metadata = record.get("metadata", {})
+            if isinstance(metadata, dict):
+                entry.update(letter_manifest_fields(metadata))
         sources[path] = entry
     if prune_missing:
         current_paths = {str(record["path"]) for record in records}
@@ -440,6 +455,54 @@ def sync_manifest(records: list[dict[str, object]], *, write: bool = True, prune
     if write:
         write_json(SOURCE_MANIFEST_FILE, manifest)
     return manifest
+
+
+def letter_manifest_fields(metadata: dict) -> dict:
+    return {key: metadata.get(key) for key in LETTER_MANIFEST_FIELDS if key in metadata}
+
+
+def _letter_findings(record: dict, metadata: dict, *, entry: dict | None) -> list[dict[str, str]]:
+    """A filed letter record must keep its letter contract and, when it
+    carries the transcript-header trailer, still rebuild its transcript byte
+    for byte (v412); its manifest row must carry the same letter fields."""
+    from family_letters import letter_problems  # noqa: PLC0415
+
+    path = str(record["path"])
+    out: list[dict[str, str]] = []
+    try:
+        text = Path(record["abs_path"]).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        problems = [f"record unreadable: {exc}"]
+    else:
+        problems = letter_problems(metadata, text)
+    if problems:
+        out.append(finding(
+            "letter_record_invalid", "error", path, "; ".join(problems),
+            fixability="manual",
+            recommended_action=(
+                "restore the record from Git; a revised transcript is refiled with "
+                "`documents file` or `intake letter` (a superseding record), never edited in place"
+            ),
+        ))
+    if entry:
+        expected = letter_manifest_fields(metadata)
+        mismatched = sorted(key for key, value in expected.items() if entry.get(key) != value)
+        if mismatched:
+            out.append(finding(
+                "letter_manifest_mismatch", "warning", path,
+                "letter manifest fields differ from the record: " + ", ".join(mismatched),
+                fixability="safe",
+                recommended_action="run source-lint --fix; the immutable record remains authority",
+            ))
+    supersedes_path = str(metadata.get("supersedes_path") or "")
+    if supersedes_path and not (REPO_DIR / supersedes_path).exists():
+        out.append(finding(
+            "letter_supersedes_missing", "warning", path,
+            f"superseded letter record {supersedes_path} does not exist",
+            fixability="manual",
+            recommended_action="restore the superseded record from Git; versions are additive",
+        ))
+    return out
 
 
 def register_source(path: Path) -> dict:
@@ -624,6 +687,8 @@ def lint_records(records: list[dict[str, object]], *, strict: bool = False) -> l
                         "correction/retraction; never rewrite it in place"
                     ),
                 ))
+        if record["type"] == LETTER_TYPE and isinstance(metadata, dict):
+            findings.extend(_letter_findings(record, metadata, entry=manifest_sources.get(path)))
         declared = str(record.get("declared_content_sha256") or "")
         if declared and declared != record["content_sha256"]:
             findings.append(finding(
@@ -849,7 +914,8 @@ def print_findings(findings: list[dict[str, str]], *, limit: int | None = None) 
 
 def apply_safe_fixes(records: list[dict[str, object]]) -> list[dict[str, object]]:
     for record in records:
-        if record["type"] == "candidate_research":
+        if record["type"] in {"candidate_research", LETTER_TYPE}:
+            # A letter is one record pinned to its transcript blob (v412).
             # Its marker/frontmatter/body are one immutable signed-by-revision
             # record. Safe repair may rebuild the manifest below, never rewrite
             # the source file itself.

@@ -204,6 +204,11 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # single-file bank mutation, the same family as candidates-promote.
     "question-retire",
     "ingest", "ingest-story",
+    # documents (v412, letters D1): `documents file` writes immutable letter
+    # records under sources/letters/ and registers them in the manifest.
+    # --dry-run writes nothing but the command is classified BY NAME, the
+    # focus-autopilot / era-migrate convention.
+    "documents",
     # decisions-feed-the-loop (ADR 0009): the weekly RUBRIC-EDIT runtime
     # writes state/question_judgment/learned.md and last_edit.json directly
     # (--dry-run/--emit-task never write) — same family as quality-update.
@@ -3384,6 +3389,25 @@ def cmd_retract_source(args: argparse.Namespace) -> int:
     return run_python("source_integrity.py", flags)
 
 
+def cmd_documents(args: argparse.Namespace) -> int:
+    flags = [args.documents_action, args.repo, "--commit", args.commit]
+    if args.all:
+        flags.append("--all")
+    if args.ids:
+        flags.extend(["--ids", *args.ids])
+    for value in args.map or []:
+        flags.extend(["--map", value])
+    if args.scan_url_template:
+        flags.extend(["--scan-url-template", args.scan_url_template])
+    if args.repo_name:
+        flags.extend(["--repo-name", args.repo_name])
+    if args.dry_run:
+        flags.append("--dry-run")
+    if args.json:
+        flags.append("--json")
+    return run_python("documents.py", flags)
+
+
 def cmd_unretract(args: argparse.Namespace) -> int:
     flags = ["unretract", args.retraction]
     if args.reason:
@@ -4233,6 +4257,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-candidates", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_ingest)
+
+    # --- Documents (v412, letters D1): the bulk, pinned door for letters ---
+    p = sub.add_parser("documents", help="File family letters into the vault as immutable letter records")
+    documents_sub = p.add_subparsers(dest="documents_action", required=True)
+    dp = documents_sub.add_parser(
+        "file", help="File letters from a family-letters archive at a pinned commit (sources/letters/)")
+    import documents as _documents  # noqa: PLC0415
+
+    _documents.add_file_arguments(dp)
+    p.set_defaults(func=cmd_documents)
 
     # --- Connectors (calibrated external-evidence ingestion, v106) ---
     p = sub.add_parser("connector-auth", help="One-time OAuth consent for a connector (gmail.readonly only)")

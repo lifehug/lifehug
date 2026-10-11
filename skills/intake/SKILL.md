@@ -192,3 +192,21 @@ already names it. It does not classify: the next classify run reads the new
 source like any other, and the letter becomes the moment "<writer>'s letter
 to <recipient>" dated by the letter itself (basis `document`).
 
+**Many letters, or a refile (v412).** When the owner wants a whole
+collection, or every letter, filed at a pinned commit of the archive:
+
+```bash
+python3 system/lifehug.py documents file ~/Workspace/family-letters --all --commit HEAD --dry-run \
+    --map <owner-id>=self --map <dad-id>=person/dad --scan-url-template 'https://<site>/letters/{id}/scan.pdf'
+python3 system/lifehug.py documents file ~/Workspace/family-letters --all --commit <sha>   # then commit as printed
+python3 system/lifehug.py documents file ~/Workspace/family-letters --ids <collection>/<letter> --commit <sha>
+```
+
+It reads the archive through git at the commit (uncommitted edits are never
+filed) and uses the same writer as `intake letter`, so the records are the
+same. The `--map` (which `letters/people.yaml` id is which vault person) and
+the template are remembered. Unchanged transcripts are left alone; a revised
+one files a new record that `supersedes` the old, which stays. Show the
+owner the `--dry-run` counts first; with hundreds of letters, say that the
+compile does not yet cap how many letters reach a page (D6).
+
