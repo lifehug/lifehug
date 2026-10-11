@@ -35,7 +35,7 @@ a gap to fill later.
 "test_*.py"`, Python 3.11 and 3.14, no `pip install` — this repo is
 deliberately dependency-free at runtime, and keeping CI dependency-free
 too is itself worth protecting), the `framework-manifest` check (every
-path in `system/version.json`'s `framework_files` exists on disk — see
+path in `system/version.json`'s `framework_files` exists on disk and none is a test fixture under `tests/fixtures/` — see
 `scripts/ci/check_framework_files.py`), and, on pull requests, the
 `version-bump` check (`scripts/ci/check_version_bump.py`). Branch
 protection requires the four PR contexts: `test (py3.11)`, `test (py3.14)`, `framework_files exists`, and `version bump present`. `.github/workflows/tag-on-merge.yml`
