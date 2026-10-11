@@ -1122,7 +1122,19 @@ def load_derivation_inputs(
         if landmark_entries is None else landmark_entries,
         "episode_records": ef.load_episode_records(vault_root)
         if episode_records is None else episode_records,
+        # v410: the vault's own earliest-memory age, when its profile names one
+        # (`remembered_story.PROFILE_KEY`). Absent otherwise, so a vault that
+        # says nothing folds with the package default and digests as before.
+        **_remembered_story_input(vault_root),
     }
+
+
+def _remembered_story_input(vault_root: str | Path) -> dict:
+    """``{"remembered_story": overrides}`` from the vault's profile, or ``{}``."""
+    import remembered_story as rs  # noqa: PLC0415
+
+    overrides = rs.profile_overrides(owner_profile(vault_root))
+    return {"remembered_story": overrides} if overrides else {}
 
 
 def _resolved_owner_identity(vault_root: str | Path, *, roster_snapshot: object,

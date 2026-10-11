@@ -386,8 +386,20 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:27 -->
-`timeline-rules:27` — a birthday anniversary is not a birth (v403, owner
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:28 -->
+`timeline-rules:28` — a remembered story never opens at the birth (v410,
+owner 2026-10-10, *"a kid's story shouldn't span from birth; you should look
+for better context"*): a story on his own axis that his words date only by a
+life-stage phrase ("as a kid", "growing up", "childhood", "as a teenager") is
+first narrowed by better context — a stated grade, a named stay, a name the
+vault ties to exactly one stay (a neighbour is at the home where they were
+neighbours), the lifetime of a person in it
+(`remembered_story.BETTER_CONTEXT_BEATS_THE_BAND`) — and, told as his own
+memory, opens no earlier than his earliest-memory age, a 4th birthday by
+default (`remembered_story.A_REMEMBERED_STORY_OPENS_AFTER_INFANCY`; provenance
+rule `remembered_story_floor`, finding `remembered_story_placed`). The
+`childhood` age frame itself stays 0–12.
+Before it, `timeline-rules:27` — a birthday anniversary is not a birth (v403, owner
 2026-10-10): a birthday reading whose date disagrees by year with a birth the
 vault already knows for that person, or a parent's or grandparent's birthday
 inside his own lifetime, stays a moment and never anchors their age

@@ -755,6 +755,31 @@ calculating placement against a spine**:
   twice spans both stays minus the gap, and one place never asks "which time?"
   (`A_HOUSE_LIVED_IN_TWICE_SPANS_BOTH_STAYS`). "Dad's house" is a relative
   place, never a residence (`landmark_identity.A_RELATION_WORDS_HOME_IS_A_RELATIVE_PLACE`).
+- **A remembered story never opens at the birth** (v410, owner 2026-10-10,
+  `timeline-rules:28`: *"A kid's story shouldn't span from birth. You should
+  look for better context."*). A story on his own axis that his words date only
+  by a life-stage phrase, placed by an inferred reading (basis `anchor` or
+  `order`), is first narrowed by **better context**, tried in order and every
+  rung reported in the finding `remembered_story_placed`: a stated school grade
+  (`chronology.school_year_record`), a named stay (the place anchors, or "at
+  Harbor Lane" in so many words), a proper name the vault ties to exactly one
+  stay — a neighbour is at the home where they were neighbours, so "Tobin
+  Vance's brother seemed scary" lands in the stay another telling put Tobin
+  Vance next door to — and the lifetime of a roster person in it (never before
+  a younger sister's birth, never after a grandmother's death unless it says
+  so) (`remembered_story.BETTER_CONTEXT_BEATS_THE_BAND`). Then, told as his own
+  memory, it opens no earlier than his **earliest-memory age**
+  (`remembered_story.A_REMEMBERED_STORY_OPENS_AFTER_INFANCY`): with no context
+  the band's own floor — as a kid / child / little and childhood 4–12, growing
+  up 4–18, as a teenager 13–19 — and with context the earliest-memory age
+  alone. Only openings move; a later bound is moved only by context. A
+  third-person fact ("Dad was in school during my early childhood"), a stated
+  date, age or grade, and a residence are untouched, and the `childhood` age
+  frame stays 0–12. The ages are declarative — `system/remembered_story.json`
+  (default `earliest_memory_age: 4`); a vault changes its own with
+  `earliest_memory_age: <n>` in `profile.yaml` or `config.yaml`. The moved bound
+  carries provenance rules `better_context` and `remembered_story_floor`, beside
+  `origin_floor`.
 - **An estimate is capped at about five years**
   (`resolver.AN_ESTIMATE_WIDER_THAN_FIVE_YEARS_STAYS_A_WINDOW`): a wider one
   stays the probable window and is asked about only when hot
