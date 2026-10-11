@@ -66,6 +66,36 @@ Exact-byte replay is idempotent; different bytes/revisions/paths conflict, and
 crash adoption comes from the source marker plus canonical Git history rather
 than the source manifest or another projection (ADR 0020).
 
+## Letter Records
+
+A transcript from the family-letters archive is filed as an immutable
+`type: letter` source by ONE writer, `family_letters.file_letter`, through two
+doors: `intake` (`--record family-letters:<id>`, `--from-updates`, `intake
+letter <id>`; the archive's working tree, v404) and `lifehug.py documents
+file <archive> --all | --ids … --commit <sha>` (the archive read through git
+at the commit, v412). Path `sources/letters/<collection>--<letter>.md`,
+`source_id letters:<collection>--<letter>` (never a `/`: Lifehug Cloud's
+validator rejects one). It is a record, never a memory: `source_trust:
+external_record`, `authority: third_party_record`, or `first_person_record`
+when `author_refs` holds `self`; `sensitivity: family`; `captured_at` is the
+day WRITTEN for a day-dated letter, else the filing time (the written date at
+its own precision is `date_edtf`; `date` only as an ISO day). The frontmatter
+keeps the transcript header's strings (`from`, `to`, `people`, `places`,
+`summary`, `date_*` …) and adds `author_refs` / `recipient_refs` /
+`subject_refs` and `origin` (`repo`, `id`, `path`, `commit`, `source_file`,
+`source_pages`, `scan_blob`, `scan_url`, `transcript_blob`). Scans are
+referenced by blob and URL, never copied.
+
+The body is the transcript body verbatim, then one trailing section
+(`<!-- lifehug:transcript-header -->`) holding the transcript's own YAML header
+verbatim, so the original file rebuilds exactly; `content_sha256` is the
+ordinary payload hash of body plus trailer. `source-lint` checks the rebuild
+against `origin.transcript_blob` (`letter_record_invalid`), and `--fix` never
+rewrites a letter record. A transcript revised in the archive is filed as a
+NEW record (`…--<blob12>.md`, `source_id …:<blob12>`) with `supersedes` and
+`supersedes_path` naming the current one; the old record stays
+(`letter_supersedes_missing` if it does not).
+
 ## Artifact Sources
 
 Drafting happens under `outputs/<artifact>/`. When an artifact is final enough

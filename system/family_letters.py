@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A cited family letter is filed as a letter (letters-in-the-vault D1, v404).
+"""A family letter is filed as a letter (letters-in-the-vault D1, v404 + v412).
 
 The family-letters archive (repo ``lifehug/letters``) holds one transcript per
 letter at ``letters/<collection>/<letter>/transcript.md``: a YAML header
@@ -18,13 +18,28 @@ This module is the one place that turns a letter id into a vault source:
 * :func:`file_letter` — files ONE letter as an immutable source
   ``sources/letters/<collection>--<letter>.md``: ``type: letter`` (a sub-kind
   of ``external_record``: ``source_trust: external_record``, ``authority:
-  third_party_record``), sensitivity ``family``, ``source_id
-  letters:<collection>--<letter>`` (no ``/``: see :func:`source_id`), the
-  header fields the vault can use in the
+  third_party_record``, or ``first_person_record`` when the owner wrote it),
+  sensitivity ``family``, ``source_id letters:<collection>--<letter>`` (no
+  ``/``: see :func:`source_id`), the header fields the vault can use in the
   frontmatter, and the transcript body VERBATIM. Manifest-registered through
-  ``source_integrity`` like every source. Idempotent by id: a letter already
-  filed is never rewritten (a record is immutable; a revised transcript is a
-  later, superseding version — D1 — not an edit).
+  ``source_integrity`` like every source. It is THE writer of a letter record
+  for every door: ``intake`` (the archive's working tree) and ``documents
+  file`` (v412: the archive read through git at a pinned commit) hand it the
+  same transcript and get the same record.
+* v412 adds, on top of v404's record: ``author_refs`` / ``recipient_refs`` /
+  ``subject_refs`` resolved through the archive's ``letters/people.yaml`` and
+  the vault's ``--map`` (`letter_people`); ``origin`` with ``commit``,
+  ``source_file``, ``source_pages``, ``scan_blob``, ``scan_url`` and
+  ``transcript_blob``; and, AFTER the verbatim body, a trailing section
+  holding the transcript's own YAML header verbatim, so
+  :func:`transcript_from_record` rebuilds the archive's file byte for byte
+  (source-lint checks it against ``origin.transcript_blob``).
+* Idempotent: a letter whose current record IS this transcript is never
+  rewritten. A REVISED transcript (its blob changed) files a NEW record that
+  ``supersedes`` the current one —
+  ``sources/letters/<collection>--<letter>--<blob12>.md``, ``source_id
+  letters:<collection>--<letter>:<blob12>`` — and the old record stays. The
+  first record keeps the bare id for good.
 * :func:`stamp_cites` — adds ``cites: [<letter source id>, …]`` to the frontmatter
   of a record memo. Frontmatter only: the body, and so ``content_sha256``,
   is untouched.
@@ -36,7 +51,8 @@ This module is the one place that turns a letter id into a vault source:
 A missing archive or a missing letter is never a crash: one honest line, and
 the caller files whatever it was filing exactly as before.
 
-CLI (``lifehug.py intake letter`` is the door; this is the worker)::
+CLI (``lifehug.py intake letter`` and ``lifehug.py documents file`` are the
+doors; this is the worker)::
 
     python3 system/family_letters.py file <id|family-letters:<id>[,<id>]> … [--json]
 """
@@ -44,9 +60,11 @@ CLI (``lifehug.py intake letter`` is the door; this is the worker)::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -81,6 +99,16 @@ TRANSCRIPT_STATUS_KEY = "transcript_status"
 TRANSCRIPT_CONFIDENCE_KEY = "transcript_confidence"
 
 CITES_KEY = "cites"
+
+#: The trailing section that keeps the transcript's own YAML header verbatim
+#: AFTER the verbatim body (v412), so the archive's file rebuilds exactly.
+TRAILER_MARKER = "<!-- lifehug:transcript-header -->"
+TRAILER_HEADING = "## Transcript header"
+
+#: Between a letter's source id and a superseding version's blob token:
+#: ``letters:<collection>--<letter>:<blob12>`` (v412).
+VERSION_SEPARATOR = ":"
+_VERSION_SUFFIX_RE = re.compile(r":[0-9a-f]{12}$")
 
 
 class LetterError(Exception):
@@ -117,7 +145,7 @@ def normalize_id(value: str) -> str:
     for prefix in (RECORD_REF_PREFIX, SOURCE_ID_PREFIX):
         if text.startswith(prefix):
             text = text[len(prefix):]
-    text = text.strip().strip("`").strip()
+    text = _VERSION_SUFFIX_RE.sub("", text.strip().strip("`").strip())
     if "/" not in text and "--" in text:
         text = text.replace("--", "/", 1)
     return text
@@ -311,7 +339,14 @@ def parse_header(text: str) -> tuple[dict, str]:
 
 
 def read_letter(root: Path, letter_id: str) -> dict:
-    """``{"id", "header", "body", "path"}`` for one letter, or LetterError."""
+    """One letter from the archive's WORKING TREE (the ``intake`` doors):
+    ``{"id", "header", "body", "path", "raw", "transcript_blob", "commit",
+    "scan_blob"}``, or LetterError.
+
+    ``commit`` is the archive's HEAD only when the transcript on disk IS the
+    one HEAD holds (same git blob), so a letter filed here and the same letter
+    filed by ``documents file --commit HEAD`` are the same record. An
+    uncommitted transcript files with ``commit: null``."""
     if not LETTER_ID_RE.match(letter_id or ""):
         raise LetterError("invalid_id", f"not a letter id: {letter_id!r}")
     root = Path(root)
@@ -321,11 +356,75 @@ def read_letter(root: Path, letter_id: str) -> dict:
     if not path.is_file():
         raise LetterError("missing_letter", f"letter {letter_id} not found in {root}")
     try:
-        text = path.read_text(encoding="utf-8")
+        data = path.read_bytes()
+        text = data.decode("utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise LetterError("unreadable", f"letter {letter_id}: {exc}") from exc
     header, body = parse_header(text)
-    return {"id": letter_id, "header": header, "body": body, "path": path}
+    blob = git_blob_sha(data)
+    commit, scan_blob = _working_tree_origin(root, letter_id, blob, header)
+    return {"id": letter_id, "header": header, "body": body, "path": path, "raw": text,
+            "transcript_blob": blob, "commit": commit, "scan_blob": scan_blob}
+
+
+def git_blob_sha(data: bytes) -> str:
+    """The id ``git hash-object`` gives these bytes."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def scan_candidates(source_file: str) -> list[str]:
+    """Where a header's ``source_file`` lives in the archive: under
+    ``source/`` (the letters repo's layout), else as written."""
+    return [f"source/{source_file}", source_file] if source_file else []
+
+
+def _git_out(root: Path, *args: str) -> str | None:
+    try:
+        done = subprocess.run(["git", "-C", str(root), *args], capture_output=True,
+                              text=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def _working_tree_origin(root: Path, letter_id: str, blob: str,
+                         header: dict) -> tuple[str | None, str | None]:
+    """``(commit, scan_blob)`` for a transcript read from the working tree."""
+    source_file = str(header.get("source_file") or "")
+    commit = None
+    if (root / ".git").exists():
+        head = _git_out(root, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+        at_head = _git_out(root, "rev-parse", "--verify", "--quiet",
+                           f"HEAD:letters/{letter_id}/transcript.md") if head else None
+        if head and at_head == blob:
+            commit = head
+            for spec in scan_candidates(source_file):
+                oid = _git_out(root, "rev-parse", "--verify", "--quiet", f"HEAD:{spec}")
+                if oid:
+                    return commit, oid
+            return commit, None
+    for spec in scan_candidates(source_file):
+        scan = root / spec
+        if scan.is_file():
+            try:
+                return commit, git_blob_sha(scan.read_bytes())
+            except OSError:
+                return commit, None
+    return commit, None
+
+
+def split_exact(raw: str | None) -> tuple[str, str] | None:
+    """``(header text, body)`` such that ``---\\n{header}\\n---\\n{body}`` IS
+    ``raw``, or ``None`` when the transcript has no header to keep."""
+    if not raw or not raw.startswith("---\n"):
+        return None
+    end = raw.find("\n---\n", 3)
+    if end < 0:
+        return None
+    header_text, body = raw[4:end], raw[end + 5:]
+    if f"---\n{header_text}\n---\n{body}" != raw:
+        return None
+    return header_text, body
 
 
 # --------------------------------------------------------------------------
@@ -372,36 +471,9 @@ def _written_at(header: dict) -> str | None:
     return None
 
 
-def render_source(letter: dict, *, filed_at: str) -> tuple[str, str]:
-    """``(relative path, file content)`` for one letter. Pure."""
-    from source_integrity import SCHEMA_VERSION, format_frontmatter, payload_sha256  # noqa: PLC0415
-
-    letter_id = letter["id"]
-    header = dict(letter.get("header") or {})
-    body = str(letter.get("body") or "").lstrip("\n")
-    relpath = source_relpath(letter_id)
-    collection = letter_id.split("/", 1)[0]
-    values: dict = {
-        "title": _title(header, body, letter_id),
-        "type": SOURCE_TYPE,
-        "source_id": source_id(letter_id),
-        "source_medium": "letter",
-        "source_trust": "external_record",
-        "authority": "third_party_record",
-        "captured_at": _written_at(header) or filed_at,
-        "visibility": "owner_only",
-        "sensitivity": SENSITIVITY,
-        "status": "raw",
-        "immutable": True,
-        "schema_version": SCHEMA_VERSION,
-        "source_path": relpath,
-        "content_sha256": payload_sha256(body),
-        "letter_id": letter_id,
-        "collection": collection,
-        "filed_at": filed_at,
-        "origin": {"repo": ORIGIN_REPO, "id": letter_id,
-                   "path": f"letters/{letter_id}/transcript.md"},
-    }
+def header_values(header: dict) -> dict:
+    """The header fields as the record's frontmatter carries them (v404)."""
+    values: dict = {}
     edtf = written_edtf(header)
     if edtf:
         values["date_edtf"] = edtf
@@ -415,16 +487,264 @@ def render_source(letter: dict, *, filed_at: str) -> tuple[str, str]:
         target = {"status": TRANSCRIPT_STATUS_KEY,
                   "confidence": TRANSCRIPT_CONFIDENCE_KEY}.get(key, key)
         values[target] = header[key]
-    return relpath, f"{format_frontmatter(values)}\n\n{body}"
+    return values
 
 
-def file_letter(letter_id: str, *, root: Path | None = None,
-                now: str | None = None) -> dict:
-    """File one letter. Never raises for a missing archive or letter.
+def trailer(header_text: str) -> str:
+    """The section after the verbatim body that keeps the transcript's own
+    YAML header verbatim, so :func:`transcript_from_record` can rebuild the
+    archive's file exactly. Fenced one backtick longer than any run inside."""
+    longest = max((len(run) for run in re.findall(r"`+", header_text)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return (f"\n{TRAILER_MARKER}\n{TRAILER_HEADING}\n\n"
+            "The letters project's own header for this transcript, kept verbatim.\n\n"
+            f"{fence}yaml\n{header_text}\n{fence}\n")
 
-    ``{"id", "status", "path", "source_id", "detail"}`` where ``status`` is
-    ``filed`` (written now), ``already`` (on file; nothing written) or one of
-    :class:`LetterError`'s codes.
+
+def _payload_after_frontmatter(text: str) -> str:
+    if not text.startswith("---\n"):
+        raise LetterError("unreadable", "record has no frontmatter")
+    end = text.find("\n---\n", 3)
+    if end == -1:
+        raise LetterError("unreadable", "record frontmatter is not closed")
+    return text[end + len("\n---\n"):]
+
+
+def has_trailer(text: str) -> bool:
+    return f"\n{TRAILER_MARKER}\n" in text
+
+
+def transcript_from_record(text: str) -> bytes:
+    """The archive's ``transcript.md`` bytes, rebuilt from a filed record:
+    ``---``, the trailer's header, ``---``, then the verbatim body."""
+    payload = _payload_after_frontmatter(text)
+    cut = payload.rfind(f"\n{TRAILER_MARKER}\n")
+    if cut == -1:
+        raise LetterError("unreadable", "record has no transcript-header trailer")
+    body, tail = payload[:cut], payload[cut:]
+    match = re.search(r"\n(`{3,})yaml\n(.*)\n\1\n\Z", tail, re.S)
+    if not match:
+        raise LetterError("unreadable", "record's transcript-header trailer is malformed")
+    return f"---\n{match.group(2)}\n---\n{body}".encode("utf-8")
+
+
+def version_token(letter: dict) -> str:
+    """The 12-hex suffix a superseding version carries: its transcript blob.
+    Content-addressed, so both doors (and any commit) name a revision the
+    same way."""
+    blob = str(letter.get("transcript_blob") or "")
+    if not blob:
+        blob = git_blob_sha(str(letter.get("raw") or letter.get("body") or "").encode("utf-8"))
+    return blob[:12]
+
+
+def versioned_source_id(letter_id: str, token: str) -> str:
+    """``letters:<collection>--<letter>:<blob12>``. ``:`` is the separator
+    because Lifehug Cloud's validator accepts it in an id
+    (``^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$``) and a letter id never holds it;
+    ``@`` and ``/`` are both ``INVALID_ID`` there."""
+    return f"{source_id(letter_id)}{VERSION_SEPARATOR}{token}"
+
+
+def versioned_relpath(letter_id: str, token: str) -> str:
+    return f"sources/{LETTERS_SUBDIR}/{source_stem(letter_id)}--{token}.md"
+
+
+def filing_context(root: Path | None = None, *, people=None, people_map: dict | None = None,
+                   scan_url_template: str | None = None, repo: str | None = None) -> dict:
+    """Who-is-who and where-it-came-from for a filing: the archive's
+    people.yaml (working tree when ``people`` is not given), the vault's
+    remembered ``--map`` / scan URL template / repo name
+    (``state/documents/letters.json``), and any overrides."""
+    import letter_people as lp  # noqa: PLC0415
+
+    config = lp.load_config()
+    if people is None:
+        try:
+            people = lp.People.from_archive(Path(root)) if root is not None else lp.People(None)
+        except lp.PeopleError:
+            people = lp.People(None)
+    return {
+        "people": people,
+        "people_map": {**config["people_map"], **(people_map or {})},
+        "scan_url_template": scan_url_template or config.get("scan_url_template") or None,
+        "repo": repo or config.get("repo") or ORIGIN_REPO,
+    }
+
+
+def letter_refs(letter: dict, context: dict | None) -> dict[str, list[str]]:
+    import letter_people as lp  # noqa: PLC0415
+
+    context = context or {}
+    collection = letter["id"].split("/", 1)[0]
+    return lp.refs_for(dict(letter.get("header") or {}), collection,
+                       context.get("people") or lp.People(None),
+                       context.get("people_map") or {})
+
+
+def render_source(letter: dict, *, filed_at: str, context: dict | None = None,
+                  supersedes: dict | None = None) -> tuple[str, str]:
+    """``(relative path, file content)`` for one letter. Pure.
+
+    ``context`` (:func:`filing_context`) resolves the refs and the origin's
+    repo and scan URL; without one the letter names nobody and its origin is
+    ``lifehug/letters``. ``supersedes`` (``{"source_id", "path"}``) makes this
+    a superseding version: its own path and id carry :func:`version_token`."""
+    from source_integrity import SCHEMA_VERSION, format_frontmatter, payload_sha256  # noqa: PLC0415
+
+    import letter_people as lp  # noqa: PLC0415
+
+    context = context or {}
+    letter_id = letter["id"]
+    header = dict(letter.get("header") or {})
+    exact = split_exact(letter.get("raw"))
+    raw_body = exact[1] if exact else str(letter.get("body") or "")
+    body = raw_body.lstrip("\n")
+    if supersedes:
+        token = version_token(letter)
+        relpath = versioned_relpath(letter_id, token)
+        sid = versioned_source_id(letter_id, token)
+    else:
+        relpath, sid = source_relpath(letter_id), source_id(letter_id)
+    collection = letter_id.split("/", 1)[0]
+    refs = letter_refs(letter, context)
+    source_file = str(header.get("source_file") or "") or None
+    source_pages = header.get("source_pages")
+    template = context.get("scan_url_template")
+    collection_slug = letter_id.split("/", 1)
+    origin = {
+        "repo": context.get("repo") or ORIGIN_REPO,
+        "id": letter_id,
+        "path": f"letters/{letter_id}/transcript.md",
+        "commit": letter.get("commit") or None,
+        "source_file": source_file,
+        "source_pages": source_pages if isinstance(source_pages, list) else None,
+        "scan_blob": letter.get("scan_blob") or None,
+        "scan_url": (template.format(id=letter_id, collection=collection_slug[0],
+                                     slug=collection_slug[1], letter=collection_slug[1])
+                     if template else None),
+        "transcript_blob": letter.get("transcript_blob") or None,
+    }
+    values: dict = {
+        "title": _title(header, body, letter_id),
+        "type": SOURCE_TYPE,
+        "source_id": sid,
+        "source_medium": "letter",
+        "source_trust": "external_record",
+        "authority": ("first_person_record" if lp.OWNER_REF in refs["author_refs"]
+                      else "third_party_record"),
+        "captured_at": _written_at(header) or filed_at,
+        "visibility": "owner_only",
+        "sensitivity": SENSITIVITY,
+        "status": "raw",
+        "immutable": True,
+        "schema_version": SCHEMA_VERSION,
+        "source_path": relpath,
+        "content_sha256": "",
+        "letter_id": letter_id,
+        "collection": collection,
+        "filed_at": filed_at,
+        "origin": origin,
+        **refs,
+    }
+    if supersedes:
+        values["supersedes"] = supersedes["source_id"]
+        values["supersedes_path"] = supersedes["path"]
+    values.update(header_values(header))
+    if exact:
+        # The body verbatim, then the header verbatim: the record rebuilds
+        # the archive's file byte for byte (`transcript_from_record`).
+        payload = f"{raw_body}{trailer(exact[0])}"
+        joiner = "\n"
+    else:
+        payload, joiner = body, "\n\n"
+    _meta, split_body = split_frontmatter(f"{format_frontmatter(values)}{joiner}{payload}")
+    values["content_sha256"] = payload_sha256(split_body)
+    return relpath, f"{format_frontmatter(values)}{joiner}{payload}"
+
+
+# --------------------------------------------------------------------------
+# What the vault already holds: versions, and which one is current
+# --------------------------------------------------------------------------
+
+def letter_index() -> dict[str, list[dict]]:
+    """Every filed letter record, by archive id: ``{"path", "source_id",
+    "supersedes", "meta", "abs"}``. Frontmatter decides, not the path."""
+    out: dict[str, list[dict]] = {}
+    base = SOURCES_DIR / LETTERS_SUBDIR
+    if not base.is_dir():
+        return out
+    for path in sorted(base.glob("*.md")):
+        try:
+            metadata, _body = split_frontmatter(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            continue
+        if metadata.get("type") != SOURCE_TYPE or not metadata.get("letter_id"):
+            continue
+        _add_to_index(out, path, metadata)
+    return out
+
+
+def _add_to_index(index: dict, path: Path, metadata: dict) -> None:
+    index.setdefault(str(metadata["letter_id"]), []).append({
+        "path": path.relative_to(REPO_DIR).as_posix(),
+        "abs": path,
+        "source_id": str(metadata.get("source_id") or ""),
+        "supersedes": str(metadata.get("supersedes") or ""),
+        "meta": metadata,
+    })
+
+
+def current_record(records: list[dict]) -> dict | None:
+    """The version nothing supersedes. A healthy chain has exactly one; if a
+    chain is ever broken, a superseding version outranks an original."""
+    if not records:
+        return None
+    superseded = {r["supersedes"] for r in records if r["supersedes"]}
+    heads = [r for r in records if r["source_id"] not in superseded] or records
+    return sorted(heads, key=lambda r: (bool(r["supersedes"]),
+                                        str(r["meta"].get("filed_at") or ""), r["path"]))[-1]
+
+
+def same_transcript(record: dict, letter: dict) -> bool:
+    """Is this filed record the letter as the archive now holds it?
+
+    A record that names its ``origin.transcript_blob`` is compared by blob. A
+    v404 record (no blob) is the same when its body and every header field it
+    carries are the transcript's."""
+    from source_integrity import payload_sha256  # noqa: PLC0415
+
+    meta = record["meta"]
+    origin = meta.get("origin") if isinstance(meta.get("origin"), dict) else {}
+    blob = origin.get("transcript_blob")
+    if blob:
+        return blob == letter.get("transcript_blob")
+    exact = split_exact(letter.get("raw"))
+    body = exact[1] if exact else str(letter.get("body") or "")
+    if meta.get("content_sha256") != payload_sha256(body):
+        return False
+    expected = header_values(dict(letter.get("header") or {}))
+    return all(meta.get(key) == value for key, value in expected.items())
+
+
+def file_letter(letter_id: str, *, root: Path | None = None, now: str | None = None,
+                letter: dict | None = None, context: dict | None = None,
+                index: dict | None = None, register: bool = True,
+                dry_run: bool = False) -> dict:
+    """File one letter — THE writer of a letter record, for every door.
+    Never raises for a missing archive or letter.
+
+    ``letter`` is a transcript already read (``documents file`` reads it
+    through git at a commit); without it the archive's working tree at
+    ``root`` is read. ``context`` is :func:`filing_context`'s. ``index``
+    (:func:`letter_index`) is reused across a bulk filing. ``register=False``
+    leaves the manifest to the caller (one sync for many records).
+
+    ``{"id", "status", "path", "source_id", "detail", …}`` where ``status`` is
+    ``filed`` (written now; with ``supersedes`` when it is a new version of a
+    revised transcript), ``would_file`` (``dry_run``), ``already`` (the
+    current record IS this transcript; nothing written), ``conflict``, or one
+    of :class:`LetterError`'s codes.
     """
     from source_integrity import register_source  # noqa: PLC0415
 
@@ -434,20 +754,61 @@ def file_letter(letter_id: str, *, root: Path | None = None,
     if not LETTER_ID_RE.match(letter_id):
         out.update(status="invalid_id", detail=f"not a letter id: {letter_id!r}")
         return out
-    relpath = source_relpath(letter_id)
+    index = letter_index() if index is None else index
+    current = current_record(index.get(letter_id, []))
+    if letter is None:
+        archive = Path(root) if root is not None else letters_dir()
+        try:
+            letter = read_letter(archive, letter_id)
+        except LetterError as exc:
+            if current is not None:
+                # On file; the archive cannot say whether it was revised.
+                out.update(status="already", path=current["path"],
+                           source_id=current["source_id"],
+                           detail=f"already filed (not checked for a revision: {exc.code})")
+                return out
+            out.update(status=exc.code, detail=str(exc))
+            return out
+        if context is None:
+            context = filing_context(archive)
+    context = context if context is not None else filing_context(None)
+    import letter_people as lp  # noqa: PLC0415
+
+    collection = letter_id.split("/", 1)[0]
+    out["unmapped"] = lp.unmapped_ids(dict(letter.get("header") or {}), collection,
+                                      context["people"], context["people_map"])
+    if current is not None and same_transcript(current, letter):
+        refs = letter_refs(letter, context)
+        out.update(status="already", path=current["path"], source_id=current["source_id"],
+                   detail="already filed",
+                   refs_drifted=any(key in current["meta"] and current["meta"][key] != value
+                                    for key, value in refs.items()))
+        return out
+    supersedes = ({"source_id": current["source_id"], "path": current["path"]}
+                  if current is not None else None)
+    filed_at = now or now_utc()
+    relpath, content = render_source(letter, filed_at=filed_at, context=context,
+                                     supersedes=supersedes)
+    out.update(path=relpath, source_id=split_frontmatter(content)[0]["source_id"])
+    if supersedes:
+        out["supersedes"] = supersedes
+    out["authority"] = split_frontmatter(content)[0]["authority"]
     target = REPO_DIR / relpath
-    out["path"] = relpath
-    if target.is_file():
-        out.update(status="already", detail="already filed")
+    if target.exists():
+        out.update(status="conflict", path=None,
+                   detail=f"{relpath} exists but is not the current version; refusing to overwrite")
         return out
-    try:
-        letter = read_letter(Path(root) if root is not None else letters_dir(), letter_id)
-    except LetterError as exc:
-        out.update(status=exc.code, detail=str(exc), path=None)
+    problems = letter_problems(split_frontmatter(content)[0], content)
+    if problems:
+        out.update(status="invalid", path=None, detail="; ".join(problems))
         return out
-    _rel, content = render_source(letter, filed_at=now or now_utc())
+    if dry_run:
+        out.update(status="would_file", detail="would file")
+        return out
     write_text(target, content)
-    register_source(target)
+    if register:
+        register_source(target)
+    _add_to_index(index, target, split_frontmatter(content)[0])
     out.update(status="filed", detail="filed")
     return out
 
@@ -463,13 +824,71 @@ def on_file(outcome: dict) -> bool:
 
 
 def outcome_line(outcome: dict) -> str:
-    """One honest line per letter, the shape intake parses."""
+    """One honest line per letter, the shape intake parses (a superseding
+    version adds one indented line after it)."""
     status = outcome.get("status")
     if status == "filed":
-        return f"✓ Filed letter {outcome['id']}: {outcome['path']}"
+        line = f"✓ Filed letter {outcome['id']}: {outcome['path']}"
+        if outcome.get("supersedes"):
+            old = outcome["supersedes"]
+            line += f"\n  supersedes {old['source_id']} ({old['path']}); the old record stays"
+        return line
     if status == "already":
         return f"  letter {outcome['id']} already filed: {outcome['path']}"
     return f"! letter {outcome['id']} not filed ({status}): {outcome.get('detail')}"
+
+
+# --------------------------------------------------------------------------
+# What a letter record must keep (source-lint; one definition)
+# --------------------------------------------------------------------------
+
+#: Lifehug Cloud's vault validator's id rule (`INVALID_ID`, hard reject).
+PLATFORM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$")
+AUTHORITIES = ("third_party_record", "first_person_record")
+
+
+def letter_problems(metadata: dict, text: str | None = None) -> list[str]:
+    """Why a ``type: letter`` record is malformed (empty when it is not).
+    A v404 record (no refs, no trailer) passes on the checks it can."""
+    import letter_people as lp  # noqa: PLC0415
+
+    problems: list[str] = []
+    if metadata.get("source_trust") != "external_record":
+        problems.append("source_trust must be external_record")
+    if metadata.get("sensitivity") != SENSITIVITY:
+        problems.append("sensitivity must be family")
+    if metadata.get("immutable") is not True:
+        problems.append("immutable must be true")
+    sid = str(metadata.get("source_id") or "")
+    if not PLATFORM_ID_RE.match(sid) or not sid.startswith(SOURCE_ID_PREFIX):
+        problems.append(f"source_id {sid!r} is not a letters: id Lifehug Cloud accepts")
+    authority = metadata.get("authority")
+    if authority not in AUTHORITIES:
+        problems.append(f"authority {authority!r} is not one of {', '.join(AUTHORITIES)}")
+    refs_ok = True
+    for key in ("author_refs", "recipient_refs", "subject_refs"):
+        if key not in metadata:
+            continue
+        value = metadata[key]
+        if not isinstance(value, list) or not all(isinstance(r, str) and lp.REF_RE.match(r)
+                                                  for r in value):
+            problems.append(f"{key} must be a list of refs")
+            refs_ok = False
+    if refs_ok and authority in AUTHORITIES:
+        first_person = lp.OWNER_REF in (metadata.get("author_refs") or [])
+        if first_person != (authority == "first_person_record"):
+            problems.append("authority does not match whether the owner wrote it")
+    origin = metadata.get("origin")
+    blob = origin.get("transcript_blob") if isinstance(origin, dict) else None
+    if text is not None and (blob or has_trailer(text)):
+        try:
+            rebuilt = transcript_from_record(text)
+        except LetterError as exc:
+            problems.append(str(exc))
+        else:
+            if blob and git_blob_sha(rebuilt) != blob:
+                problems.append("body no longer rebuilds the filed transcript (origin.transcript_blob)")
+    return problems
 
 
 # --------------------------------------------------------------------------
@@ -556,12 +975,15 @@ def citing_memos(letter_ids: list[str]) -> dict[str, list[str]]:
     return found
 
 
-def link_citing_memos(letter_ids: list[str]) -> list[str]:
+def link_citing_memos(letter_ids: list[str] | dict[str, str]) -> list[str]:
     """Stamp ``cites`` on every memo that names one of these (filed) letters.
-    Returns the memos that changed."""
+    ``letter_ids`` may map each id to the source id to cite (the CURRENT
+    version's, v412); a plain list cites the bare id. Returns the memos that
+    changed."""
+    wanted = letter_ids if isinstance(letter_ids, dict) else {i: source_id(i) for i in letter_ids}
     changed = []
-    for rel, named in citing_memos(letter_ids).items():
-        if stamp_cites(REPO_DIR / rel, [source_id(i) for i in named]):
+    for rel, named in citing_memos(list(wanted)).items():
+        if stamp_cites(REPO_DIR / rel, [wanted[i] for i in named]):
             changed.append(rel)
     return changed
 
@@ -581,7 +1003,7 @@ def file_and_link(refs: list[str], *, root: Path | None = None,
             if letter_id not in ids:
                 ids.append(letter_id)
     outcomes = [file_letter(letter_id, root=root, now=now) for letter_id in ids]
-    linked = link_citing_memos([o["id"] for o in outcomes if on_file(o)])
+    linked = link_citing_memos({o["id"]: o["source_id"] for o in outcomes if on_file(o)})
     return {"letters": outcomes, "linked": linked}
 
 
@@ -610,11 +1032,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
-    "CITES_KEY", "LETTER_ID_RE", "LetterError", "RECORD_REF_PREFIX", "SOURCE_ID_PREFIX",
-    "SOURCE_TYPE", "citing_memos", "file_and_link", "file_cited", "file_letter",
-    "ids_from_ref", "letters_dir", "link_citing_memos", "merged_cites", "on_file",
-    "outcome_line", "parse_header", "read_letter", "render_source", "source_id",
-    "source_relpath", "stamp_cites", "with_cites",
+    "CITES_KEY", "LETTER_ID_RE", "LetterError", "PLATFORM_ID_RE", "RECORD_REF_PREFIX",
+    "SOURCE_ID_PREFIX", "SOURCE_TYPE", "TRAILER_MARKER", "citing_memos", "current_record",
+    "file_and_link", "file_cited", "file_letter", "filing_context", "git_blob_sha",
+    "header_values", "ids_from_ref", "letter_index", "letter_problems", "letters_dir",
+    "link_citing_memos", "merged_cites", "on_file", "outcome_line", "parse_header",
+    "read_letter", "render_source", "same_transcript", "source_id", "source_relpath",
+    "split_exact", "stamp_cites", "transcript_from_record", "versioned_source_id",
+    "with_cites",
 ]
 
 

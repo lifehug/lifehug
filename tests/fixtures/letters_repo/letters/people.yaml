@@ -1,0 +1,40 @@
+# Synthetic people for tests/test_documents.py (lifehug#471). Same shape as a
+# letters repository's people.yaml: regex aliases, some scoped to a collection.
+chapters:
+  - id: pat-mission
+    title: "Pat's mission"
+    central: pat-owner
+
+people:
+  # ---- the owner and family -------------------------------------------------
+  - id: pat-owner
+    name: Pat Owner
+    bio: "The archive owner."
+    aliases:
+      - "Pat Owner"
+      - {p: "\\bPat\\b", in: [pat-mission]}
+      - {p: "Elder Owner", in: [pat-mission]}
+  - id: sam-owner
+    name: Sam Owner
+    bio: "Pat's dad; \"Dad\" in the mission letters."
+    aliases:
+      - "Sam Owner"
+      - {p: "\\bDad\\b", in: [pat-mission]}
+  - id: lee-owner
+    name: Lee Owner
+    aliases:
+      - {p: "\\bMom\\b", in: [pat-mission]}
+  - id: ezra-owner
+    name: Ezra Owner
+    bio: "Sam's father; \"Dad\" in the old box."
+    aliases: ["Ezra( Owner)?", {p: "\\bDad\\b", in: [old-box]}]
+  - id: robin-friend
+    name: Robin Friend
+    aliases: ["Robin( Friend)?"]
+  - id: mission-office
+    name: The mission office
+    group: true
+    aliases: ["Mission office", "^All missionaries"]
+  - id: unknown
+    name: Unknown
+    aliases: ["^unknown"]

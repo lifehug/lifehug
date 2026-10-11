@@ -765,8 +765,31 @@ memo whose `record_ref` already names them. A classified letter is the moment
 "<writer>'s letter to <recipient>" on the letter's own date, basis `document`
 (`classifier_claims.letter_event`); its subject is the writer, so the existing
 axis rules decide whose timeline it is on. `sources/letters/` is user data,
-never `framework_files`. D2–D6 of `docs/pr-specs/letters-in-the-vault.md`
-are not built.
+never `framework_files`.
+
+**Many letters, pinned (v412).** `documents file <archive> --all | --ids <id>…
+--commit <sha> [--dry-run] [--map ID=REF …] [--scan-url-template T]
+[--repo-name R]` reads the archive THROUGH GIT AT THE COMMIT (never its
+working tree; never written) and hands every transcript to the same writer
+(`family_letters.file_letter`), so it and `intake letter` file identical
+records. On top of v404's record: `author_refs` / `recipient_refs` /
+`subject_refs` (`self`, `person/<slug>`) resolved through the archive's
+`letters/people.yaml` aliases and the vault's `--map` (remembered, with the
+scan URL template and repo name, in `state/documents/letters.json`; an
+unmapped id is `person/<id>`); `authority: first_person_record` when the
+owner wrote it; `origin` with `commit`, `source_file`, `source_pages`,
+`scan_blob`, `scan_url` and `transcript_blob`; and AFTER the verbatim body one
+trailing section with the transcript's own YAML header verbatim, so
+`family_letters.transcript_from_record()` rebuilds the archive's file byte for
+byte (`source-lint`: `letter_record_invalid`; `--fix` never rewrites a letter).
+Re-running on an unchanged transcript writes nothing; a REVISED transcript
+files a new record `sources/letters/<collection>--<letter>--<blob12>.md`,
+`source_id letters:<collection>--<letter>:<blob12>`, `supersedes` the current
+one, and the old record stays. Source Integrity lists letters by collection
+(Written / Writer / Recipient / Kind) and the reader shows the letter fields,
+refs, scan link and the header collapsed. Loop-adjacent: nothing on the
+rhythm runs it. D2–D7 of `docs/pr-specs/letters-in-the-vault.md` are not
+built.
 
 ### External Evidence Connectors (v106 — Gmail first)
 
@@ -1808,12 +1831,12 @@ Lifehug tracks its version in `system/version.json`. Framework files (listed the
 
 **Framework files** (updated automatically):
 - `CLAUDE.md`, `system/ai_provider.py`, `system/answer_ack.py`, `system/answer_ack_delivery.py`, `system/ask.py`,
-  `system/conversation.py`, `system/conversation_delivery.py`, `system/conversation_lints.py`, `system/eval_gates.py`, `system/interaction_registry.py`, `system/question_candidate.py`, `system/question_candidate_evals.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/jobs.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
+  `system/conversation.py`, `system/conversation_delivery.py`, `system/conversation_lints.py`, `system/eval_gates.py`, `system/interaction_registry.py`, `system/question_candidate.py`, `system/question_candidate_evals.py`, `system/artifact.py`, `system/compose.py`, `system/daily_question.sh`, `system/weekly_maintenance.sh`, `system/weekly_report.py`, `system/monthly_research.sh`, `system/gen_followups.py`, `system/ingest_story.py`, `system/jobs.py`, `system/lifehug.py`, `system/lifehug_core.py`, `system/mirror.py`, `system/process_answer.py`, `system/question_candidates.py`, `system/question_planner.py`, `system/rebuild_state.py`, `system/serve_wiki.py`, `system/source_integrity.py`, `system/source_contract.md`, `system/family_letters.py`, `system/documents.py`, `system/letter_people.py`, `system/mini_yaml.py`, `system/update.py`, `system/update_readme.py`, `system/version.json`, `system/wiki_compile.py`, `system/research.md`, `.gitignore`
 - `templates/letter.md`, `templates/tweet.md`, `templates/instagram.md`, `templates/post.md`, `templates/chapter.md`
 - `skills/artifact/SKILL.md`, `skills/focus/SKILL.md`, `skills/compile/SKILL.md`
 
 **User data** (never touched):
-- `README.md`, `profile.yaml` (committed identity/prefs), `config.yaml` (gitignored secrets/overrides), `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`
+- `README.md`, `profile.yaml` (committed identity/prefs), `config.yaml` (gitignored secrets/overrides), `system/question-bank.md`, `system/rotation.json`, `system/coverage.json`, `system/schedule.json`, `state/documents/letters.json`
 - `answers/`, `outputs/`, `sources/`
 - `state/answer_acknowledgments.json`, `state/conversation_deliveries.json`, `state/question_candidates.json`, `state/question_queue.json`, `state/planner_state.json`, `state/source_manifest.json`, `state/source_lint_findings.json`, `state/timeline_placements.json`
 

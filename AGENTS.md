@@ -529,6 +529,7 @@ All paths are relative to this workspace root:
 - Source lint findings: `state/source_lint_findings.json`
 - Question candidates: `state/question_candidates.json`
 - Connector state (ledger, cursor, date evidence, calibrated weights): `state/connectors/`
+- Letter records (letters D1, v404/v412): `sources/letters/<collection>--<letter>.md` (a superseding version `…--<blob12>.md`); the people map, scan URL template and repo name: `state/documents/letters.json`
 - Planned queue: `state/question_queue.json`
 - Planner state: `state/planner_state.json`
 - Answers: `answers/`

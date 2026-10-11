@@ -1,7 +1,7 @@
 {
-  "version": 411,
+  "version": 412,
   "released": "2026-10-10",
-  "changelog": "v411: the owner never dies on his own timeline, and one graduation is one row. (1) A death or loss telling the extractor filed under the narrator (subject \"self\") whose own words name who died — \"Father died of COVID in Mesa\", \"James Taylor's death\", \"The death of …\" — is now read as about that person: re-subjected through the roster (the resolver, then the one roster row holding that relationship), or to the words themselves when the roster cannot say who, never kept on the owner (`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`); an age filed under him (\"when I was like 21\") stays his own age. A death node's subjects never hold the owner, and its title and every card are composed from the deceased (\"James Taylor's death\"), so \"Your death\" and a \"your death\" contradiction card can no longer be drawn; a death naming nobody but the narrator (\"Nearly died in the crash\") is titled and asked in its own words. The binder reads the same thing in its view of the telling, so R2b buckets it under the person who died. Findings: `death_resubjected_from_the_narrator`, `owner_dropped_from_death_subjects`, `narrator_death_titled_in_its_own_words`. (2) New binder rung R2e (`episode_binder.ONE_GRADUATION_TOLD_MANY_WAYS_IS_ONE_ROW`): one person's graduation told several ways folds into one episode, key (subject, graduation, year) — the subject resolved through the roster (\"Dad\", \"Father\" and the roster ref are one man), the year the one an unglued telling states, every telling whose interval contains it folding in; with no stated year, overlapping intervals fold. `graduation` stays out of ONCE_PER_SUBJECT_EVENT_KINDS: contradicting years, two schools, undated tellings and the owner's own graduations stay apart. A telling that glues a graduation to another event (\"graduated and got a job\") never supplies the year, is linked by no other rung to a non-graduation telling, and never titles the row (`episode_binder.A_GLUED_TELLING_LENDS_NO_YEAR`); the folded row is titled by its cleanest telling (\"Dad graduated\", `temporal_timeline.A_GRADUATION_IS_TITLED_BY_ITS_CLEANEST_TELLING`). CALCULATION_RULE_VERSION timeline-rules:29, so an upgraded vault re-derives on its next publish; the binder's RULE_VERSION does not move. Not built: splitting a glued telling at the classifier/resolver seat, so a graduation glued to a job and dated by the job (\"Father graduated and got a job\", June 1989–June 1990) still stands as its own row.",
+  "changelog": "v412: many family letters at once, pinned, and revisions that never overwrite (letters-in-the-vault D1, rebuilt on v404 from PR #473). New door: `lifehug.py documents file <archive> --all | --ids <collection>/<letter>… --commit <sha> [--dry-run] [--map ID=REF] [--scan-url-template T] [--repo-name R]` files every letter (or the ones named) from the family-letters archive read THROUGH GIT AT THAT COMMIT — uncommitted edits are never filed and the archive is never written — through the same writer as `intake letter`, so both doors produce the same `sources/letters/<collection>--<letter>.md` record (v404's path, id and fields). Re-running on an unchanged transcript writes nothing; `--dry-run` reports the counts first. Every letter record now also carries who it is from, to and about as refs (`author_refs`, `recipient_refs`, `subject_refs`: `self` or `person/<slug>`), resolved through the archive's `letters/people.yaml` aliases (collection-scoped ones included) and your `--map` (remembered in `state/documents/letters.json` with the scan URL template), beside the header's own from/to/people strings; your own letters are `authority: first_person_record`; `origin` pins the commit, the scan file and its blob, a scan link and the transcript's blob; and after the verbatim body one trailing section keeps the transcript's YAML header verbatim, so the archive's file rebuilds byte for byte (source-lint `letter_record_invalid` checks it; `--fix` never rewrites a letter). A transcript revised in the archive now files a NEW record (`…--<blob12>.md`, id `letters:<collection>--<letter>:<blob12>`, which Lifehug Cloud's validator accepts) that `supersedes` the current one; the old record stays, and intake cites the current version. In the local viewer, Source Integrity lists letters under their own type, one table per collection with Written / Writer / Recipient / Kind in written-date order, and the source reader shows the letter fields, refs, the scan link, page markers as quiet labels and the transcript header collapsed; the Sources view also reads the manifest once instead of once per row. Letters already filed by v404 stay as they are and count as current. Not built: D2–D7 (and with hundreds of letters filed, compile does not yet cap how many reach a page: D6).",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -685,6 +685,22 @@
     "tests/test_v404_letters_in_the_vault.py",
     "system/remembered_story.py",
     "system/remembered_story.json",
-    "tests/test_v410_remembered_story_floor.py"
+    "tests/test_v410_remembered_story_floor.py",
+    "system/documents.py",
+    "system/letter_people.py",
+    "system/mini_yaml.py",
+    "tests/test_v412_letters_documents_file.py",
+    "tests/walkthrough_letters.py",
+    "docs/pr-specs/letters-in-the-vault.md",
+    "tests/fixtures/letters_repo/letters/old-box/dad-to-sam/transcript.md",
+    "tests/fixtures/letters_repo/letters/pat-mission/dad-letter/transcript.md",
+    "tests/fixtures/letters_repo/letters/pat-mission/newsletter-002/transcript.md",
+    "tests/fixtures/letters_repo/letters/pat-mission/newsletter/transcript.md",
+    "tests/fixtures/letters_repo/letters/pat-mission/pat-to-home/transcript.md",
+    "tests/fixtures/letters_repo/letters/people.yaml",
+    "tests/fixtures/letters_repo/source/2001/DAD.pdf",
+    "tests/fixtures/letters_repo/source/2001/NEWSLETTER.pdf",
+    "tests/fixtures/letters_repo/source/2001/PAT HOME.pdf",
+    "tests/fixtures/letters_repo/source/OLD BOX/DAD TO SAM.pdf"
   ]
 }
