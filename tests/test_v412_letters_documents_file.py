@@ -567,7 +567,7 @@ class WiringTests(unittest.TestCase):
                      "system/family_letters.py", "tests/test_v412_letters_documents_file.py",
                      "tests/walkthrough_letters.py"):
             self.assertIn(name, shipped)
-        # v416 (A_FIXTURE_NEVER_SHIPS_TO_A_VAULT): the fixture archive is test
+        # v418 (A_FIXTURE_NEVER_SHIPS_TO_A_VAULT): the fixture archive is test
         # data; shipping it put made-up transcripts into real vaults.
         self.assertFalse(any(path.startswith("tests/fixtures/") for path in shipped))
         self.assertFalse(any(path.startswith("sources/letters") for path in shipped))

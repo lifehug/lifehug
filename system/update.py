@@ -248,7 +248,7 @@ def repo_file_is_executable_at(ref, filepath):
     return result.stdout.split(None, 1)[0] == "100755"
 
 
-# RULE A_FIXTURE_NEVER_SHIPS_TO_A_VAULT (v416).
+# RULE A_FIXTURE_NEVER_SHIPS_TO_A_VAULT (v418).
 #
 # `framework_files` is copied byte-for-byte into every vault by
 # `apply_version`, so it may NEVER name a path under `tests/fixtures/`. A

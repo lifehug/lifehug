@@ -1,4 +1,4 @@
-"""A_FIXTURE_NEVER_SHIPS_TO_A_VAULT (v416): framework_files never names a
+"""A_FIXTURE_NEVER_SHIPS_TO_A_VAULT (v418): framework_files never names a
 test fixture, and update --apply retires fixtures an old version shipped."""
 
 import json

@@ -799,10 +799,10 @@ memo whose `record_ref` already names them. A classified letter is the moment
 axis rules decide whose timeline it is on. `sources/letters/` is user data,
 never `framework_files`.
 
-**A fixture never ships to a vault (v416).** `framework_files` is copied into
+**A fixture never ships to a vault (v418).** `framework_files` is copied into
 every vault, so it may never name a path under `tests/fixtures/`
 (`update.A_FIXTURE_NEVER_SHIPS_TO_A_VAULT`); plain `tests/*.py` may ship. v412
-listed its letters archive and v412–v415 put made-up transcripts into real
+listed its letters archive and v412–v417 put made-up transcripts into real
 vaults, which Lifehug Cloud's vault validator rejected (`INVALID_ID`,
 `INVALID_DATE`). Enforced by `tests/test_framework_manifest.py` and the required
 `framework_files exists` check (`scripts/ci/check_framework_files.py`).
