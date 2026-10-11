@@ -282,7 +282,12 @@ to *mother*. **The narrator is not the deceased** (v411,
 `identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`): a death telling filed
 under the owner whose own words name who died (*"Father died of COVID in
 Mesa"*) is read as about that person, in the binder's view and in the fold, so
-no death on his timeline is ever titled or asked as *"your death"*.
+no death on his timeline is ever titled or asked as *"your death"*. Its sibling,
+**the narrator is not the newborn** (v414,
+`identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`), reads a birth the same
+way: *"Harvey's birth as turning point"* filed under the owner is Harvey's
+birth, and a birth node naming anybody else never lists the owner among its
+subjects; *"I was born in Redlands"* stays his own.
 
 ### The five laws that protect the drawing
 

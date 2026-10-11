@@ -1595,8 +1595,10 @@ def _span_settings_of(rows: Sequence[object], mentions: Sequence[str],
 
 def narrator_resubjected(claims: Sequence[object], event_kind: object,
                          subject_mentions: Sequence[str]) -> str:
-    """The deceased a death telling filed under the narrator names, or ``""``
-    (`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`).
+    """The deceased a death telling — or, since v414, the newborn a birth
+    telling — filed under the narrator names, or ``""``
+    (`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`,
+    `identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`).
 
     The binder's half of the fold's reading: when every subject the telling
     was filed under is the owner and its own title names whose death it was
@@ -1610,20 +1612,25 @@ def narrator_resubjected(claims: Sequence[object], event_kind: object,
         or tt.is_owner_reference_only(text) for text in subject_mentions)
     if not owner_only:
         return ""
+    # v414, `identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`: the same
+    # reading for a birth ("Harvey's birth as turning point").
+    readings = ((ir.deceased_named_in, ir.DEATH_EVENT_KINDS, "death"),
+                (ir.newborn_named_in, ir.BIRTH_EVENT_KINDS, "birth"))
     for claim in claims or ():
         row = claim if isinstance(claim, dict) else {}
-        deceased = ir.deceased_named_in(row.get("event_mention"))
-        if not deceased:
-            continue
-        kind = collapsed_text(row.get("event_kind")) or collapsed_text(event_kind)
-        if kind in ir.DEATH_EVENT_KINDS:
-            return deceased
-        if kind in ("", KIND_WILDCARD):
-            import cornerstones as cs  # noqa: PLC0415 - avoids an import cycle
+        for named_in, kinds, milestone in readings:
+            named = named_in(row.get("event_mention"))
+            if not named:
+                continue
+            kind = collapsed_text(row.get("event_kind")) or collapsed_text(event_kind)
+            if kind in kinds:
+                return named
+            if kind in ("", KIND_WILDCARD):
+                import cornerstones as cs  # noqa: PLC0415 - avoids an import cycle
 
-            if cs.milestone_of_label(row.get("event_mention"),
-                                     subject_words=(deceased,)) == "death":
-                return deceased
+                if cs.milestone_of_label(row.get("event_mention"),
+                                         subject_words=(named,)) == milestone:
+                    return named
     return ""
 
 

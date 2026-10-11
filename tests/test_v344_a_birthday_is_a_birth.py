@@ -728,7 +728,9 @@ class ABirthBelongsToThePersonBornTests(unittest.TestCase):
     def test_the_group_resolves_to_the_child(self) -> None:
         group = self.group(harvey_birth_tellings(), roster_snapshot=roster(HARVEY_ROW))
         self.assertEqual(group["subject"], "person/harvey")
-        self.assertIn("self", group["subjects"])
+        # v414 (`identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`): the
+        # turning point is the child's birth; the owner is not among its subjects.
+        self.assertNotIn("self", group["subjects"])
 
     def test_an_owner_only_mention_on_it_is_the_turning_point(self) -> None:
         group = self.group(harvey_birth_tellings(), roster_snapshot=roster(HARVEY_ROW))
@@ -919,9 +921,9 @@ class TheOwnersReviewTests(unittest.TestCase):
         self.assertEqual(frames[0]["best_temporal_value"]["earliest"], BIRTH_DAY)
 
     def test_the_rule_version_moved(self) -> None:
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:29")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:30")
         for node in self.result.nodes:
-            self.assertEqual(node["calculation_rule_version"], "timeline-rules:29")
+            self.assertEqual(node["calculation_rule_version"], "timeline-rules:30")
 
 
 if __name__ == "__main__":

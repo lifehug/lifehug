@@ -131,6 +131,20 @@ construction: every publish applies it with no vault edit. Never date a kid's
 story from the birth by hand, and never change the `childhood` age frame (0–12)
 to get the same effect.
 
+**The narrator is not the newborn (v414, owner 2026-10-10).** The birth sibling
+of the rule below: a birth or child_born telling filed under the owner whose own
+title names who was born ("Harvey's birth as turning point", "<Name> born",
+"the birth of <Name>") is that person's birth — re-subjected through the roster,
+or to the words themselves — and a birth node naming anybody besides him drops
+him from its subjects (`identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`;
+findings `birth_resubjected_from_the_narrator`,
+`owner_dropped_from_birth_subjects`). His relation to his child's birth is the
+`child_born` kind and the family axis, never `self` among its subjects; a birth
+naming only him ("I was born in Redlands") keeps its subject, and an age he
+filed on it stays his. A fold-time reading (`timeline-rules:30`) and a binder
+view reading, In the Loop on every publish and sweep; never fix such a subject
+by hand.
+
 **The owner never dies on his own timeline; one graduation is one row (v411,
 owner 2026-10-10).** He narrates his vault, so a death in it is never his: a
 death or loss telling the extractor filed under him whose own words name the
