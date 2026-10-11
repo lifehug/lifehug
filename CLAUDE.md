@@ -131,6 +131,26 @@ construction: every publish applies it with no vault edit. Never date a kid's
 story from the birth by hand, and never change the `childhood` age frame (0–12)
 to get the same effect.
 
+**The owner never dies on his own timeline; one graduation is one row (v411,
+owner 2026-10-10).** He narrates his vault, so a death in it is never his: a
+death or loss telling the extractor filed under him whose own words name the
+deceased ("Father died of COVID in Mesa", "James Taylor's death") is about the
+person those words name — re-subjected through the roster, or to the words
+themselves when the roster cannot say who, never kept on him — and a death
+node is titled and asked from the deceased, never "Your death"
+(`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`; findings
+`death_resubjected_from_the_narrator`, `owner_dropped_from_death_subjects`).
+One person's graduation told several ways folds into one row when the dates do
+not contradict — binder rung R2e, key `(subject, graduation, year)`, the year
+the one an unglued telling states (`episode_binder.ONE_GRADUATION_TOLD_MANY_WAYS_IS_ONE_ROW`);
+`graduation` stays out of `ONCE_PER_SUBJECT_EVENT_KINDS` because a person can
+graduate twice, so contradicting years, two schools and his own graduations stay
+apart. A telling that glues a graduation to another event ("graduated and got a
+job") never lends the graduation's year to the other event and never titles the
+row (`episode_binder.A_GLUED_TELLING_LENDS_NO_YEAR`). Both are READINGS applied
+on every publish and every binder sweep (`timeline-rules:29`), In the Loop with
+no vault edit; never fix such a row by hand.
+
 **Cornerstones (v360, owner 2026-09-25, ADR 0038).** Beside landmarks (the
 skeleton) and keystones (the computed highest-leverage gap) sits a FIXED set of
 dates asked to the day: the owner's birth; his children's, parents', siblings'

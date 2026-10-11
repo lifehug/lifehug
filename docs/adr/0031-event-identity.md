@@ -490,6 +490,47 @@ Two corollaries, both deliberate:
 previously produced no drawing at all, so no vault whose head has not moved
 draws anything different.
 
+## R2e amendment (v411) — one person's graduation in one year is one episode
+
+The incident: the owner's father's college graduation sat on his timeline six
+times — three plain tellings dated 1987 ("Dad's graduation", "Dad graduated",
+"Dad graduates college") and three resolver readings that glued it to the job
+that followed ("Dad graduated, got San Diego job" 1987–1988, "Father graduated
+and got San Diego job" 1987–June 1988, "Father graduated and got a job" June
+1989–June 1990, the last dated by the San Diego stay the job was in). The
+owner's ruling: his father's graduation is ONE row.
+
+No existing rung could fold them, by design: `graduation` is absent from
+`identity_resolution.ONCE_PER_SUBJECT_EVENT_KINDS` because high school and
+college are two graduations of one person, and that stays true. The decision
+is a fifth exact-identity rung, `R2e`
+(`episode_binder.ONE_GRADUATION_TOLD_MANY_WAYS_IS_ONE_ROW`), whose key carries
+the discriminator the subject rung lacks — the YEAR: `(subject, "graduation",
+year)`. The subject is who the title says graduated, resolved through the
+roster (and through the relation word's canonical spelling, since "dad" is too
+short to be an index key), so "Dad", "Father" and the roster ref are one man.
+The year is one an UNGLUED telling states (its own interval inside one
+calendar year); every telling of that subject's graduation whose interval —
+stated and placed (Law `A_MERGE_NEVER_MOVES_A_DATED_MOMENT`) — contains it
+folds, pairwise, so the ordinary clique rule groups them. With no stated year,
+overlapping intervals fold. Contradicting years, two schools named, an undated
+telling (it could be either graduation) and the owner's own graduations stay
+apart; a miss is cheap and a wrong link is not (Law 6).
+
+The glued telling is the second half (`episode_binder.A_GLUED_TELLING_LENDS_NO_YEAR`):
+it never supplies the year, folds only when its interval contains the stated
+one, is then linked by no other R2 rung to a telling that is not a graduation
+(so the graduation's year can never reach the job through it), and never
+titles the row (`temporal_timeline.A_GRADUATION_IS_TITLED_BY_ITS_CLEANEST_TELLING`
+— "Dad graduated"). The seat that GLUES — the classifier filing one event for
+two clauses, and the resolver dating that event by either half — is upstream of
+the binder and unchanged here; "Father graduated and got a job" (June 1989–June
+1990) therefore stays its own row until that seat splits the clauses.
+
+The rung is appended to `EXACT_IDENTITY_RULE_IDS` rather than slotted, and the
+binder's `RULE_VERSION` does not move: a filed binding names the family
+(`R2`), never the rung, so every byte an existing create holds is unchanged.
+
 ## Consequences
 
 * Two new record families and two new directories; two modules after I2b

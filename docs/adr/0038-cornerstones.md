@@ -146,3 +146,31 @@ things: either the point or the span.
   we started Etherfuse") is an alternate beside the stated 2020 one, with one
   contradiction card.
 
+## Amendment (v411, owner 2026-10-10) — the narrator is not the deceased
+
+His calculated timeline drew nine tellings of his father's death as "Your
+death" and raised a "your death" contradiction card. One telling, "Father died
+of COVID in Mesa", had been filed under `subject_mention: "self"` — the
+extractor subjected the narrator, not the man who died — and the death row of
+`temporal_timeline.KIND_SENTENCES` writes `{whose} death`, which an owner
+subject turns into "your". `cornerstones.node_status` already read whose death
+a node is off its label's possessor; the TITLE and the CARD did not.
+
+The rule (`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`): the owner
+narrates his vault and is never its deceased. A death or loss telling filed
+under him whose own words name the deceased by a relation word or a name
+(`identity_resolution.deceased_named_in`) is re-subjected to that person through
+the roster (`identity_resolution.deceased_ref`), or to the words themselves when
+the roster cannot say who — the owner is dropped, never kept. An age claim
+filed under him ("when I was like 21") is his own age and keeps his subject. A death node's
+subjects never hold the owner, it is titled and asked from the deceased, and a
+death naming nobody but the narrator ("Nearly died in the crash") is titled and
+asked in its own words. The binder reads the same thing in its view of the
+telling (`episode_binder.narrator_resubjected`), so R2b buckets the telling under
+the man who died. It is a reading: the receipt keeps what the extractor wrote,
+and the fold's findings (`death_resubjected_from_the_narrator`,
+`owner_dropped_from_death_subjects`, `narrator_death_titled_in_its_own_words`)
+say what was read instead. "While he narrates" is every vault today — nothing
+writes a death claim about the owner (`temporal_timeline._owner_death` is a
+contract only); one written in future will be its own explicitly-ruled record.
+

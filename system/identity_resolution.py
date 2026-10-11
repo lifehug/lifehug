@@ -2939,8 +2939,309 @@ def record_view(record: object, roster: object, *, entity_type: str = "person") 
     }
 
 
+# --------------------------------------------------------------------------
+# v411: the narrator is not the deceased
+# --------------------------------------------------------------------------
+
+#: v411 (owner, 2026-10-10). His calculated timeline drew an episode of nine
+#: tellings of his FATHER's death (COVID, January 2021) as *"Your death"*, and
+#: the full republish raised a *"your death"* contradiction card. Every one of
+#: the nine says whose death it was ("Father's death", "Father dies of COVID",
+#: "James Taylor's death"); one of them, *"Father died of COVID in Mesa"*, was
+#: filed with ``subject_mention: "self"`` because the extractor subjected the
+#: narrator who told it rather than the man who died, and the title composer
+#: wrote that subject's possessive through `temporal_timeline.OWNER_REFERENCE_REWRITES`
+#: ("self" -> "your"). The owner is alive: he is the one telling it.
+#:
+#: THE RULE. The owner narrates his own vault, so he is never the deceased in
+#: it. A death or loss telling whose OWN words name the deceased — by a relation
+#: word or a name (:func:`deceased_named_in`) — while its subject is the owner
+#: is about the deceased those words name: it is re-subjected to them through
+#: the roster (:func:`deceased_ref`, the ordinary resolver plus the roster's
+#: own ``relationship`` field), and when the roster cannot say who, to the words
+#: themselves — the owner is DROPPED from its subjects rather than kept. A death
+#: node's subjects never contain the owner, its title is composed from the
+#: deceased ("James Taylor's death"), never from an owner subject, and no
+#: "your death" card can be derived while he narrates. This is a READING made
+#: at fold time and in the binder's view of a telling — the receipt still says
+#: what the extractor wrote, and the diagnostics say what was read instead.
+#:
+#: "While the owner narrates" is every vault today: nothing in the framework
+#: writes a death claim ABOUT the owner (`temporal_timeline._owner_death` is a
+#: contract only, design §3.4). If one is ever written it will be its own
+#: explicitly-ruled record, not a telling the classifier subjected to him.
+THE_NARRATOR_IS_NOT_THE_DECEASED = (
+    "the owner narrates his vault and is never its deceased: a death or loss "
+    "telling whose own words name the deceased by a relation word or a name "
+    "(\"Father died of COVID\", \"James Taylor's death\") while its subject is "
+    "the owner is re-subjected to the person those words name through the "
+    "roster, or, when the roster cannot say who, to the words themselves - the "
+    "owner is dropped, never kept; a death's subjects never contain the owner "
+    "and its title and cards are composed from the deceased, never \"your death\""
+)
+
+#: The event kinds :data:`THE_NARRATOR_IS_NOT_THE_DECEASED` reads as a death.
+DEATH_EVENT_KINDS = ("death", "loss")
+
+#: Words that say a death happened. Whole tokens; a hyphenated word is read
+#: through its parts ("near-death" holds "death").
+DEATH_WORDS = frozenset({
+    "death", "deaths", "died", "dies", "die", "dying", "passed", "passing",
+    "funeral",
+})
+
+#: Words that may open a death title before whose it is ("My dad's death",
+#: "The death of James Taylor"). Skipped, never read as the deceased.
+_DECEASED_DETERMINERS = frozenset({"my", "our", "the", "his", "her", "their", "a"})
+
+#: Words a capitalized title may open with that are never a person
+#: ("Nearly died in the crash", "Almost died"). Adverbs in ``-ly`` are refused
+#: by shape as well.
+_NOT_A_DECEASED = frozenset({
+    "almost", "nearly", "never", "then", "when", "after", "before", "also",
+    "who", "finally", "suddenly", "unexpectedly", "news", "grief", "learning",
+    "hearing", "begins", "processing", "remembering", "mourning", "wake",
+})
+
+_DEATH_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z.\-]*(?:['\u2019]s|s['\u2019])?")
+
+
+def _bare(token: str) -> tuple[str, bool]:
+    """``(the word without its possessive, whether it carried one)``."""
+    body = token.replace("\u2019", "'")
+    if body.endswith("'s"):
+        return body[:-2], True
+    if body.endswith("s'"):
+        return body[:-1], True
+    return body, False
+
+
+def _is_death_word(token: str) -> bool:
+    word = _bare(token)[0].casefold()
+    return word in DEATH_WORDS or any(part in DEATH_WORDS for part in word.split("-"))
+
+
+def deceased_named_in(event_mention: object, *, owner_names: object = ()) -> str:
+    """The words a death title names its deceased by, or ``""``
+    (:data:`THE_NARRATOR_IS_NOT_THE_DECEASED`).
+
+    Read from the title's own words, in two shapes and nothing else:
+
+    * WHOSE, before the death word — "Father died of COVID in Mesa" ->
+      ``Father``; "James Taylor's death" -> ``James Taylor``; "My dad's death"
+      -> ``dad``; "Dave's father's death" (his own name, then whose) ->
+      ``father``. The run must be possessive ("Father's near-death and
+      death") or stand directly before the death word ("Father dies");
+    * OF WHOM, after it — "The death of James Taylor" -> ``James Taylor``.
+
+    A run is a person only when every word of it is a relation word
+    (`RELATIONSHIP_MENTION_WORDS`, singular or plural) or a name: a
+    capitalized word, or any word that carries the possessive. The owner's own
+    words ("I", "self", his own names) and the openers a title starts with
+    that are never somebody ("Nearly died", "Begins processing father's
+    death") name nobody, and nor does a title with no death word at all.
+    """
+    text = collapsed_text(event_mention)
+    if not text:
+        return ""
+    tokens = _DEATH_TOKEN_RE.findall(text)
+    if not tokens:
+        return ""
+    owner_keys = {normalized_mention_key(name) for name in owner_names or ()
+                  if normalized_mention_key(name)}
+    # Whole spellings only: his father shares his surname, so "Taylor" alone
+    # is never read as the owner.
+    owner_words = set(OWNER_SUBJECT_MENTIONS) | set(OWNER_POSSESSIVE_WORDS)
+
+    def is_owner(word: str) -> bool:
+        key = normalized_mention_key(word)
+        return key in owner_words or key in owner_keys
+
+    def is_person_word(token: str) -> bool:
+        word, possessive = _bare(token)
+        key = normalized_mention_key(word)
+        if not key or is_owner(word) or key in _DECEASED_DETERMINERS:
+            return False
+        if key in _NOT_A_DECEASED or _is_death_word(word):
+            return False
+        if relation_word_stem(key) or IN_LAW_RE.search(word):
+            return True
+        if key.endswith("ly") and not possessive:
+            return False
+        return possessive or word[:1].isupper()
+
+    first = next((index for index, token in enumerate(tokens) if _is_death_word(token)), None)
+    if first is None:
+        return ""
+    # WHOSE: the run before the death word, determiners and the owner's own
+    # possessive skipped from the front ("my dad's death", "Dave's father's death").
+    lead = list(tokens[:first])
+    while lead and (normalized_mention_key(_bare(lead[0])[0]) in _DECEASED_DETERMINERS
+                    or (is_owner(_bare(lead[0])[0]) and _bare(lead[0])[1] and len(lead) > 1)):
+        lead.pop(0)
+    if lead:
+        # The run that ends at the first possessive, or the whole lead when it
+        # stands directly before the death word ("Father dies of COVID").
+        cut = next((index for index, token in enumerate(lead) if _bare(token)[1]), None)
+        run = lead[: cut + 1] if cut is not None else lead
+        if all(is_person_word(token) for token in run):
+            return " ".join(_bare(token)[0] for token in run)
+        return ""
+    # OF WHOM: "The death of James Taylor", "Passing of my grandmother".
+    rest = list(tokens[first + 1:])
+    if not rest or normalized_mention_key(rest[0]) != "of":
+        return ""
+    rest = rest[1:]
+    while rest and normalized_mention_key(_bare(rest[0])[0]) in _DECEASED_DETERMINERS:
+        rest.pop(0)
+    run: list[str] = []
+    for token in rest:
+        if not is_person_word(token):
+            break
+        run.append(_bare(token)[0])
+        if _bare(token)[1]:
+            break
+    return " ".join(run) if run and not any(is_owner(word) for word in run) else ""
+
+
+def deceased_ref(mention: object, roster: object, *, evidence_ref: object = "",
+                 now: object = None) -> str:
+    """The roster ref of the person ``mention`` names, or ``""``.
+
+    The ordinary resolver first (:func:`resolve_mention` — names, aliases, the
+    owner's possessive read as his "my"); then, for a bare relation word the
+    roster carries no alias for, the ONE roster person whose own
+    ``relationship`` is that word (``father`` -> the row saying ``father``, or
+    the only ``parent`` when exactly one parent is on the roster). Several
+    holders, or none, resolve nobody.
+    """
+    text = collapsed_text(mention)
+    if not text:
+        return ""
+    try:
+        record = resolve_mention(text, roster=roster, evidence_ref=evidence_ref or "deceased",
+                                 now=now)
+    except Exception:  # noqa: BLE001 - an unreadable roster resolves nobody
+        record = None
+    if record is not None and collapsed_text(getattr(record, "resolution", "")) == "same":
+        return collapsed_text(getattr(record, "resolved_ref", ""))
+    word = relation_word_stem(text) or relation_word_stem(
+        owner_possessive_as_my(text).removeprefix("my "))
+    if not word:
+        return ""
+    try:
+        index = roster_index(roster)
+    except Exception:  # noqa: BLE001
+        return ""
+    exact = [ref for ref, relation in index.relationship_of.items()
+             if collapsed_text(relation) == word]
+    if len(exact) == 1:
+        return exact[0]
+    if exact:
+        return ""
+    wanted = RELATIONSHIP_MENTION_WORDS.get(word, frozenset())
+    holders = [ref for ref, relation in index.relationship_of.items()
+               if collapsed_text(relation) in wanted]
+    return holders[0] if len(holders) == 1 else ""
+
+
+# --------------------------------------------------------------------------
+# v411: a graduation clause, and whether another event is glued to it
+# --------------------------------------------------------------------------
+
+#: The words that say a graduation happened (whole tokens). Read by
+#: `episode_binder.ONE_GRADUATION_TOLD_MANY_WAYS_IS_ONE_ROW` (rung R2e) and by
+#: `temporal_timeline.A_GRADUATION_IS_TITLED_BY_ITS_CLEANEST_TELLING`; it lives
+#: here because the fold may never import the binder.
+GRADUATION_WORDS = frozenset({"graduate", "graduated", "graduates", "graduating",
+                              "graduation", "graduations"})
+
+#: What separates two clauses of one glued title.
+_GLUE_RE = re.compile(r"\s*(?:[,;]|\band then\b|\bthen\b|\band\b|&)\s*", re.IGNORECASE)
+
+#: Verbs that make a second clause an EVENT ("got San Diego job"); a word in
+#: ``-ed`` of five letters or more counts too ("moved", "started").
+_SECOND_EVENT_VERBS = frozenset({
+    "got", "get", "gets", "getting", "took", "take", "began", "begins", "became",
+    "becomes", "went", "goes", "had", "has", "lost", "found", "landed", "left",
+    "met", "wed", "bought", "sold", "built", "quit", "joined", "moved", "married",
+    "started", "hired", "retired", "born", "died",
+})
+
+#: A word before the graduation word that makes the title about something else
+#: near it ("Party after Dad's graduation").
+_GRADUATION_ADJUNCTS = frozenset({"after", "before", "during", "since", "until", "for",
+                                  "party", "celebration", "dinner", "trip", "gift",
+                                  "missed", "skipped", "at"})
+
+#: Words that open a graduation title without naming who ("My graduation").
+_GRADUATION_DETERMINERS = frozenset({"my", "our", "the", "his", "her", "a", "s"})
+
+#: Words after the graduation word that are not a school's name.
+_NOT_A_SCHOOL = frozenset({"from", "school", "class", "degree", "diploma", "ceremony",
+                           "with", "the", "and", "his", "her", "my", "our", "in", "of",
+                           "at", "on", "year"})
+
+
+@dataclass(frozen=True)
+class GraduationReading:
+    """What :func:`graduation_clause` reads off one title."""
+
+    clause: str
+    lead: tuple
+    glued: bool
+    institution: frozenset
+
+
+def graduation_clause(label: object) -> "GraduationReading | None":
+    """The graduation clause of a title, the words leading it (who), whether
+    another event is glued to it, and the school words it names — or ``None``
+    when the title tells no graduation. Pure.
+
+    "Dad graduated, got San Diego job" -> clause "Dad graduated", lead
+    ``("dad",)``, glued; "Dad graduates college" -> institution ``{"college"}``;
+    "Party after Dad's graduation" -> ``None`` (about something near it).
+    """
+    text = collapsed_text(label)
+    if not text:
+        return None
+    clauses = [part for part in _GLUE_RE.split(text) if collapsed_text(part)]
+    found = None
+    for position, clause in enumerate(clauses):
+        tokens = normalized_mention_key(clause).split()
+        hit = next((index for index, token in enumerate(tokens) if token in GRADUATION_WORDS),
+                   None)
+        if hit is not None:
+            found = (position, tokens, hit)
+            break
+    if found is None:
+        return None
+    position, tokens, hit = found
+    if any(token in _GRADUATION_ADJUNCTS for token in tokens[:hit]):
+        return None
+    lead = tuple(token for token in tokens[:hit] if token not in _GRADUATION_DETERMINERS)
+    glued = any(
+        word in _SECOND_EVENT_VERBS or (len(word) > 4 and word.endswith("ed")
+                                        and word not in GRADUATION_WORDS)
+        for other, clause in enumerate(clauses) if other != position
+        for word in normalized_mention_key(clause).split()
+    )
+    after = frozenset(token for token in tokens[hit + 1:]
+                      if len(token) >= 3 and token not in _NOT_A_SCHOOL)
+    return GraduationReading(clause=collapsed_text(clauses[position]), lead=lead,
+                             glued=glued, institution=after)
+
+
 __all__ = [
     "CANDIDATE_BASES",
+    "DEATH_EVENT_KINDS",
+    "DEATH_WORDS",
+    "THE_NARRATOR_IS_NOT_THE_DECEASED",
+    "GRADUATION_WORDS",
+    "GraduationReading",
+    "graduation_clause",
+    "deceased_named_in",
+    "deceased_ref",
     "DETERMINISTIC_REASONS",
     "EDGE_ID_PREFIX",
     "ERROR_CODES",

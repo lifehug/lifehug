@@ -388,7 +388,15 @@ from temporal_claims import (  # noqa: E402
 #: opens no earlier than his earliest-memory age
 #: (:data:`A_REMEMBERED_STORY_OPENS_AFTER_INFANCY`). The same claims calculate
 #: to different bounds and `remembered_story_placed` findings.
-CALCULATION_RULE_VERSION = "timeline-rules:28"
+#: timeline-rules:29 (v411, owner 2026-10-10, "the owner never dies on his own
+#: timeline" and "put them together"): a death telling the extractor filed
+#: under the narrator is read as the death its own words name, a death node's
+#: subjects never hold the owner and it is titled and asked from the deceased
+#: (`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`); a graduation told
+#: many ways is titled by its cleanest telling
+#: (:data:`A_GRADUATION_IS_TITLED_BY_ITS_CLEANEST_TELLING`). The same claims
+#: calculate to different subjects, labels, cards and findings.
+CALCULATION_RULE_VERSION = "timeline-rules:29"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -1704,6 +1712,150 @@ def _resolve_subjects(
     records.update(rule_records)
     records.update(supplied)
     return resolved, records, by_mention
+
+
+#: v411. Reported, never raised: one death telling the extractor filed under
+#: the narrator, re-subjected to the deceased its own words name
+#: (`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`). ``now`` is the
+#: roster ref when the roster knows who, else the words themselves.
+DIAGNOSTIC_DEATH_RESUBJECTED = "death_resubjected_from_the_narrator"
+
+#: v411. Reported, never raised: the owner dropped from a death node's
+#: subjects, and the subject the node is drawn for instead.
+DIAGNOSTIC_OWNER_DROPPED_FROM_A_DEATH = "owner_dropped_from_death_subjects"
+
+#: v411. Reported, never raised: a death node whose tellings name nobody but
+#: the narrator ("Nearly died in the crash"). It is titled and asked in its own
+#: words, never as "your death" and never as "When did you die?".
+DIAGNOSTIC_NARRATOR_DEATH_IN_ITS_OWN_WORDS = "narrator_death_titled_in_its_own_words"
+
+
+def _is_owner_handle(subject: object, owner: object, own_refs: object = ()) -> bool:
+    """Is this subject handle the owner — his ref, one of his roster rows, or a
+    word that names nobody but him ("self", "the narrator")?"""
+    text = collapsed_text(subject)
+    if not text:
+        return False
+    if text == collapsed_text(owner) or text in set(own_refs or ()):
+        return True
+    return normalized_mention_key(text) in ident.OWNER_SUBJECT_MENTIONS \
+        or is_owner_reference_only(text)
+
+
+def _reads_as_a_death(claim: dict, deceased: str) -> bool:
+    """A death or loss kind, or a `moment` whose title the cornerstones' own
+    strict reading calls a death ("Father dies of COVID")."""
+    kind = collapsed_text(claim.get("event_kind"))
+    if kind in ident.DEATH_EVENT_KINDS:
+        return True
+    if kind not in ("", KIND_WILDCARD_MOMENT):
+        return False
+    return cs.milestone_of_label(claim.get("event_mention"),
+                                 subject_words=(deceased,)) == "death"
+
+
+def _the_narrator_is_not_the_deceased(claims: list, *, owner: str, roster_snapshot: object,
+                                      owner_names: object = (), now: object = None
+                                      ) -> tuple[list, list]:
+    """`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`, over the
+    resolved claims: ``(claims, findings)``.
+
+    A death claim whose subject is the owner and whose own title names the
+    deceased (`identity_resolution.deceased_named_in`) is handed on with
+    ``subject_ref`` set to that person's roster ref
+    (`identity_resolution.deceased_ref`), or to the words themselves when the
+    roster cannot say who. ``subject_mention`` is left as filed, so the id the
+    claim used to mint is still arithmetic and
+    :data:`AN_IDENTITY_RE_KEY_IS_A_WAY_A_NODE_ID_MOVES` publishes the redirect
+    for a claim that carried no ``event_ref`` of its own. The receipt itself
+    is never edited.
+    """
+    own_refs = set(ident.owner_name_refs(roster_snapshot, owner_names) or ())
+    out: list = []
+    findings: list = []
+    for claim in claims:
+        if not isinstance(claim, dict):
+            out.append(claim)
+            continue
+        ref = collapsed_text(claim.get("subject_ref"))
+        mention = collapsed_text(claim.get("subject_mention"))
+        about_owner = (_is_owner_handle(ref, owner, own_refs) if ref
+                       else _is_owner_handle(mention, owner, own_refs)
+                       or normalized_mention_key(mention) in {
+                           normalized_mention_key(name) for name in owner_names or ()})
+        if not about_owner or collapsed_text(claim.get("claim_type")) == "age":
+            # An AGE filed under the narrator is HIS age ("Grandpa died when I
+            # was 14", "when I was like 21"): it is the evidence he lived the
+            # death, measured from his own birth, and re-subjecting it would
+            # read his age as the dead man's.
+            out.append(claim)
+            continue
+        deceased = ident.deceased_named_in(claim.get("event_mention"),
+                                           owner_names=owner_names)
+        if not deceased or not _reads_as_a_death(claim, deceased):
+            out.append(claim)
+            continue
+        person = ident.deceased_ref(deceased, roster_snapshot,
+                                    evidence_ref=_source_key(claim) or claim.get("claim_id"),
+                                    now=now)
+        if person and person in own_refs:
+            out.append(claim)
+            continue
+        now_subject = person or deceased
+        out.append({**claim, "subject_ref": now_subject})
+        findings.append({
+            "finding": DIAGNOSTIC_DEATH_RESUBJECTED,
+            "claim_id": collapsed_text(claim.get("claim_id")),
+            "event_mention": collapsed_text(claim.get("event_mention")),
+            "was": ref or mention,
+            "now": now_subject,
+            "deceased_mention": deceased,
+            "resolved": bool(person),
+            "rule": ident.THE_NARRATOR_IS_NOT_THE_DECEASED,
+        })
+    return out, findings
+
+
+def _death_group_deceased(group: dict, owner: str) -> list:
+    """`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED` on one group, in
+    place: a death group's subjects lose the owner, and its subject is the one
+    roster person it names (else its first other subject). Returns the
+    findings. A death group naming nobody but the owner is marked to be
+    titled and asked in its own words (:data:`DIAGNOSTIC_NARRATOR_DEATH_IN_ITS_OWN_WORDS`)."""
+    if collapsed_text(group.get("event_kind")) not in ident.DEATH_EVENT_KINDS:
+        return []
+    subjects = list(group.get("subjects") or ())
+    others = [ref for ref in subjects if not _is_owner_handle(ref, owner)]
+    node_id = collapsed_text(group.get("node_id"))
+    if not others:
+        if collapsed_text(group.get("event_kind")) != "death":
+            return []
+        group["narrator_death"] = True
+        return [{"finding": DIAGNOSTIC_NARRATOR_DEATH_IN_ITS_OWN_WORDS, "node_id": node_id,
+                 "rule": ident.THE_NARRATOR_IS_NOT_THE_DECEASED}]
+    findings: list = []
+    if len(others) != len(subjects):
+        group["subjects"] = sorted(others)
+        findings.append({"finding": DIAGNOSTIC_OWNER_DROPPED_FROM_A_DEATH, "node_id": node_id,
+                         "dropped": sorted(set(subjects) - set(others)),
+                         "rule": ident.THE_NARRATOR_IS_NOT_THE_DECEASED})
+    people = sorted({ref for ref in others if ref.startswith("person/")})
+    subject = collapsed_text(group.get("subject"))
+    if len(people) == 1:
+        wanted = people[0]
+    elif subject in others:
+        wanted = subject
+    else:
+        wanted = sorted(others)[0]
+    if wanted != subject:
+        group["subject"] = wanted
+        if findings:
+            findings[-1]["subject"] = wanted
+        else:
+            findings.append({"finding": DIAGNOSTIC_OWNER_DROPPED_FROM_A_DEATH,
+                             "node_id": node_id, "dropped": [], "subject": wanted,
+                             "rule": ident.THE_NARRATOR_IS_NOT_THE_DECEASED})
+    return findings
 
 
 def _is_owner_birth_group(group: dict, owner: str) -> bool:
@@ -3107,6 +3259,24 @@ def _subject_display(subject: str, claims: list[dict], roster_names: dict, *,
     return subject
 
 
+def _death_display(group: dict, roster_names: dict) -> str:
+    """Who a death node is FOR, in words — the deceased, never a telling's
+    owner mention (`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`).
+    ``""`` for anything that is not a death of somebody named."""
+    if collapsed_text(group.get("event_kind")) not in ident.DEATH_EVENT_KINDS \
+            or group.get("narrator_death"):
+        return ""
+    subject = collapsed_text(group.get("subject"))
+    return collapsed_text(roster_names.get(subject)) or subject
+
+
+def _spoken_kind(group: dict) -> object:
+    """The kind a node's title and questions are worded by: its own, except a
+    death naming nobody but the narrator, which is worded in its own words
+    (:data:`DIAGNOSTIC_NARRATOR_DEATH_IN_ITS_OWN_WORDS`)."""
+    return None if group.get("narrator_death") else group.get("event_kind")
+
+
 def _roster_names(roster_snapshot: object) -> dict:
     """``ref -> display name`` from the roster snapshot, or an empty map."""
     try:
@@ -3335,6 +3505,12 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
             if born not in group["subjects"]:
                 group["subjects"].append(born)
                 group["subjects"].sort()
+        # v411, `identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`: the
+        # same seat and the same reason as the birth rule above — a death is
+        # the death OF somebody, and while he narrates it is never the owner's.
+        findings = _death_group_deceased(group, owner_ref)
+        if findings:
+            group["_narrator_findings"] = findings
     return groups
 
 
@@ -7295,6 +7471,13 @@ def derive_calculated_timeline(
         owner_ref=owner,
         owner_names=owner_names,
     )
+    # v411, `identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`: a death
+    # telling filed under the narrator is read as the death its words name,
+    # BEFORE grouping, so every reader below sees the deceased as its subject.
+    resolved, narrator_findings = _the_narrator_is_not_the_deceased(
+        resolved, owner=owner, roster_snapshot=roster_snapshot,
+        owner_names=owner_names, now=now)
+    diagnostics.extend(narrator_findings)
     timings["resolve"] = clock() - mark
 
     mark = clock()
@@ -7321,6 +7504,8 @@ def derive_calculated_timeline(
     groups = _group_claims(resolved, owner_ref=owner, era_views=era_views,
                            identity=identity, participation=participation,
                            births=births)
+    for node_id in sorted(groups):
+        diagnostics.extend(groups[node_id].pop("_narrator_findings", ()))
     diagnostics.extend(_anniversary_findings(groups, owner_ref=owner, births=births))
     anniversary_aliases, anniversary_alias_findings = _anniversary_rekey_aliases(
         resolved, groups=groups, owner_ref=owner, births=births)
@@ -7346,8 +7531,9 @@ def derive_calculated_timeline(
     diagnostics.extend(rekey_alias_findings)
     roster_names = _roster_names(roster_snapshot)
     displays = {
-        node_id: _subject_display(group["subject"], group["claims"], roster_names,
-                                  prefer_subject=bool(group.get("participation_domain")))
+        node_id: (_death_display(group, roster_names)
+                  or _subject_display(group["subject"], group["claims"], roster_names,
+                                      prefer_subject=bool(group.get("participation_domain"))))
         for node_id, group in groups.items()
     }
     # Timeline Fix 07: one derivation of "what is this node, in words", read by
@@ -7366,7 +7552,7 @@ def derive_calculated_timeline(
     }
     labels = {
         node_id: (collapsed_text(group.get("era_label"))
-                  or _node_label(displays[node_id], group["event_kind"],
+                  or _node_label(displays[node_id], _spoken_kind(group),
                                  what=whats[node_id],
                                  is_owner=owner_flags[node_id]))
         for node_id, group in groups.items()
@@ -8509,9 +8695,55 @@ def _node_what(group: dict, display: str) -> str:
         return era
     mentions = [collapsed_text(claim.get("event_mention")) for claim in group.get("claims", ())]
     mentions = [text for text in mentions if text]
+    graduation = _graduation_title(group)
+    if graduation:
+        return graduation
     if mentions:
         return max(mentions, key=len)
     return collapsed_text(display)
+
+
+#: v411 (the binder's rung R2e, `ONE_GRADUATION_TOLD_MANY_WAYS_IS_ONE_ROW`,
+#: and `A_GLUED_TELLING_LENDS_NO_YEAR`). A graduation told many ways
+#: is titled by its cleanest telling — never by the longest, which is the one
+#: that glued a job onto it ("Father graduated and got San Diego job").
+A_GRADUATION_IS_TITLED_BY_ITS_CLEANEST_TELLING = (
+    "a node whose tellings are all one graduation is titled by an unglued "
+    "telling: the classifier's own graduation kind first, then one stating a "
+    "year, then the shortest — never by a telling that glues another event to it"
+)
+
+
+def _graduation_title(group: dict) -> str:
+    """:data:`A_GRADUATION_IS_TITLED_BY_ITS_CLEANEST_TELLING`, or ``""``."""
+    kind = collapsed_text(group.get("event_kind"))
+    if kind not in ("graduation", "school", KIND_WILDCARD_MOMENT, ""):
+        return ""
+    rows = []
+    for claim in group.get("claims") or ():
+        text = collapsed_text(claim.get("event_mention"))
+        if not text:
+            continue
+        reading = ident.graduation_clause(text)
+        if reading is None:
+            return ""
+        rows.append((claim, text, reading))
+    if len({text for _c, text, _r in rows}) < 2:
+        return ""
+    clean = [(claim, text) for claim, text, reading in rows if not reading.glued]
+    if not clean:
+        return ""
+
+    def rank(row):
+        claim, text = row
+        record = chrono.from_dict(claim.get("temporal_value")) \
+            if isinstance(claim.get("temporal_value"), dict) else None
+        stated_year = bool(record is not None and record.earliest
+                           and str(record.earliest)[:4] == str(record.latest or "")[:4])
+        return (collapsed_text(claim.get("event_kind")) != "graduation", not stated_year,
+                len(text), text)
+
+    return sorted(clean, key=rank)[0][1]
 
 
 def _is_owner_subject(group: dict, owner: object) -> bool:
@@ -8524,6 +8756,10 @@ def _is_owner_subject(group: dict, owner: object) -> bool:
     contradiction card, the age anchor and the origin floor cannot answer the
     question four ways.
     """
+    if collapsed_text(group.get("event_kind")) in ident.DEATH_EVENT_KINDS:
+        # v411, `identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`: the
+        # owner narrates; no death is his, whatever subject a telling carries.
+        return False
     if collapsed_text(group.get("subject")) == collapsed_text(owner):
         return True
     if _birth_group_person(group, owner):
@@ -9003,7 +9239,7 @@ def _derive_work_items(
         in its milestone's own sentence, about the person it belongs to —
         "Do you know the day of your father's death?", never "Do you know the
         day for Father dies of COVID?"."""
-        kind = group.get("event_kind")
+        kind = _spoken_kind(group)
         who = displays.get(node_id, group.get("subject"))
         is_owner = bool(owner_flags.get(node_id))
         status = (cornerstone_rows or {}).get(node_id) or ("",)
