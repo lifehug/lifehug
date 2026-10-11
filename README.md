@@ -267,6 +267,7 @@ than on a score:
 | **R2b** | one subject's one **once-per-life** milestone (`ONCE_PER_SUBJECT_EVENT_KINDS`: `birth`, `child_born`, `death`, `loss`, `married`) — and, since v345, one **couple's** one wedding (`ONCE_PER_COUPLE_EVENT_KINDS`: `married`, keyed by `couple_key`) | eleven tellings of one child's birth, folded into one node |
 | **R2c** | an identical normalized label about the same named people | *"Family moved to Yucaipa"* said twice |
 | **R2d** | one moment restated in other words — three shared significant label tokens, at least one not a name | the seven *"Isaac's first check"* nodes |
+| **R2e** | one person's **graduation** in one year (v411, `ONE_GRADUATION_TOLD_MANY_WAYS_IS_ONE_ROW`): `(subject, graduation, year)`, the subject resolved through the roster ("Dad" and "Father" are one man), the year the one an unglued telling states; contradicting years, two schools and the owner's own graduations stay apart, and a telling glued to another event (*"graduated and got a job"*) lends its year to nothing (`A_GLUED_TELLING_LENDS_NO_YEAR`) | his father's 1987 graduation told six ways, one row titled *"Dad graduated"* |
 
 `R2a` chains freely because its key is arithmetic. Every other rung must form a
 **clique**: non-transitivity at group scale, and the reason a 104-telling
@@ -277,7 +278,11 @@ always wins, and no rung may move an adopted or human-authority episode. A
 person token anywhere in it — the owner's own subject names the owner's couple,
 so *"our wedding"* can never reach his parents'; and a **compound relationship
 word is never the simple word inside it**, so *mother-in-law* does not resolve
-to *mother*.
+to *mother*. **The narrator is not the deceased** (v411,
+`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`): a death telling filed
+under the owner whose own words name who died (*"Father died of COVID in
+Mesa"*) is read as about that person, in the binder's view and in the fold, so
+no death on his timeline is ever titled or asked as *"your death"*.
 
 ### The five laws that protect the drawing
 

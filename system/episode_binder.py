@@ -62,6 +62,7 @@ import episode_fold as ef  # noqa: E402
 import episode_fold_contract as efc  # noqa: E402
 import episode_routing_contract as erc  # noqa: E402
 import event_identity as ei  # noqa: E402
+import identity_resolution as ir  # noqa: E402
 import landmark_projection as lp  # noqa: E402
 import temporal_projection as tp  # noqa: E402
 import temporal_store as store  # noqa: E402
@@ -326,14 +327,21 @@ RULE_ID_RESTATEMENT = "R2d"
 #: that detail is already looking.
 RULE_ID_EXACT = "R2"
 
+#: v411. One person's graduation, told several ways in one year
+#: (:data:`ONE_GRADUATION_TOLD_MANY_WAYS_IS_ONE_ROW`).
+RULE_ID_GRADUATION = "R2e"
+
 #: Every rung in the family, in the order they are swept. The order is the
 #: order of CERTAINTY: an arithmetic reading first, a once-per-life fact next,
-#: an identical label next, a restatement last.
+#: an identical label next, a restatement next, and a graduation keyed by its
+#: year last — appended rather than slotted, so every rung id already written
+#: into a plan or a dry run keeps its position.
 EXACT_IDENTITY_RULE_IDS = (
     RULE_ID_DERIVED_READING,
     RULE_ID_MILESTONE,
     RULE_ID_SAME_LABEL,
     RULE_ID_RESTATEMENT,
+    RULE_ID_GRADUATION,
 )
 
 #: :data:`RULE_ID_DERIVED_READING`'s shape test. A telling ref with a `#` names
@@ -885,6 +893,10 @@ class TellingView:
     #: A place-containing span's own landmark words (label, where, place,
     #: city) — "Where did you serve?" — and nothing for any other telling.
     landmark_words: tuple = ()
+    #: v411 (`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`). The
+    #: deceased this death telling's own words name, when it was filed under
+    #: the narrator and is read as about them instead; ``""`` otherwise.
+    narrator_resubjected: str = ""
 
     def as_dict(self) -> dict:
         return {
@@ -914,6 +926,7 @@ class TellingView:
             "setting_places": sorted(self.setting_places),
             "eligible": self.eligible,
             "ineligible_reason": self.ineligible_reason,
+            "narrator_resubjected": self.narrator_resubjected,
         }
 
 
@@ -1580,6 +1593,40 @@ def _span_settings_of(rows: Sequence[object], mentions: Sequence[str],
     return settings, frozenset(places)
 
 
+def narrator_resubjected(claims: Sequence[object], event_kind: object,
+                         subject_mentions: Sequence[str]) -> str:
+    """The deceased a death telling filed under the narrator names, or ``""``
+    (`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`).
+
+    The binder's half of the fold's reading: when every subject the telling
+    was filed under is the owner and its own title names whose death it was
+    ("Father died of COVID in Mesa"), the view is about THAT person — its
+    subject mentions are the deceased's words, so :func:`person_tokens`, the
+    roster entities and R2b's buckets read the man who died rather than an
+    owner the rungs drop as naming nobody.
+    """
+    owner_only = bool(subject_mentions) and all(
+        normalized_mention_key(text) in OWNER_SUBJECT_MENTIONS
+        or tt.is_owner_reference_only(text) for text in subject_mentions)
+    if not owner_only:
+        return ""
+    for claim in claims or ():
+        row = claim if isinstance(claim, dict) else {}
+        deceased = ir.deceased_named_in(row.get("event_mention"))
+        if not deceased:
+            continue
+        kind = collapsed_text(row.get("event_kind")) or collapsed_text(event_kind)
+        if kind in ir.DEATH_EVENT_KINDS:
+            return deceased
+        if kind in ("", KIND_WILDCARD):
+            import cornerstones as cs  # noqa: PLC0415 - avoids an import cycle
+
+            if cs.milestone_of_label(row.get("event_mention"),
+                                     subject_words=(deceased,)) == "death":
+                return deceased
+    return ""
+
+
 def telling_views(claims: object, *, manifest: object = None,
                   era_memberships: object = None, entity_index: object = None,
                   participation_kinds: object = None,
@@ -1663,6 +1710,13 @@ def telling_views(claims: object, *, manifest: object = None,
         participants = frozenset(signature.get("participant_set") or ())
         bounds, dated = _bounds_of(rows_here)
         mentions, subject_mentions = _mention_texts(rows_here)
+        # v411, `identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`: a death
+        # telling filed under the narrator is about the deceased it names.
+        deceased = narrator_resubjected(rows_here, event_kind, subject_mentions)
+        if deceased:
+            subject_mentions = (deceased,)
+            if deceased not in mentions:
+                mentions = (*mentions, deceased)
         entities = ec.resolve_entity_set(mentions, entity_index)
         subject_entities = ec.resolve_entity_set(subject_mentions, entity_index)
         place_entities = ec.resolve_entity_set(signature.get("place_set") or (), entity_index)
@@ -1711,6 +1765,7 @@ def telling_views(claims: object, *, manifest: object = None,
             stretch=(span if span is not None
                      else ec.span_from_claims(rows_here, require_stated=False)[0]),
             landmark_words=words_by_telling.get(telling_ref, ()),
+            narrator_resubjected=deceased,
             created_at=max(
                 (collapsed_text(row.get("created_at")) for row in rows_here), default=""
             ),
@@ -3293,15 +3348,223 @@ def restatement_links(views: Mapping[str, TellingView], *, index: object = None)
     return rows
 
 
+# --------------------------------------------------------------------------
+# R2e — one person's graduation, told many ways, is one row (v411)
+# --------------------------------------------------------------------------
+
+#: v411 (owner, 2026-10-10): *"put them together."* His father's college
+#: graduation sat on his timeline six times — "Dad's graduation" (1987, a
+#: stated year), "Dad graduated" (1987, his residence-by-residence summary),
+#: "Dad graduates college" (1987, a landmark merge) and three resolver
+#: readings that glued it to the job that followed ("Dad graduated, got San
+#: Diego job" 1987–1988, "Father graduated and got San Diego job" 1987–June
+#: 1988, "Father graduated and got a job" June 1989–June 1990). His ruling:
+#: his father's graduation is ONE row.
+#:
+#: `graduation` is deliberately absent from
+#: `identity_resolution.ONCE_PER_SUBJECT_EVENT_KINDS` — high school and college
+#: are two graduations of one person — so R2b can never fold it, and this rung
+#: does not put it there. Its key is ``(subject, "graduation", year)``:
+#:
+#: * the SUBJECT is who graduated — the words before the graduation word
+#:   ("Dad", "Father", "Walter Hale's") resolved through the roster, so "Dad",
+#:   "Father" and ``person/walter-hale`` are one person; else the one roster
+#:   person the telling is about. A graduation that names nobody but the owner
+#:   ("Graduation from ASU") is never in this rung: two of HIS graduations in
+#:   one year are as likely two schools as one;
+#: * the YEAR is the year a member STATES — its own interval inside one
+#:   calendar year — and every telling of that person's graduation whose
+#:   interval contains that year (stated or where the timeline already has it,
+#:   :data:`A_MERGE_NEVER_MOVES_A_DATED_MOMENT`) folds into one episode; with
+#:   no stated year, tellings whose intervals overlap fold;
+#: * tellings with CONTRADICTING years stay apart, each keeping its own date
+#:   and the fold's ordinary contradiction treatment — a person can graduate
+#:   twice — and so do two tellings naming different schools ("high school",
+#:   "college") and an undated telling, which could be either graduation.
+ONE_GRADUATION_TOLD_MANY_WAYS_IS_ONE_ROW = (
+    "one person's graduation told several ways folds into one episode when the "
+    "dates do not contradict: key (subject, graduation, year), the year being "
+    "the one a member states, or the overlapping interval when none states "
+    "one; the subject is one person through the roster (Dad, Father and their "
+    "roster ref are one); contradicting years, different schools, undated "
+    "tellings and the owner's own graduations stay apart"
+)
+
+#: v411, the other half of the same owner ruling. A telling that GLUES a
+#: graduation to another event ("Father graduated and got a job") is two
+#: events in one title, and whichever half its date came from, it is not the
+#: graduation's date to give away: the resolver dated "Father graduated and got
+#: a job" by the San Diego stay the job was in (June 1989–June 1990), and
+#: "Dad graduated, got San Diego job" carried the graduation's 1987 onto the
+#: job. So in this rung a glued telling (a) never supplies the year — only an
+#: unglued telling states it; (b) folds into the graduation only when its own
+#: interval contains that year, and is then a graduation telling only — no
+#: other R2 rung may link it to a telling that is not a graduation, so the
+#: graduation's year can never reach the other event's episode through it;
+#: (c) never titles the folded row (`temporal_timeline` prefers an unglued,
+#: stated-year telling). The seat that glues — the classifier filing one event
+#: for two clauses, and the resolver dating the pair by either half — is
+#: upstream of the binder and is not changed here.
+A_GLUED_TELLING_LENDS_NO_YEAR = (
+    "a telling that glues a graduation to another event never supplies the "
+    "graduation's year, folds into the graduation only when its own interval "
+    "contains the stated year, is then linked to nothing that is not a "
+    "graduation, and never titles the row"
+)
+
+#: The graduation clause reader is `identity_resolution.graduation_clause` —
+#: ONE definition, read here and by the fold's title rule, which may not
+#: import the binder.
+GRADUATION_WORDS = ir.GRADUATION_WORDS
+GraduationReading = ir.GraduationReading
+graduation_clause = ir.graduation_clause
+
+
+def graduation_subject(view: TellingView, reading: GraduationReading,
+                       index: object = None) -> str:
+    """Who graduated, as one key: a roster ref, else the lead's own relation
+    word or name; ``""`` for the owner or nobody
+    (:data:`ONE_GRADUATION_TOLD_MANY_WAYS_IS_ONE_ROW`)."""
+    import relation_words as rw  # noqa: PLC0415 - avoids an import cycle
+
+    lead = tuple(token for token in reading.lead
+                 if token not in OWNER_SUBJECT_MENTIONS and token not in ir.OWNER_POSSESSIVE_WORDS)
+    if reading.lead and not lead:
+        return ""  # "My graduation", "Narrator's graduation": his own.
+    if lead:
+        # The lead as written, then in the relation word's canonical spelling
+        # ("dad" -> "father"): a three-letter alias is too short to be an
+        # index key, and "Dad" and "Father" are one man.
+        words = [rw.canonical_gendered_word(token) or token for token in lead]
+        for spelling in dict.fromkeys((" ".join(lead), " ".join(words))):
+            refs = sorted(ref for ref in ec.resolve_entity_set((spelling,), index)
+                          if collapsed_text(ref).startswith(PERSON_ENTITY_PREFIX))
+            if len(refs) == 1:
+                return refs[0]
+            if refs:
+                return ""
+        return "words:" + " ".join(words)
+    people = sorted(ref for ref in view.subject_entities
+                    if collapsed_text(ref).startswith(PERSON_ENTITY_PREFIX))
+    if len(people) == 1:
+        return people[0]
+    return ""
+
+
+def _year_of(record: object) -> str:
+    """The one calendar year an interval sits inside, or ``""``."""
+    earliest = collapsed_text(getattr(record, "earliest", "") or "")
+    latest = collapsed_text(getattr(record, "latest", "") or "")
+    if len(earliest) >= 4 and earliest[:4] == latest[:4]:
+        return earliest[:4]
+    return ""
+
+
+def _year_record(year: str) -> object:
+    return chrono.parse_stated_date(year)
+
+
+def graduation_readings(views: Mapping[str, TellingView], index: object = None) -> dict:
+    """``{telling_ref: (subject key, GraduationReading)}`` for every eligible
+    telling that tells one person's graduation (not the owner's)."""
+    out: dict = {}
+    for telling_ref in sorted(views):
+        view = views[telling_ref]
+        if not view.eligible:
+            continue
+        kind = collapsed_text(view.event_kind)
+        if kind not in ("", KIND_WILDCARD) and not kinds_compatible(kind, "graduation"):
+            continue
+        reading = graduation_clause(view.label)
+        if reading is None:
+            continue
+        subject = graduation_subject(view, reading, index)
+        if subject:
+            out[telling_ref] = (subject, reading)
+    return out
+
+
+def graduation_links(views: Mapping[str, TellingView], *, index: object = None,
+                     readings: Mapping | None = None) -> list:
+    """:data:`RULE_ID_GRADUATION` — one person's graduation in one year is one
+    episode (:data:`ONE_GRADUATION_TOLD_MANY_WAYS_IS_ONE_ROW`,
+    :data:`A_GLUED_TELLING_LENDS_NO_YEAR`)."""
+    readings = graduation_readings(views, index) if readings is None else readings
+    by_subject: dict[str, list] = {}
+    for telling_ref, (subject, _reading) in readings.items():
+        by_subject.setdefault(subject, []).append(telling_ref)
+    rows: list = []
+    for subject, refs in sorted(by_subject.items()):
+        dated = [ref for ref in refs if views[ref].bounds is not None]
+        stated = sorted({_year_of(views[ref].bounds) for ref in dated
+                         if not readings[ref][1].glued} - {""})
+        folds: list[tuple[str, list]] = []
+        if stated:
+            years = {year: _year_record(year) for year in stated}
+            for year in stated:
+                members = []
+                for ref in dated:
+                    view = views[ref]
+                    fits = [other for other, record in years.items()
+                            if _dates_agree(view.bounds, record)
+                            and _dates_agree(view.placed_bounds, record)]
+                    if fits == [year]:
+                        members.append(ref)
+                folds.append((year, members))
+        else:
+            folds.append(("", dated))
+        for year, members in folds:
+            for position, left in enumerate(members):
+                for right in members[position + 1:]:
+                    a, b = views[left], views[right]
+                    if not year and not (_dates_agree(a.bounds, b.bounds)
+                                         and _placements_agree(a, b)):
+                        continue
+                    ia, ib = readings[left][1].institution, readings[right][1].institution
+                    if ia and ib and not (ia & ib):
+                        continue
+                    who = subject.removeprefix("words:")
+                    rows.append(ExactLink(
+                        rule_id=RULE_ID_GRADUATION, left=left, right=right,
+                        key=f"graduation:{subject}:{year or 'overlap'}",
+                        reason=(f"{who} graduated once in {year}, and both tellings say so"
+                                if year else
+                                f"{who} graduated once, and both tellings' dates overlap"),
+                    ))
+    return rows
+
+
+def _lends_a_glued_year(link: ExactLink, glued: frozenset, graduations: Mapping) -> bool:
+    """:data:`A_GLUED_TELLING_LENDS_NO_YEAR` (b): a non-R2e, non-reading link
+    joining a glued telling R2e folded to a telling that is not a graduation."""
+    if link.rule_id in (RULE_ID_GRADUATION, RULE_ID_DERIVED_READING):
+        return False
+    for this, other in ((link.left, link.right), (link.right, link.left)):
+        if this in glued and other not in graduations:
+            return True
+    return False
+
+
 def exact_identity_links(views: Mapping[str, TellingView], *,
                          entity_index: object = None) -> list:
-    """Every R2 link, every rung, in :data:`EXACT_IDENTITY_RULE_IDS` order."""
-    return [
+    """Every R2 link, every rung, in :data:`EXACT_IDENTITY_RULE_IDS` order.
+
+    v411 (:data:`A_GLUED_TELLING_LENDS_NO_YEAR`): a glued telling R2e folded
+    into a graduation is linked by no other rung to a telling that is not one.
+    """
+    graduations = graduation_readings(views, entity_index)
+    graduation = graduation_links(views, index=entity_index, readings=graduations)
+    glued = frozenset(ref for link in graduation for ref in link.members
+                      if graduations[ref][1].glued)
+    others = [
         *derived_reading_links(views),
         *milestone_links(views, not_theirs=births_dated_elsewhere(views, entity_index)),
         *same_label_links(views),
         *restatement_links(views, index=entity_index),
     ]
+    if glued:
+        others = [link for link in others if not _lends_a_glued_year(link, glued, graduations)]
+    return [*others, *graduation]
 
 
 def link_refusal(link: ExactLink, units: Mapping[str, Candidate], *,

@@ -386,8 +386,22 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:28 -->
-`timeline-rules:28` — a remembered story never opens at the birth (v410,
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:29 -->
+`timeline-rules:29` — the owner never dies on his own timeline, and one
+graduation is one row (v411, owner 2026-10-10): a death or loss telling the
+extractor filed under the narrator whose own words name the deceased
+("Father died of COVID in Mesa") is read as about the deceased, re-subjected
+through the roster or, when the roster cannot say who, to the words
+themselves; a death node's subjects never hold the owner and it is titled and
+asked from the deceased ("Walter Hale's death"), never "Your death"
+(`identity_resolution.THE_NARRATOR_IS_NOT_THE_DECEASED`, findings
+`death_resubjected_from_the_narrator`, `owner_dropped_from_death_subjects`,
+`narrator_death_titled_in_its_own_words`); and a node of one graduation told
+many ways is titled by its cleanest telling, never by one that glued a job
+onto it (`temporal_timeline.A_GRADUATION_IS_TITLED_BY_ITS_CLEANEST_TELLING`;
+the fold itself is the binder's R2e,
+`episode_binder.ONE_GRADUATION_TOLD_MANY_WAYS_IS_ONE_ROW`).
+Before it, `timeline-rules:28` — a remembered story never opens at the birth (v410,
 owner 2026-10-10, *"a kid's story shouldn't span from birth; you should look
 for better context"*): a story on his own axis that his words date only by a
 life-stage phrase ("as a kid", "growing up", "childhood", "as a teenager") is
