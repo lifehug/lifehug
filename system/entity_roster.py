@@ -357,7 +357,10 @@ _SETTLED_IDENTITY_FIELDS = ("relationship", "living", "born", "died", *roster_re
                             # a grandparent is on, and the word he calls them.
                             "grandparent_side", "relation_word",
                             # v407: whose spouse an introduced in-law is.
-                            "spouse_of")
+                            "spouse_of",
+                            # v419: whose child an introduced niece/nephew/
+                            # grandchild is.
+                            "child_of")
 _SETTLED_PLACE = object()
 
 #: The two date-shaped settled fields, as a subset of the tuple above. Named
@@ -1906,6 +1909,7 @@ def ensure_introduced_relatives(*, dry_run: bool = False) -> dict:
             ensure=True,
             name=row["name"],
             spouse_of=row.get("spouse_of"),
+            child_of=row.get("child_of"),
         )
         filed += 1
     # v383 (ADR 0041): a landmark name the roster already answers to is
@@ -2050,6 +2054,7 @@ def main() -> int:
             aliases = ", ".join(row.get("aliases") or ()) or "—"
             born = f", born {row['born']}" if row.get("born") else ""
             spouse = f", spouse of {row['spouse_of']}" if row.get("spouse_of") else ""
+            spouse += f", child of {row['child_of']}" if row.get("child_of") else ""
             print(f"  {row['slug']}: {row['name']} — {row['relationship']} "
                   f"(from “{row['relationship_word']}”{born}{spouse}); aliases: {aliases}")
             for alias in row.get("contested_aliases") or ():
@@ -2061,7 +2066,8 @@ def main() -> int:
         for row in result.get("unintroduced") or ():
             print(f"    ? {row['name']} (born {row['born']}) left unintroduced — shares the "
                   f"surname of {', '.join(row['household_of'])} but {row['source_id']} states no "
-                  f"relation; say who they are to file them")
+                  f"relation; say who they are to file them — "
+                  f"{row.get('how_to_say') or roster_relations.UNINTRODUCED_HOW_TO_SAY}")
         for row in result["skipped_aliases"]:
             print(f"    ↯ “{row['alias']}” already answers to "
                   f"{', '.join(row['taken_by'])} — left alone")

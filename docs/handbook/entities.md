@@ -363,6 +363,19 @@ value, and never the owner's own spouse. An unlabeled line sharing the
 household's surname (a son? a nephew?) is NOT guessed: nothing is filed and
 the `--dry-run` says who was left unintroduced and why, so the owner can say.
 
+Since v419 he can say it in the source: "(son)", "(daughter)" or "(child)"
+(also kid, boy, girl; any case) in the parenthetical of a line under an
+introduced sibling or child — that household's spouse line may sit between —
+introduces that relative's child
+(`roster_relations.A_CHILD_LINE_UNDER_A_RELATIVE_IS_THAT_RELATIVES_CHILD`):
+`relationship: other`, `child_of: <slug>`, and the dry-run word `nephew`,
+`niece`, `nephew or niece` (under a sibling) or `grandson`, `granddaughter`,
+`grandchild` (under a child), with the born date from the line. Never the
+owner's own child; a line under the owner's own name or under nobody files
+nothing. `child_of` is a settled field, so a roster refresh keeps it. The
+nephew/niece word is shown on the dry run only: `relation_word` on a row is the
+name the owner calls the person by, not their relation.
+
 Since v402 it reads only STANDING entries: one a refile or retire withdrew
 (its identity claim superseded — `landmark_projection.withdrawn_source_ids`,
 the drawing's own reading) introduces nobody. A `partnerships` entry

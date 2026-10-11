@@ -230,7 +230,11 @@ Since v407 that pass also reads a household memo: a "Name — date
 "(husband)" line under them files the in-law with `spouse_of`
 (`A_SPOUSE_LINE_UNDER_A_RELATIVE_IS_THAT_RELATIVES_SPOUSE`), and an unlabeled
 same-surname line is reported unintroduced, never guessed
-(`A_HOUSEHOLD_SURNAME_IS_NOT_A_RELATION`). A named stranger's birth is never
+(`A_HOUSEHOLD_SURNAME_IS_NOT_A_RELATION`). Since v419 the owner can say it:
+"(son)"/"(daughter)"/"(child)" on a line under an introduced sibling or child
+(their spouse's line skipped) files that relative's child — relationship
+`other`, `child_of` the relative, word nephew/niece/grandchild
+(`A_CHILD_LINE_UNDER_A_RELATIVE_IS_THAT_RELATIVES_CHILD`). A named stranger's birth is never
 on the owner's axis (`axis_membership.A_NAMED_OTHER_SUBJECT_IS_NEVER_THE_OWNERS`).
 Since v402 that daily pass (the hosted `roster_introductions` step) reads only
 STANDING entries — a refiled or retired entry introduces nobody

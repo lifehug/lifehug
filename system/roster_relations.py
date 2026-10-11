@@ -1834,6 +1834,19 @@ A_HOUSEHOLD_SURNAME_IS_NOT_A_RELATION = (
     "introduces nobody; it is reported unintroduced so the owner can say"
 )
 UNINTRODUCED_HOUSEHOLD_REASON = "household_surname_relation_unstated"
+#: (d) v419 (owner, 2026-10-11: "they are Britt's kids"). The way to SAY it in
+#: the source: "(son)/(daughter)/(child)" in the parenthetical of the line
+#: under an introduced sibling or child (spouse lines of that household are
+#: skipped over) introduces that relative's child: relationship `other`, a
+#: `child_of` pointer to the relative's slug, the nephew/niece/grandchild word
+#: as `relationship_word` — never the owner's own child.
+A_CHILD_LINE_UNDER_A_RELATIVE_IS_THAT_RELATIVES_CHILD = (
+    "a '(son)/(daughter)/(child)' list line under an introduced sibling or "
+    "child (their spouse's line skipped) introduces that relative's child "
+    "(relationship other, child_of the relative), never the owner's own"
+)
+UNINTRODUCED_HOW_TO_SAY = (
+    "\"(son)\", \"(daughter)\" or \"(child)\" on the line introduces the relative's child")
 
 _QUALIFIERS = (r"(?:(?:older|younger|elder|oldest|youngest|big|little|half|step|twin)"
                r"[-\s]+)*")
@@ -1842,11 +1855,21 @@ _ENTRY_RE = re.compile(
     rf"\s*[\u2014\u2013:-]+\s*(?P<rest>.*)$")
 _PAREN_RE = re.compile(r"\(([^)]*)\)")
 _SPOUSE_PAREN_RE = re.compile(r"^\s*(husband|wife|spouse)\b", re.IGNORECASE)
+_CHILD_PAREN_RE = re.compile(r"^\s*(son|daughter|child|kid|boy|girl)\b", re.IGNORECASE)
 _BULLET_RE = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+")
 _SPOUSE_IN_LAW = {
     ("sibling", "husband"): "brother-in-law", ("sibling", "wife"): "sister-in-law",
     ("sibling", "spouse"): "sibling-in-law", ("child", "husband"): "son-in-law",
     ("child", "wife"): "daughter-in-law", ("child", "spouse"): "child-in-law",
+}
+#: v419: (the relative's relationship, the parenthetical word) -> the word.
+_CHILD_WORD = {
+    ("sibling", "son"): "nephew", ("sibling", "daughter"): "niece",
+    ("sibling", "boy"): "nephew", ("sibling", "girl"): "niece",
+    ("sibling", "child"): "nephew or niece", ("sibling", "kid"): "nephew or niece",
+    ("child", "son"): "grandson", ("child", "daughter"): "granddaughter",
+    ("child", "boy"): "grandson", ("child", "girl"): "granddaughter",
+    ("child", "child"): "grandchild", ("child", "kid"): "grandchild",
 }
 
 
@@ -2029,6 +2052,42 @@ def relative_birth_introductions(claims: object, *, roster: object = (),
         spouse = _SPOUSE_PAREN_RE.match(entry["paren"] or "")
         above = _entry_of(lines[at - 1]) if at > 0 else None
         record, source = item["record"], item["source"]
+        kid = _CHILD_PAREN_RE.match(entry["paren"] or "")
+        if kid is not None and spouse is None:
+            # v419: the nearest introduced sibling/child above, in this list,
+            # skipping that household's spouse and child lines.
+            of = None
+            for j in range(at - 1, _list_block(lines, at).start - 1, -1):
+                above_entry = _entry_of(lines[j])
+                if above_entry is None:
+                    break
+                aslug = ir.normalized_mention_key(above_entry["name"]).replace(" ", "-")
+                rostered = (find_by_alias(roster, above_entry["name"]) or [{}])[0]
+                if (_SPOUSE_PAREN_RE.match(above_entry["paren"] or "")
+                        or _CHILD_PAREN_RE.match(above_entry["paren"] or "")
+                        or any(out.get(aslug, {}).get(k) or rostered.get(k)
+                               for k in ("spouse_of", "child_of"))):
+                    continue
+                found = relative_of(above_entry["name"], lines)
+                if found is not None and (found[1], kid.group(1).casefold()) in _CHILD_WORD:
+                    of = found
+                if found is None and not above_entry["paren"]:
+                    continue    # an unlabeled, still-unintroduced line says nothing
+                break
+            if of is not None:
+                slug = ir.normalized_mention_key(entry["name"]).replace(" ", "-")
+                if slug and slug not in out and not known(entry["name"]):
+                    out[slug] = {
+                        "name": entry["name"], "slug": slug, "relationship": FALLBACK_RELATIONSHIP,
+                        "relationship_word": _CHILD_WORD[(of[1], kid.group(1).casefold())],
+                        "child_of": of[0], "aliases": (),
+                        "source_id": collapsed_text_of(source.get("source_id")),
+                        "mention": item["mention"], "born": record.best,
+                        "born_basis": record.basis or "stated",
+                        "rule": A_CHILD_LINE_UNDER_A_RELATIVE_IS_THAT_RELATIVES_CHILD,
+                    }
+                    origin[slug] = (item["path"], at)
+                continue
         if spouse is not None and above is not None:
             of = relative_of(above["name"], lines)
             word = _SPOUSE_IN_LAW.get((of[1], spouse.group(1).casefold())) if of else None
@@ -2065,6 +2124,7 @@ def relative_birth_introductions(claims: object, *, roster: object = (),
                 "name": entry["name"], "born": item["record"].best,
                 "source_id": collapsed_text_of(item["source"].get("source_id")),
                 "household_of": household, "reason": UNINTRODUCED_HOUSEHOLD_REASON,
+                "how_to_say": UNINTRODUCED_HOW_TO_SAY,
                 "rule": A_HOUSEHOLD_SURNAME_IS_NOT_A_RELATION})
     placed = dict(roster_recorded_relations(roster))
     kept: list[dict] = []
