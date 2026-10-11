@@ -560,13 +560,16 @@ class WiringTests(unittest.TestCase):
             ["documents", "file", "/x", "--ids", "a/b", "--commit", "HEAD", "--dry-run"])
         self.assertEqual((args.documents_action, args.ids, args.dry_run), ("file", ["a/b"], True))
 
-    def test_framework_ships_the_code_and_fixture_and_never_the_letters(self):
+    def test_framework_ships_the_code_and_never_the_fixture_or_the_letters(self):
         manifest = json.loads((SYSTEM / "version.json").read_text(encoding="utf-8"))
         shipped = set(manifest["framework_files"])
         for name in ("system/documents.py", "system/letter_people.py", "system/mini_yaml.py",
                      "system/family_letters.py", "tests/test_v412_letters_documents_file.py",
-                     "tests/walkthrough_letters.py", "tests/fixtures/letters_repo/letters/people.yaml"):
+                     "tests/walkthrough_letters.py"):
             self.assertIn(name, shipped)
+        # v418 (A_FIXTURE_NEVER_SHIPS_TO_A_VAULT): the fixture archive is test
+        # data; shipping it put made-up transcripts into real vaults.
+        self.assertFalse(any(path.startswith("tests/fixtures/") for path in shipped))
         self.assertFalse(any(path.startswith("sources/letters") for path in shipped))
         self.assertGreaterEqual(int(manifest["version"]), 412)
 

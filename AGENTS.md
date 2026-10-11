@@ -38,7 +38,9 @@ A code change is not done until its paper trail ships **in the same pass**:
    Any new file the upgrade path should distribute goes into
    `framework_files` in the same bump (that manifest is what
    `system/update.py` ships to existing installs — a file missing from it
-   never reaches upgraders). No PR ships without a bump.
+   never reaches upgraders). Never list anything under `tests/fixtures/`:
+   a fixture in a vault is rejected by the cloud vault validator (CI enforces
+   it). No PR ships without a bump.
 4. **CI & release discipline** — every PR runs CI
    (`.github/workflows/ci.yml`) green before merge; branch protection
    requires it. The `test` job is the unit suite on the Python matrix, the

@@ -1,7 +1,7 @@
 {
-  "version": 417,
+  "version": 418,
   "released": "2026-10-10",
-  "changelog": "v417: a glued resolver telling reaches R2e, and the binder says what it skipped. On the owner's vault at v415 his father's 1987 graduation was one folded row, but \"Dad graduated, got San Diego job\" (1987/1988, subject \"narrator's family\", a resolver telling) still stood apart and was named nowhere in the dry run. Cause: the resolver files every reading of one node under one `resolver:<hex>` source, and after that node was re-keyed the telling held readings naming its old id and its new one; v414's \"a telling of several events\" guard counted node ids, so one event under two ids was passed over in silence. Now a telling tells several events only when its claims name more than one node AND more than one distinct event mention (`episode_binder.ONE_EVENT_UNDER_TWO_IDS_IS_ONE_EVENT`), so the glued telling is read by its graduation clause and folds into the 1987 row on the next `bind-episodes --apply` — still never supplying the year or titling the row (`A_GLUED_TELLING_LENDS_NO_YEAR`); a whole message of several events is still never bound whole. And every telling the binder passes over is one dry-run line, `· skipped <telling> [<rung>]: <reason>`, plus a `skipped` list in the plan: ineligible tellings, and graduation-titled tellings R2e did not read (several events, an adjunct title, a non-schooling kind, nobody but the owner, undated) (`episode_binder.A_SKIPPED_TELLING_SAYS_WHY`). CALCULATION_RULE_VERSION and the binder's RULE_VERSION do not move: no fold rule changed.",
+  "changelog": "v418: a test fixture can never ship to a vault again. v412 listed its letters fixture archive (tests/fixtures/letters_repo/**: five transcript.md, people.yaml, four PDFs) in framework_files, so updating to v412-v417 copied made-up transcripts into real vaults, where Lifehug Cloud's vault validator rejected the vault (INVALID_ID, INVALID_DATE) and did not serve it. (1) framework_files no longer names anything under tests/fixtures/ (rule update.A_FIXTURE_NEVER_SHIPS_TO_A_VAULT), enforced by tests/test_framework_manifest.py and by the required 'framework_files exists' CI check. (2) update.py --apply now removes, with one line per file, any tests/fixtures/ file that your previous version shipped and the new one does not name, and nothing else, so a vault updated through v412-v417 is repaired by this update. No new step: it runs inside the existing update.\n\nv417: a glued resolver telling reaches R2e, and the binder says what it skipped. On the owner's vault at v415 his father's 1987 graduation was one folded row, but \"Dad graduated, got San Diego job\" (1987/1988, subject \"narrator's family\", a resolver telling) still stood apart and was named nowhere in the dry run. Cause: the resolver files every reading of one node under one `resolver:<hex>` source, and after that node was re-keyed the telling held readings naming its old id and its new one; v414's \"a telling of several events\" guard counted node ids, so one event under two ids was passed over in silence. Now a telling tells several events only when its claims name more than one node AND more than one distinct event mention (`episode_binder.ONE_EVENT_UNDER_TWO_IDS_IS_ONE_EVENT`), so the glued telling is read by its graduation clause and folds into the 1987 row on the next `bind-episodes --apply` — still never supplying the year or titling the row (`A_GLUED_TELLING_LENDS_NO_YEAR`); a whole message of several events is still never bound whole. And every telling the binder passes over is one dry-run line, `· skipped <telling> [<rung>]: <reason>`, plus a `skipped` list in the plan: ineligible tellings, and graduation-titled tellings R2e did not read (several events, an adjunct title, a non-schooling kind, nobody but the owner, undated) (`episode_binder.A_SKIPPED_TELLING_SAYS_WHY`). CALCULATION_RULE_VERSION and the binder's RULE_VERSION do not move: no fold rule changed.",
   "framework_files": [
     ".gitignore",
     "AGENTS.md",
@@ -692,16 +692,6 @@
     "tests/test_v412_letters_documents_file.py",
     "tests/walkthrough_letters.py",
     "docs/pr-specs/letters-in-the-vault.md",
-    "tests/fixtures/letters_repo/letters/old-box/dad-to-sam/transcript.md",
-    "tests/fixtures/letters_repo/letters/pat-mission/dad-letter/transcript.md",
-    "tests/fixtures/letters_repo/letters/pat-mission/newsletter-002/transcript.md",
-    "tests/fixtures/letters_repo/letters/pat-mission/newsletter/transcript.md",
-    "tests/fixtures/letters_repo/letters/pat-mission/pat-to-home/transcript.md",
-    "tests/fixtures/letters_repo/letters/people.yaml",
-    "tests/fixtures/letters_repo/source/2001/DAD.pdf",
-    "tests/fixtures/letters_repo/source/2001/NEWSLETTER.pdf",
-    "tests/fixtures/letters_repo/source/2001/PAT HOME.pdf",
-    "tests/fixtures/letters_repo/source/OLD BOX/DAD TO SAM.pdf",
     "tests/test_v415_remembered_story_floor_2.py"
   ]
 }

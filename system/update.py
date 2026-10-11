@@ -248,6 +248,41 @@ def repo_file_is_executable_at(ref, filepath):
     return result.stdout.split(None, 1)[0] == "100755"
 
 
+# RULE A_FIXTURE_NEVER_SHIPS_TO_A_VAULT (v418).
+#
+# `framework_files` is copied byte-for-byte into every vault by
+# `apply_version`, so it may NEVER name a path under `tests/fixtures/`. A
+# fixture is test data (transcripts, PDFs, rosters with made-up ids and
+# dates); in a vault it is indistinguishable from the owner's own records, and
+# Lifehug Cloud's vault validator scans every `.md` frontmatter and rejects the
+# whole vault (INVALID_ID / INVALID_DATE) — a rejected vault is not served.
+# This happened for real: v412 listed `tests/fixtures/letters_repo/**` and the
+# owner's vault received it at v415. Plain `tests/*.py` files may still ship.
+# Enforced three ways: tests/test_framework_manifest.py over system/version.json,
+# scripts/ci/check_framework_files.py (the required `framework_files exists`
+# check), and `fixtures_to_retire` below, which repairs vaults that already
+# received one. `FIXTURE_PREFIX` is the whole definition of "a fixture".
+A_FIXTURE_NEVER_SHIPS_TO_A_VAULT = "tests/fixtures/"
+FIXTURE_PREFIX = A_FIXTURE_NEVER_SHIPS_TO_A_VAULT
+
+
+def is_fixture_path(filepath):
+    """True if filepath is under tests/fixtures/ (after normalising; any `..`
+    segment or absolute path is NOT treated as a fixture, so nothing outside
+    that directory can ever be matched for deletion)."""
+    parts = str(filepath).replace("\\", "/").split("/")
+    if str(filepath).startswith("/") or ".." in parts or "." in parts:
+        return False
+    return str(filepath).startswith(FIXTURE_PREFIX) and len(parts) > 2
+
+
+def fixtures_to_retire(previous_files, new_files):
+    """Fixture paths a previous version shipped that the new list no longer
+    names. ONLY tests/fixtures/ paths are ever returned — never anything else."""
+    keep = set(new_files or [])
+    return [f for f in (previous_files or []) if is_fixture_path(f) and f not in keep]
+
+
 def is_protected(filepath):
     """True if filepath is user data the updater must never overwrite.
 
@@ -987,6 +1022,38 @@ def run_migrations(target_version, current_version):
             )
 
 
+def retire_shipped_fixtures(previous_files, new_files):
+    """Remove fixture files an earlier version shipped into this vault.
+
+    Deletes ONLY paths under tests/fixtures/ that the previous framework_files
+    named and the new one does not, one honest line per file. Anything else —
+    including a fixture this vault never received from an update — is left
+    alone. Returns the paths actually removed."""
+    removed = []
+    root = REPO_DIR.resolve()
+    for f in fixtures_to_retire(previous_files, new_files):
+        target = REPO_DIR / f
+        try:
+            if not target.is_file() or root not in target.resolve().parents:
+                continue
+            target.unlink()
+        except OSError as exc:
+            print(f"  Warning: could not remove retired fixture {f}: {exc}", file=sys.stderr)
+            continue
+        removed.append(f)
+        print(f"  Removed {f} (a test fixture an earlier version shipped by mistake; fixtures never ship to a vault)")
+        # Prune now-empty directories, but never above tests/fixtures itself.
+        parent = target.parent
+        fixtures_root = REPO_DIR / "tests" / "fixtures"
+        while parent != fixtures_root.parent and parent.is_relative_to(fixtures_root):
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
+    return removed
+
+
 def apply_version(version):
     """Apply a specific version by extracting framework files from its tag."""
     tag = f"v{version}"
@@ -1007,6 +1074,14 @@ def apply_version(version):
             print(f"  {f}", file=sys.stderr)
         print("\nCommit or stash your changes before updating.", file=sys.stderr)
         return False
+
+    # A_FIXTURE_NEVER_SHIPS_TO_A_VAULT: read the list THIS vault last shipped
+    # (its own version.json, before extraction overwrites it) so fixtures a
+    # v412-v415 update dropped into it are retired below.
+    try:
+        previous_files = load_json(VERSION_FILE).get("framework_files", [])
+    except Exception:
+        previous_files = []
 
     # Extract each framework file from the tag
     updated = []
@@ -1039,13 +1114,17 @@ def apply_version(version):
         except subprocess.CalledProcessError:
             print(f"  Warning: {filepath} not found in {tag}, skipping", file=sys.stderr)
 
+    removed = retire_shipped_fixtures(previous_files, framework_files)
+
     # Run any version-specific migrations
     run_migrations(version, current_version)
 
-    if updated:
+    if updated or removed:
         # Stage and commit
         for f in updated:
             run_git("add", f)
+        for f in removed:
+            run_git("rm", "-q", "--cached", "--ignore-unmatch", "--", f, check=False)
         # Stage .gitkeep files if they were just created by migrations.
         for marker in (
             "outputs/.gitkeep",

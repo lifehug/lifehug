@@ -11,7 +11,8 @@ Usage:
     python3 scripts/ci/check_framework_files.py
 
 Exit code 0 if every entry resolves to a real file relative to the repo
-root; exit code 1, with every missing path listed, otherwise.
+root and none is a test fixture (update.A_FIXTURE_NEVER_SHIPS_TO_A_VAULT);
+exit code 1, with every offending path listed, otherwise.
 """
 
 from __future__ import annotations
@@ -37,11 +38,36 @@ def check_framework_files(root: Path = ROOT, version_json: Path = VERSION_JSON) 
     return missing
 
 
+def check_no_fixtures(version_json: Path = VERSION_JSON) -> list[str]:
+    """Return framework_files entries that break A_FIXTURE_NEVER_SHIPS_TO_A_VAULT.
+
+    `system/update.py --apply` copies every entry into a vault; anything under
+    tests/fixtures/ is test data that a vault validator will reject (v412
+    shipped one and a real vault was refused). Defined in system/update.py.
+    """
+    sys.path.insert(0, str(ROOT / "system"))
+    import update
+
+    data = json.loads(version_json.read_text(encoding="utf-8"))
+    return [e for e in data.get("framework_files") or [] if update.is_fixture_path(e)]
+
+
 def main() -> int:
     try:
         missing = check_framework_files()
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"check_framework_files: could not read manifest: {exc}", file=sys.stderr)
+        return 1
+    fixtures = check_no_fixtures()
+    if fixtures:
+        print(f"check_framework_files: {len(fixtures)} framework_files entries are test fixtures:", file=sys.stderr)
+        for entry in fixtures:
+            print(f"  - {entry}", file=sys.stderr)
+        print(
+            "A_FIXTURE_NEVER_SHIPS_TO_A_VAULT: framework_files is copied into every vault, "
+            "and nothing under tests/fixtures/ may ship. Remove these entries.",
+            file=sys.stderr,
+        )
         return 1
     if missing:
         print(f"check_framework_files: {len(missing)} framework_files entries do not exist on disk:", file=sys.stderr)
