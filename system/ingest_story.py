@@ -299,6 +299,11 @@ def frontmatter(args: argparse.Namespace, source_path: str, candidate_ids: list[
         values["source_trust"] = "external_record"
         values["authority"] = "third_party_record"
         values["record_ref"] = str(record_ref).strip()
+        # v404 (letters-in-the-vault D1): the letters this record cites that
+        # are ON FILE as `sources/letters/` sources, by source id.
+        cites = list(getattr(args, "cites", None) or [])
+        if cites:
+            values["cites"] = cites
     return format_frontmatter(values)
 
 
@@ -360,6 +365,16 @@ def main() -> int:
     else:
         candidates = generate_candidates(args.title, story, relative_source, created_at)
 
+    # v404 (letters-in-the-vault D1): a `family-letters:` record files each
+    # letter it cites as a letter source FIRST — once, immutable — and the
+    # memo cites the ones on file. A missing archive or letter is one line;
+    # the memo is filed exactly as before.
+    letter_outcomes = []
+    if args.record and not args.dry_run:
+        import family_letters  # noqa: PLC0415
+
+        letter_outcomes = family_letters.file_cited(args.record)
+        args.cites = [o["source_id"] for o in letter_outcomes if family_letters.on_file(o)]
     payload = f"# {args.title}\n\n{story}\n"
     content = f"{frontmatter(args, relative_source, [c['id'] for c in candidates], payload)}\n\n{payload}"
 
@@ -389,6 +404,10 @@ def main() -> int:
         print(f"✓ Ingested witness account from {args.witness}: {relative_source}")
         print(f"  Their words, kept separate from yours — the wiki renders both accounts side by side.")
     elif args.record:
+        import family_letters  # noqa: PLC0415
+
+        for outcome in letter_outcomes:
+            print(family_letters.outcome_line(outcome))
         print(f"✓ Ingested third-party record ({args.record}): {relative_source}")
         print("  A corroborating record, never first-person memory — cited, not merged.")
     elif args.kind == "opinion":
