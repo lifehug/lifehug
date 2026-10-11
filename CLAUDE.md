@@ -143,7 +143,12 @@ findings `birth_resubjected_from_the_narrator`,
 naming only him ("I was born in Redlands") keeps its subject, and an age he
 filed on it stays his. A fold-time reading (`timeline-rules:30`) and a binder
 view reading, In the Loop on every publish and sweep; never fix such a subject
-by hand.
+by hand. Same release, the graduation row: a whole-message telling's graduation
+claim joins the one folded row it agrees with
+(`temporal_timeline.A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW`), a glued telling under
+a family handle is read by its graduation clause, and a binder
+`possible_overmerge` names its episode and its two contradicting dates
+(`episode_binder.A_POSSIBLE_OVERMERGE_NAMES_ITSELF`).
 
 **The owner never dies on his own timeline; one graduation is one row (v411,
 owner 2026-10-10).** He narrates his vault, so a death in it is never his: a

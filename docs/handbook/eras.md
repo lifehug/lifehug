@@ -394,7 +394,10 @@ person's birth, re-subjected through the roster or to the words themselves, and
 a birth node naming anybody besides the owner drops him from its subjects
 (`identity_resolution.THE_NARRATOR_IS_NOT_THE_NEWBORN`, findings
 `birth_resubjected_from_the_narrator`, `owner_dropped_from_birth_subjects`); a
-birth naming only him keeps its subject.
+birth naming only him keeps its subject; and a graduation node no bind could
+reach (one event of a whole-message telling) joins the one folded graduation
+row it agrees with (`temporal_timeline.A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW`,
+finding `graduation_telling_folded`).
 Before it, `timeline-rules:29` — the owner never dies on his own timeline, and one
 graduation is one row (v411, owner 2026-10-10): a death or loss telling the
 extractor filed under the narrator whose own words name the deceased

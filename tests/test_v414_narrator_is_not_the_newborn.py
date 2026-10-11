@@ -191,5 +191,160 @@ class TheBinderReadsTheNewbornTests(unittest.TestCase):
         self.assertEqual(view.narrator_resubjected, "")
 
 
+# --------------------------------------------------------------------------
+# The two R2e gaps seen on the owner's vault after the v411 bindings, and
+# the possible_overmerge that named nothing
+# --------------------------------------------------------------------------
+
+import temporal_store as ts  # noqa: E402
+
+#: The father's roster row WITHOUT a "father"/"dad" alias: the shape where a
+#: bare relation word resolves nothing on its own.
+BARE_ROSTER = {"version": 1, "type": "person", "entities": [
+    {"name": "Walter Hale", "slug": "walter-hale", "relationship": "parent",
+     "aliases": ["Walter"]},
+]}
+
+
+def _gclaim(stem, label, *, subject, kind, when, source_id="", subject_ref=""):
+    node_id = tp.derive_node_id(node_kind="event", event_kind=kind,
+                                subject_refs=[subject_ref or subject], discriminator=label)
+    row = {"source_kind": "import", "claim_type": "date" if when else "occurrence",
+           "subject_mention": subject, "event_kind": kind, "event_ref": node_id,
+           "event_mention": label, "evidence": [{"quote": label}], "basis": "explicit",
+           "confidence": 0.8, "extractor_version": "classifier-claims/rule:5",
+           "source_ref": {"source_id": source_id or f"classification:answers-{stem}#{stem}",
+                          "revision": "sha256:" + "0" * 64, "source_path": f"answers/{stem}.md"}}
+    if subject_ref:
+        row["subject_ref"] = subject_ref
+    if when:
+        row["temporal_value"] = _date(when)
+    return tc.validate_temporal_claim(row, now=NOW)
+
+
+def _gref(stem):
+    return f"classification:answers-{stem}#{stem}"
+
+
+class AGluedTellingUnderAFamilyHandleTests(unittest.TestCase):
+    """Gap 2: "Dad graduated, got San Diego job" filed under "narrator's
+    family", its kind the job's. The graduation CLAUSE names Dad; the roster
+    knows him by the subject of another telling of the same graduation."""
+
+    def setUp(self):
+        self.claims = [
+            _gclaim("a", "Dad's graduation", subject="Walter Hale", kind="moment", when="1987"),
+            _gclaim("b", "Dad graduated", subject="Walter Hale", kind="graduation", when="1987"),
+            _gclaim("d", "Dad graduated, got San Diego job", subject="narrator's family",
+                    kind="job", when="1987/1988"),
+        ]
+        self.index = ec.entity_index({"person": BARE_ROSTER})
+        self.views = eb.telling_views(self.claims, entity_index=self.index)
+
+    def test_the_glued_telling_is_read_by_its_graduation_clause(self):
+        readings = eb.graduation_readings(self.views, self.index)
+        self.assertEqual({ref: row[0] for ref, row in readings.items()},
+                         {_gref(stem): "person/walter-hale" for stem in "abd"})
+
+    def test_it_folds_but_never_supplies_the_year(self):
+        links = eb.graduation_links(self.views, index=self.index)
+        self.assertEqual({ref for link in links for ref in link.members},
+                         {_gref(stem) for stem in "abd"})
+        self.assertEqual({link.key for link in links},
+                         {"graduation:person/walter-hale:1987"})
+
+
+def _episode(claims, members):
+    views = eb.telling_views(claims, entity_index=ec.entity_index({"person": ROSTER_DAD}))
+    envelope = eb.group_envelope({"members": tuple(sorted(members)), "rule_ids": ("R2e",)},
+                                 views=views, active={}, now=NOW)
+    return {"operations": [envelope["operation"]], "bindings": envelope["bindings"]}
+
+
+ROSTER_DAD = {"version": 1, "type": "person", "entities": [
+    {"name": "Walter Hale", "slug": "walter-hale", "relationship": "parent",
+     "aliases": ["dad", "father", "Walter"]},
+    {"name": "Brittney Hale", "slug": "brittney-hale", "relationship": "sibling",
+     "aliases": ["Brittney"]},
+]}
+
+
+class AWholeMessageTellingOfTheGraduationJoinsItsRowTests(unittest.TestCase):
+    """Gap 1: the residence summary "Events: Brittney born, Kristine 10, Dad
+    graduated (1987)" is ONE whole-message telling holding three events, so the
+    binder can never bind it to the graduation (its kind reads as the birth and
+    binding it would drag the other two along). Its graduation claim — kind
+    graduation, Dad, 1987 — joins the folded row when subject, year and kind
+    agree."""
+
+    def setUp(self):
+        whole = "conversation:msg-0f0f0f0f"
+        self.claims = [
+            _gclaim("a", "Dad's graduation", subject="Dad", kind="moment", when="1987"),
+            _gclaim("b", "Dad graduates college", subject="Dad", kind="graduation",
+                    when="1987"),
+            _gclaim("w1", "Brittney born", subject="Brittney", kind="birth",
+                    when="1987-12-17", source_id=whole),
+            _gclaim("w2", "Kristine 10", subject="Kristine", kind="moment", when="1987",
+                    source_id=whole),
+            _gclaim("w3", "Dad graduated", subject="Dad", kind="graduation", when="1987",
+                    source_id=whole, subject_ref="person/walter-hale"),
+        ]
+        self.loose = self.claims[-1]["event_ref"]
+        self.result = tt.derive_calculated_timeline(
+            {"version": ts.INDEX_VERSION, "claims": list(self.claims)},
+            episode_records=_episode(self.claims, (_gref("a"), _gref("b"))),
+            roster_snapshot=ROSTER_DAD, now=NOW)
+
+    def test_the_binder_cannot_bind_the_whole_message(self):
+        views = eb.telling_views(self.claims, entity_index=ec.entity_index({"person": ROSTER_DAD}))
+        self.assertNotIn("conversation:msg-0f0f0f0f",
+                         eb.graduation_readings(views, ec.entity_index({"person": ROSTER_DAD})))
+
+    def test_its_graduation_claim_joins_the_folded_row(self):
+        graduations = [n for n in self.result.nodes if "graduat" in str(n.get("label")).lower()]
+        self.assertEqual(len(graduations), 1, [n["label"] for n in graduations])
+        self.assertIn(self.loose, self.result.node_aliases)
+        self.assertIn(tt.DIAGNOSTIC_GRADUATION_TELLING_FOLDED,
+                      {r.get("finding") for r in self.result.diagnostics["findings"]})
+
+    def test_the_messages_other_events_stay_where_they_are(self):
+        labels = {n["label"] for n in self.result.nodes}
+        self.assertTrue(any("Brittney" in label for label in labels), labels)
+        self.assertTrue(any("Kristine" in label for label in labels), labels)
+
+    def test_a_contradicting_year_does_not_join(self):
+        claims = list(self.claims[:-1]) + [
+            _gclaim("w3", "Dad graduated", subject="Dad", kind="graduation", when="1972",
+                    source_id="conversation:msg-0f0f0f0f", subject_ref="person/walter-hale")]
+        result = tt.derive_calculated_timeline(
+            {"version": ts.INDEX_VERSION, "claims": claims},
+            episode_records=_episode(claims, (_gref("a"), _gref("b"))),
+            roster_snapshot=ROSTER_DAD, now=NOW)
+        graduations = [n for n in result.nodes if "graduat" in str(n.get("label")).lower()]
+        self.assertEqual(len(graduations), 2)
+
+
+class APossibleOvermergeNamesItselfTests(unittest.TestCase):
+
+    def test_the_row_names_its_episode_and_the_two_dates(self):
+        claims = [_gclaim("x", "Dad graduated", subject="Dad", kind="graduation", when="1972"),
+                  _gclaim("y", "Dad graduated", subject="Dad", kind="graduation", when="1987")]
+        records = _episode(claims, (_gref("x"), _gref("y")))
+        result = eb.plan(claims, episode_records=[*records["operations"], *records["bindings"]],
+                         entity_index=ec.entity_index({"person": ROSTER_DAD}), now=NOW)
+        self.assertEqual(len(result.overmerges), 1)
+        row = result.overmerges[0]
+        self.assertEqual(row["episode_label"], "Dad graduated")
+        self.assertEqual(sorted(d["date"] for d in row["dates"]), ["1972", "1987"])
+        line = next(line for line in eb.describe(result) if "⚠ possible_overmerge" in line)
+        self.assertIn("Dad graduated", line)
+        self.assertIn("1972", line)
+        self.assertIn("1987", line)
+        receipt = eb.overmerge_receipt_rows(result)
+        self.assertEqual(receipt[0]["episode_label"], "Dad graduated")
+        self.assertEqual(sorted(d["date"] for d in receipt[0]["dates"]), ["1972", "1987"])
+
+
 if __name__ == "__main__":
     unittest.main()

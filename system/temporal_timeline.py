@@ -1397,6 +1397,114 @@ def _owner_birth_telling(group: dict, *, owner: str, owner_names: object,
     return named_birth and dated > 0
 
 
+#: v414 (owner's vault after the v411 bindings). The binder folded his
+#: father's graduation into one row, and "Dad graduated" (1987) still stood
+#: beside it: its telling is the whole residence-summary message, three events
+#: in one telling, which the binder never binds whole
+#: (the binder's `A_WHOLE_MESSAGE_TELLING_IS_NEVER_BOUND_BY_ITS_GRADUATION`).
+#: The claim is what agrees, so the claim follows: a node that is nothing but
+#: one person's graduation, bound to no episode, joins the ONE folded graduation
+#: row (an episode) of the same person whose stated year its every dated claim
+#: agrees with — never one naming another school, never a glued telling's, and
+#: never when two rows could take it. Its old id is published as a redirect.
+A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW = (
+    "a node that is nothing but one person's graduation and that no bind could "
+    "reach joins the one folded graduation row of that person whose stated "
+    "year its dates agree with; another school, a glued telling, an undated "
+    "node or two possible rows leave it where it is"
+)
+
+#: Reported, never raised: a loose graduation node folded into its row.
+DIAGNOSTIC_GRADUATION_TELLING_FOLDED = "graduation_telling_folded"
+
+
+def _graduation_reading_of_group(group: dict) -> dict | None:
+    """``{person, year, schools, glued}`` when every claim of the group tells
+    one person's graduation; ``None`` otherwise."""
+    kind = collapsed_text(group.get("event_kind"))
+    if kind not in ("graduation", "school", KIND_WILDCARD_MOMENT, ""):
+        return None
+    people: set = set()
+    years: set = set()
+    schools: set = set()
+    glued = False
+    dated = []
+    for claim in group.get("claims") or ():
+        text = collapsed_text(claim.get("event_mention"))
+        if not text:
+            continue
+        reading = ident.graduation_clause(text)
+        if reading is None:
+            return None
+        glued = glued or reading.glued
+        schools |= set(reading.institution)
+        ref = collapsed_text(claim.get("subject_ref"))
+        if ref.startswith("person/"):
+            people.add(ref)
+        record = chrono.from_dict(claim.get("temporal_value")) \
+            if isinstance(claim.get("temporal_value"), dict) else None
+        if record is not None:
+            dated.append(record)
+            if not reading.glued and record.earliest and \
+                    str(record.earliest)[:4] == str(record.latest or "")[:4]:
+                years.add(str(record.earliest)[:4])
+    people |= {ref for ref in group.get("subjects") or () if collapsed_text(ref).startswith("person/")}
+    if len(people) != 1:
+        return None
+    return {"person": next(iter(people)), "years": years, "schools": schools,
+            "glued": glued, "dated": dated}
+
+
+def _fold_loose_graduations(groups: dict) -> tuple[dict, list]:
+    """:data:`A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW`, in place on the groups.
+    Returns ``({old node id: row node id}, findings)``."""
+    rows = {}
+    loose = {}
+    for node_id in sorted(groups):
+        group = groups[node_id]
+        reading = _graduation_reading_of_group(group)
+        if reading is None:
+            continue
+        if group.get("episode_id"):
+            if len(reading["years"]) == 1:
+                rows[node_id] = reading
+        elif not reading["glued"] and reading["dated"]:
+            loose[node_id] = reading
+    aliases: dict = {}
+    findings: list = []
+    for node_id, reading in loose.items():
+        fits = []
+        for row_id, row in rows.items():
+            if row["person"] != reading["person"] or row_id == node_id:
+                continue
+            year = next(iter(row["years"]))
+            record = chrono.parse_stated_date(year)
+            if not all(chrono.dates_agree(other, record) for other in reading["dated"]):
+                continue
+            if reading["schools"] and row["schools"] and not (reading["schools"] & row["schools"]):
+                continue
+            fits.append(row_id)
+        if len(fits) != 1:
+            continue
+        target = fits[0]
+        home, group = groups[target], groups.pop(node_id)
+        seen = {collapsed_text(c.get("claim_id")) for c in home["claims"]}
+        for claim in group["claims"]:
+            if collapsed_text(claim.get("claim_id")) not in seen:
+                home["claims"].append(claim)
+        for subject in group.get("subjects") or ():
+            if subject not in home["subjects"]:
+                home["subjects"].append(subject)
+        home["claims"].sort(key=lambda row: collapsed_text(row.get("claim_id")))
+        home["subjects"].sort()
+        aliases[node_id] = target
+        findings.append({"finding": DIAGNOSTIC_GRADUATION_TELLING_FOLDED, "node_id": target,
+                         "was_node_id": node_id, "subject": reading["person"],
+                         "year": next(iter(rows[target]["years"])),
+                         "rule": A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW})
+    return aliases, findings
+
+
 def _fold_owner_birth_tellings(groups: dict, *, owner: str, owner_names: object,
                                births: KnownBirths) -> tuple[dict, list]:
     """:data:`ONE_OWNER_BIRTH`, applied to the drawn groups IN PLACE.
@@ -7585,6 +7693,11 @@ def derive_calculated_timeline(
     owner_birth_aliases, owner_birth_findings = _fold_owner_birth_tellings(
         groups, owner=owner, owner_names=owner_names, births=births)
     diagnostics.extend(owner_birth_findings)
+    # v414, `A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW`: a graduation claim no bind
+    # could reach joins the one folded graduation row it agrees with.
+    graduation_aliases, graduation_findings = _fold_loose_graduations(groups)
+    owner_birth_aliases = {**owner_birth_aliases, **graduation_aliases}
+    diagnostics.extend(graduation_findings)
     # v345. The node id a re-read landmark entry used to be drawn at, redirected
     # to the id it is drawn at now — computed AFTER grouping, so a key the
     # drawing still publishes is never made an alias of anything.

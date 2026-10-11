@@ -531,6 +531,30 @@ The rung is appended to `EXACT_IDENTITY_RULE_IDS` rather than slotted, and the
 binder's `RULE_VERSION` does not move: a filed binding names the family
 (`R2`), never the rung, so every byte an existing create holds is unchanged.
 
+## R2e follow-up (v414) — what the bindings on the owner's vault left
+
+After the v411 bindings his father's graduation went from six rows to four;
+two still stood apart. (1) "Dad graduated" (1987) is one event of a
+whole-message telling — "Events: Brittney born, Kristine 10, Dad graduated
+(1987)" — whose kind reads as the birth and which holds three events. Binding
+that telling would drag the birth and the age into the graduation, so R2e never
+binds a telling of several events
+(`episode_binder.A_WHOLE_MESSAGE_TELLING_IS_NEVER_BOUND_BY_ITS_GRADUATION`); the
+fold moves the CLAIM instead (`temporal_timeline.A_LOOSE_GRADUATION_FOLLOWS_ITS_ROW`):
+a node that is nothing but one person's graduation and that no bind reached
+joins the one folded graduation row of that person whose stated year its dates
+agree with, its old id published as a redirect — the claim-level counterpart of
+v342's carry, and the same shape as v403's `ONE_OWNER_BIRTH`. (2) "Dad
+graduated, got San Diego job" was filed under "narrator's family" with the
+job's kind; R2e now reads a glued telling by its graduation clause whatever its
+kind, and a lead the roster index cannot read ("Dad", too short to be a key) is
+the one roster person the telling is filed under, or the one person every other
+telling's same relation word resolved to. `A_GLUED_TELLING_LENDS_NO_YEAR` is
+unchanged. Also: a `possible_overmerge` now names its episode and the two
+contradicting dates (`episode_binder.A_POSSIBLE_OVERMERGE_NAMES_ITSELF`), in the
+plan, the dry run and the binder receipt. The binder's `RULE_VERSION` does not
+move.
+
 ## Consequences
 
 * Two new record families and two new directories; two modules after I2b
