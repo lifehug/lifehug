@@ -2530,6 +2530,9 @@ def same_landmark_stay(existing: object, record: object, row: object = None) -> 
     if different_grades(existing, record, overlap=chrono.overlap_months(left, right)):
         # :data:`TWO_STATED_GRADE_STRETCHES_ARE_TWO_STAYS`.
         return False
+    if _places_key_stays(row) and different_places(existing, record):
+        # :data:`TWO_STATED_PLACE_STRETCHES_ARE_TWO_STAYS`.
+        return False
     gap = chrono.gap_months(left, right)
     return gap is None or gap <= SEQUENCE_ENTRY_ABUT_MONTHS
 
@@ -2568,6 +2571,117 @@ def different_grades(existing: object, record: object, *, overlap: int = 0) -> b
     if left and right:
         return left != right
     return bool(left or right) and overlap <= 1
+
+
+#: v420 (lifehug#487). Two dated `work` tellings of one employer — a stint in
+#: Cedarport 2012-07-01 to 2013-08-01, then Harbor City 2013-08 to 2015-08 —
+#: abutted, so the key folded them into ONE stay; `merge_landmark_entry` then
+#: reconciled each bound on its own, the day-grain Cedarport end beat the
+#: month-grain Harbor City end, and the chain drew a sixteen-month hole that
+#: never happened. The work twin of
+#: :data:`TWO_STATED_GRADE_STRETCHES_ARE_TWO_STAYS`: two DATED tellings of one
+#: employer (or one school) whose stated places do not intersect are two stays
+#: of it, whatever the distance between them. A telling whose place names
+#: several localities ("Cedarport, Harbor City, AZ, WA") intersects each of
+#: them, so the place never separates it from either; which stay it joins is
+#: decided by its stretch exactly as before (`landmark_projection.stay_slots`:
+#: EXACTLY ONE compatible slot joins, zero or several open a new one), and it
+#: never respells the place of a stay it joins (`stay_slots` holds the stay's
+#: own place), so it cannot make the next single-place telling look like that
+#: stay. Residences are keyed by their address already and are left alone.
+TWO_STATED_PLACE_STRETCHES_ARE_TWO_STAYS = (
+    "two dated tellings of one employer or school that state different places "
+    "are two stays of it, never one stay with the other's end"
+)
+
+#: The domains whose stays the stated place separates.
+PLACE_STAY_DOMAINS = ("work", "schools")
+
+#: The fields a work or school telling states its place in.
+PLACE_FIELDS = ("where", "place", "city", "state")
+
+#: Words that say what KIND of place without naming one: two tellings that
+#: share only these do not share a place.
+_PLACE_STOP_WORDS = frozenset({
+    "the", "a", "an", "of", "in", "at", "near", "outside", "around", "and",
+    "city", "town", "village", "county", "township", "area", "metro", "greater",
+    "downtown", "region", "office", "campus", "remote", "usa", "us", "america",
+    "united", "states",
+})
+
+
+def _places_key_stays(row: object) -> bool:
+    """Does this domain's stay key read the stated place? A row that names no
+    domain (a caller asking about two bare stretches) lets the fields decide."""
+    if not isinstance(row, dict):
+        return True
+    domain = str(row.get("domain") or "").strip()
+    return not domain or domain in PLACE_STAY_DOMAINS
+
+
+def stated_places(entry: object) -> tuple[tuple[frozenset, ...], frozenset]:
+    """``(localities, regions)`` one telling states, folded. PURE.
+
+    Each place field is split into phrases (comma, semicolon, slash, "and");
+    a phrase that is a US state (by name or postal code,
+    `landmark_identity.US_STATES`) is a REGION, every other phrase a LOCALITY,
+    as the set of its words with :data:`_PLACE_STOP_WORDS` taken out.
+    "Cedarport, AZ" is one locality (``{cedarport}``) in one region
+    (``{arizona}``); "Cedarport, Harbor City, AZ, WA" is two localities.
+    """
+    import landmark_identity as lid  # noqa: PLC0415
+
+    if not isinstance(entry, dict):
+        return (), frozenset()
+    localities: list[frozenset] = []
+    regions: set[str] = set()
+    for field in PLACE_FIELDS:
+        text = entry.get(field)
+        if not isinstance(text, str) or not text.strip():
+            continue
+        for phrase in re.split(r"[,;/&]|\band\b", text, flags=re.IGNORECASE):
+            folded = lid.fold(phrase)
+            if not folded or folded in ("unknown", "unsure", "none", "n a"):
+                continue
+            region = lid.canonical_region(folded)
+            if region in lid.US_STATES.values():
+                regions.add(region)
+                continue
+            words = frozenset(word for word in folded.split() if word not in _PLACE_STOP_WORDS)
+            if words and words not in localities:
+                localities.append(words)
+    return tuple(localities), frozenset(regions)
+
+
+def names_several_places(entry: object) -> bool:
+    """Does this telling's place name more than one locality?"""
+    return len(stated_places(entry)[0]) > 1
+
+
+def _share_a_word(left: object, right: object) -> bool:
+    import landmark_identity as lid  # noqa: PLC0415
+
+    return any(lid.same_word(a, b) for a in left for b in right)
+
+
+def different_places(existing: object, record: object) -> bool:
+    """Are these two DATED tellings two stretches by the places they state?
+
+    Both must state a place. When both name a locality, they are two when no
+    word of any locality on one side is a word of a locality on the other
+    (`landmark_identity.same_word`, so a voice-to-text spelling still joins);
+    when either names only a state, they are two when both name states and
+    none is shared. Nothing stated on either side: never two by place.
+    """
+    left_localities, left_regions = stated_places(existing)
+    right_localities, right_regions = stated_places(record)
+    if left_localities and right_localities:
+        left = frozenset().union(*left_localities)
+        right = frozenset().union(*right_localities)
+        return not _share_a_word(left, right)
+    if left_regions and right_regions:
+        return not (left_regions & right_regions)
+    return False
 
 
 #: v349, and the rule this release is named for.

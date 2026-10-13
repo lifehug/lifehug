@@ -104,6 +104,7 @@ from temporal_claims import (  # noqa: E402
     TemporalContractError,
     bounded_quote,
     collapsed_text,
+    normalized_mention_key,
     normalized_timestamp,
     split_subject_enumeration,
     validate_extraction_receipt,
@@ -1530,6 +1531,57 @@ OWNER_RELEVANCE_BY_DOMAIN = {
 }
 
 
+#: v420 (lifehug#487). A chain-domain entry whose own ``subject`` names
+#: somebody else is THAT person's — "Dad's mission in Washington", filed under
+#: `missions` with ``subject: "Dad"``, was drawn on the owner's axis as
+#: ``owner``/``participated`` because every entry outside
+#: :data:`OWNER_RELEVANCE_BY_DOMAIN` used to be read as the owner's own life
+#: whatever its subject said. The owner shortcut now applies only to an entry
+#: that names nobody else; one that does takes the ``other_person`` row with
+#: the domain's relevance (``contextual_only`` for every chain domain), and
+#: `timeline_views` leaves it out of the owner's lanes.
+A_RELATIVES_ENTRY_IS_THEIRS = (
+    "a landmark entry whose own subject names somebody other than the owner "
+    "is that person's, never a stretch of the owner's own life"
+)
+
+
+def entry_subject_is_another_person(record: object) -> bool:
+    """Does this landmark record's own ``subject`` name somebody else? PURE.
+
+    Lexical, and deliberately the same grounds `temporal_timeline`'s
+    zero-candidate fallback reads (`timeline-rules:9`): the subject is
+    somebody else when a relation word
+    (`cross_dating.THIRD_PARTY_RELATION_WORDS`, the one vocabulary) is its
+    HEAD ("Dad", "my uncle", "the narrator's father") or the POSSESSOR of its
+    head ("Dad's mission", "aunt's family"). A subject that is the owner
+    ("self", "me", "the narrator", "we") or is owner-headed ("my mission")
+    is his; an entry with no ``subject`` at all is his, exactly as before (a
+    domain-word fallback is common when the entry names nobody else).
+
+    A bare proper name with no relation word ("Kristine") is NOT decided
+    against the owner here: there is no capitalisation heuristic, for the
+    reason `temporal_timeline._mention_names_another_person` gives — the
+    owner under a spelling the roster lacks is also a bare proper name.
+    """
+    if not isinstance(record, dict):
+        return False
+    subject = record.get("subject")
+    if not isinstance(subject, str) or not subject.strip():
+        return False
+    import cross_dating  # noqa: PLC0415
+    import identity_resolution as ident  # noqa: PLC0415
+
+    text = collapsed_text(subject).replace("\u2019", "'")
+    key = normalized_mention_key(text)
+    if key in ident.OWNER_SUBJECT_MENTIONS or key in ident.OWNER_COUPLE_SUBJECT_WORDS:
+        return False
+    words = "|".join(cross_dating.THIRD_PARTY_RELATION_WORDS)
+    head = re.compile(rf"(?<!\w)(?:{words})(?:'s)?[^\w]*$", re.IGNORECASE)
+    possessor = re.compile(rf"(?<!\w)(?:{words})'s\s+[\w'.-]+[^\w]*$", re.IGNORECASE)
+    return bool(head.search(text) or possessor.search(text))
+
+
 def entry_supported_event_kinds(domain: object) -> tuple[str, ...]:
     """The event kinds ONE entry of ``domain`` is evidence for.
 
@@ -2487,6 +2539,23 @@ def new_skeleton_only(record: object, entry: object) -> dict:
 _DATE_GRAIN_WORDS = frozenset({"year", "month", "day", "birth"})
 
 
+def _keep_the_stays_place(folded: dict, record: dict) -> dict:
+    """``record`` without its place fields when it names SEVERAL places and the
+    stay it joins already states one
+    (`landmarks_interaction.TWO_STATED_PLACE_STRETCHES_ARE_TWO_STAYS`).
+
+    A telling of "Cedarport, Harbor City, AZ, WA" that joins the Cedarport
+    stay does not make that stay read as Harbor City too, so the next
+    single-place Harbor City telling is still compared against Cedarport. Only
+    the key's running fold is spared; the drawn entry is built from every
+    telling as before."""
+    if not landmarks_interaction.names_several_places(record) \
+            or not landmarks_interaction.stated_places(folded)[0]:
+        return record
+    return {key: value for key, value in record.items()
+            if key not in landmarks_interaction.PLACE_FIELDS}
+
+
 def stay_slots(sources: object) -> dict:
     """``{source_id: (domain, entry_key, slot)}`` — the INTERVAL-AWARE key.
 
@@ -2554,7 +2623,8 @@ def stay_slots(sources: object) -> dict:
                       if landmarks_interaction.same_landmark_stay(folded, record, row)]
         if len(compatible) == 1:
             chosen = compatible[0]
-            held[chosen] = landmarks_interaction.merge_landmark_entry(held[chosen], record)
+            held[chosen] = landmarks_interaction.merge_landmark_entry(
+                held[chosen], _keep_the_stays_place(held[chosen], record))
         else:
             held.append(landmarks_interaction.merge_landmark_entry(None, record))
             chosen = len(held) - 1
@@ -3588,7 +3658,12 @@ PERSON_IS_NOT_A_SCHOOL = "person_is_not_a_school"
 EVENT_IS_NOT_A_JOB = "event_is_not_a_job"
 #: A company or a fund filed as a partnership.
 ORGANIZATION_IS_NOT_A_PARTNER = "organization_is_not_a_partner"
-MISFILED_REASONS = (PERSON_IS_NOT_A_SCHOOL, EVENT_IS_NOT_A_JOB, ORGANIZATION_IS_NOT_A_PARTNER)
+#: v420 (lifehug#487): a dated event (a legal action, a hearing) filed as a
+#: mission. A mission is a stretch; a record that states none and reads as an
+#: event, or names no place and gives no warrant for its date, is a moment.
+EVENT_IS_NOT_A_MISSION = "event_is_not_a_mission"
+MISFILED_REASONS = (PERSON_IS_NOT_A_SCHOOL, EVENT_IS_NOT_A_JOB, ORGANIZATION_IS_NOT_A_PARTNER,
+                    EVENT_IS_NOT_A_MISSION)
 
 #: What each reason refiles AS: nothing (the record is not a moment of its
 #: own — Katie's graduation is already told), or an ordinary moment.
@@ -3596,12 +3671,14 @@ REFILE_RETIRED = "retired"
 REFILE_AS_MOMENT = "moment"
 REFILE_KIND_FOR = {PERSON_IS_NOT_A_SCHOOL: REFILE_RETIRED,
                    EVENT_IS_NOT_A_JOB: REFILE_AS_MOMENT,
-                   ORGANIZATION_IS_NOT_A_PARTNER: REFILE_AS_MOMENT}
+                   ORGANIZATION_IS_NOT_A_PARTNER: REFILE_AS_MOMENT,
+                   EVENT_IS_NOT_A_MISSION: REFILE_AS_MOMENT}
 
 A_RECORD_IS_FILED_WHERE_IT_BELONGS = (
-    "a person is never a school, a dated event is never a job, and a company "
-    "or a fund is never a partnership; such a record is refiled - retired, or "
-    "an ordinary moment at its own dates - never drawn as a landmark"
+    "a person is never a school, a dated event is never a job or a mission, "
+    "and a company or a fund is never a partnership; such a record is refiled "
+    "- retired, or an ordinary moment at its own dates - never drawn as a "
+    "landmark"
 )
 
 REFILE_SOURCES_DIR = f"{LANDMARK_SOURCES_DIR}/refiles"
@@ -3609,15 +3686,20 @@ LANDMARK_REFILE_SOURCE_TYPE = "landmark_refile"
 REFILE_EXTRACTOR = "landmark-refile/rule:1"
 REFILE_EXTRACTOR_NAME = "landmark-refile"
 
-#: The words that make a one-date `work` record an EVENT. Closed, and only
-#: ever read over a record that states no span: a job is a stretch.
+#: The words that make a one-date `work` or `missions` record an EVENT.
+#: Closed, and only ever read over a record that states no span: a job and a
+#: mission are stretches. v420 (lifehug#487) added the legal words — ``legal``,
+#: ``court``, ``action``, ``hearing``, ``filing``, ``dispute`` — for "legal
+#: action" (2025-08) filed by the ladder as a mission.
 _EVENT_WORDS_RE = re.compile(
     r"\b(?:safe|safes|conversion|convert(?:ed|ing)?|sign(?:ed|ing)?|signature|"
     r"paper(?:s|work)?|term\s+sheet|terms|negotiat(?:ion|ions|ed|ing)|funding|"
     r"investment|invest(?:ed|or|ors)?|round|closing|closed|wire[ds]?|deal|contract|"
     r"agreement|acquisition|acquired|merger|ipo|loan|settlement|lawsuit|pitch|"
-    r"meeting|email|call)\b",
+    r"meeting|email|call|legal|court|action|hearing|filing|dispute)\b",
     re.IGNORECASE)
+#: A place a `missions` record may leave unanswered without naming one.
+_NO_PLACE_WORDS = frozenset({"", "unknown", "unsure", "not sure", "n/a", "none", "?"})
 #: Words that make a name an ORGANIZATION.
 _ORGANIZATION_WORDS_RE = re.compile(
     r"\b(?:ventures?|capital|partners|fund|funds|llc|inc|corp(?:oration)?|company|"
@@ -3672,6 +3754,12 @@ def misfiled_landmark(domain: object, record: object, *, people: object = (),
     * :data:`ORGANIZATION_IS_NOT_A_PARTNER` — a ``partnerships`` record whose
       person is an organization (:data:`_ORGANIZATION_WORDS_RE`), or whose
       subject is one of his own employers.
+    * :data:`EVENT_IS_NOT_A_MISSION` (v420) — a ``missions`` record that states
+      ONE date and no span, and either reads as an event
+      (:data:`_EVENT_WORDS_RE` over its label/what/note) or names no place
+      (``where``/``place`` empty or ``unknown``) and carries no provenance on
+      its date. A mission is a stretch with a field; a dated thing with
+      neither is not one.
     """
     import landmark_identity as lid  # noqa: PLC0415
 
@@ -3692,6 +3780,20 @@ def misfiled_landmark(domain: object, record: object, *, people: object = (),
             return None
         words = " ".join(collapsed_text(record.get(key)) for key in ("label", "what"))
         return EVENT_IS_NOT_A_JOB if _EVENT_WORDS_RE.search(words) else None
+    if name == "missions":
+        if isinstance(record.get("span"), dict) and record["span"]:
+            return None
+        date = record.get("date")
+        if not isinstance(date, dict):
+            return None
+        words = " ".join(collapsed_text(record.get(key)) for key in ("label", "what", "note"))
+        if _EVENT_WORDS_RE.search(words):
+            return EVENT_IS_NOT_A_MISSION
+        place = " ".join(collapsed_text(record.get(key)) for key in ("where", "place")
+                         if collapsed_text(record.get(key)).casefold() not in _NO_PLACE_WORDS)
+        if not place and not date.get("provenance"):
+            return EVENT_IS_NOT_A_MISSION
+        return None
     if name == "partnerships":
         who = collapsed_text(record.get("who")) or collapsed_text(record.get("label"))
         if who and _ORGANIZATION_WORDS_RE.search(who):

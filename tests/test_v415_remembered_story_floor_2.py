@@ -244,7 +244,7 @@ class TheHelpers(unittest.TestCase):
         self.assertNotIn("(Ridgeview): June 1990", every)
 
     def test_the_rule_version_moved(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:31")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:32")
 
 
 if __name__ == "__main__":

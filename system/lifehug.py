@@ -2606,7 +2606,8 @@ def cmd_landmark_refile(args: argparse.Namespace) -> int:
 
     `landmark_projection.A_RECORD_IS_FILED_WHERE_IT_BELONGS` for what landed
     before the write seat knew it: a person's name filed as a school, a dated
-    event filed as a job, a company or a fund filed as a partnership.
+    event filed as a job or (v420) as a mission, a company or a fund filed as a
+    partnership.
     `landmark_projection.refile_plan` names each one; ``--apply`` supersedes
     its claims (scope ``landmarks/<domain>``) and, for an event, files the
     ordinary moment it is (a refile record under
@@ -5088,7 +5089,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "landmark-refile",
         help="Refile landmark records filed in the wrong domain (a person as a "
-             "school, an event as a job, a company as a partnership)")
+             "school, an event as a job or a mission, a company as a partnership)")
     p.add_argument("--apply", action="store_true",
                    help="supersede, file the moments and republish; without it "
                         "nothing is written and the plan is printed")

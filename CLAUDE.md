@@ -90,6 +90,19 @@ node of that kind. `landmarks_interaction.A_LADDER_OPENS_ON_A_MENTION` decides
 which ladders are live; never offer either ladder by hand to a vault that has
 not raised it.
 
+**A relative's mission is theirs; a dated event is not a mission; two places
+are two stays (v420, lifehug#487).** A landmark entry whose own `subject`
+names somebody else by a relation word ("Dad", "my uncle") is that person's,
+never a stretch of the owner's life, and never hides the Missions lane his own
+Missionary work entry derives (`landmark_projection.A_RELATIVES_ENTRY_IS_THEIRS`).
+A `missions` record with no span that reads as an event, or names no place and
+gives no warrant for its date, is refiled as a moment
+(`landmark_projection.EVENT_IS_NOT_A_MISSION`; `landmark-refile --apply` for
+what landed before). Two dated work or school tellings of one identity that
+state different places are two stays
+(`landmarks_interaction.TWO_STATED_PLACE_STRETCHES_ARE_TWO_STAYS`). Never file
+a relative's mission as the owner's by leaving out its subject.
+
 **A birthday anniversary is not a birth (v403, owner 2026-10-10).** A dated
 birthday is a birth (v344) only when it can be one: a birthday whose year
 disagrees with a birth the vault already knows for that person — roster

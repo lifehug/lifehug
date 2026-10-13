@@ -386,8 +386,18 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:31 -->
-`timeline-rules:31` — the remembered-story floor reaches what the owner's
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:32 -->
+`timeline-rules:32` — whose stretch, and how many (v420, lifehug#487): a
+chain-domain entry whose own `subject` names somebody else by a relation word
+(a `missions` entry with `subject: "Dad"`) is that person's — `other_person`,
+`contextual_only` — and never the owner's own stretch
+(`landmark_projection.A_RELATIVES_ENTRY_IS_THEIRS`); an entry with no subject,
+or one that names him, is his exactly as before. Two dated `work` or `schools`
+tellings of one identity whose stated places do not intersect are two stays of
+it, whatever the distance between them
+(`landmarks_interaction.TWO_STATED_PLACE_STRETCHES_ARE_TWO_STAYS`), so a
+Cedarport stint and a Harbor City stint at one employer each keep their own
+end. Before it, `timeline-rules:31` — the remembered-story floor reaches what the owner's
 republish showed it missing (v415): any moment on his axis whose inferred
 opening is at or before his birth is a remembered moment and opens at his
 earliest-memory age, life-stage phrase or not, unless every sentence of it is
