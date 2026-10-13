@@ -799,6 +799,28 @@ calculating placement against a spine**:
   `diagnostics.remembered_story` and summarized in the generation's receipt
   (`temporal_receipts.remembered_story_summary`: `moved`, `unmoved`,
   `declined`, `declined_nodes`), so the pass is verifiable from the vault alone.
+- **A relative's mission is theirs; a dated event is not a mission; two places
+  are two stays** (v420, `timeline-rules:32`, lifehug#487). A `missions` (or
+  any chain-domain) entry whose own `subject` names somebody else by a relation
+  word — "Dad", "my uncle", "Dad's mission" — is that person's
+  (`landmark_projection.A_RELATIVES_ENTRY_IS_THEIRS`): its node is
+  `other_person`/`contextual_only`, it is drawn on no lane of the owner's, and
+  it no longer hides the Missions lane his own covered stretch derives (the
+  Missionary work entry and the MTC school and stay). A bare name with no
+  relation word is not decided against him. A `missions` record that states
+  no span and reads as an event ("legal action", "court hearing" — the event
+  words now include `legal`, `court`, `action`, `hearing`, `filing`,
+  `dispute`), or names no place and gives no warrant for its date, is refiled
+  as an ordinary moment at its own date
+  (`landmark_projection.EVENT_IS_NOT_A_MISSION`) — by `timeline.save_landmark`
+  the moment it lands and by `landmark-refile --apply` for what landed before.
+  Two dated `work` or `schools` tellings of one identity whose stated places
+  (`where`/`place`/`city`/`state`) do not intersect are two stays
+  (`landmarks_interaction.TWO_STATED_PLACE_STRETCHES_ARE_TWO_STAYS`), so the
+  chain reads stay → stay → next employer with no invented hole. A telling
+  that names several places ("Cedarport, Harbor City, AZ, WA") never
+  separates by place; its stretch decides which stay it joins, and it never
+  respells that stay's place.
 - **An estimate is capped at about five years**
   (`resolver.AN_ESTIMATE_WIDER_THAN_FIVE_YEARS_STAYS_A_WINDOW`): a wider one
   stays the probable window and is asked about only when hot

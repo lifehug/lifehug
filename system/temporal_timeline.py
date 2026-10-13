@@ -409,7 +409,13 @@ from temporal_claims import (  # noqa: E402
 #: grade, a place named outright, one house a cited moment names, a neighbour)
 #: REPLACES the inferred band; a negated grade and a spine line are never
 #: context. The same claims calculate to different bounds and findings.
-CALCULATION_RULE_VERSION = "timeline-rules:31"
+#: timeline-rules:32 (v420, lifehug#487): a chain-domain entry whose own
+#: ``subject`` names somebody else is that person's, never the owner's
+#: (`landmark_projection.A_RELATIVES_ENTRY_IS_THEIRS`), and two dated work or
+#: school tellings of one identity that state different places are two stays
+#: (`landmarks_interaction.TWO_STATED_PLACE_STRETCHES_ARE_TWO_STAYS`). The same
+#: claims calculate to different subject scopes, relations and stay bounds.
+CALCULATION_RULE_VERSION = "timeline-rules:32"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -6110,6 +6116,8 @@ def _landmark_entry_index(landmark_entries: object) -> dict:
             "source_id": source_id,
             "domain": domain,
             "entry_key": collapsed_text(row.get("entry_key")),
+            # v420 (`landmark_projection.A_RELATIVES_ENTRY_IS_THEIRS`).
+            "names_another_person": lp.entry_subject_is_another_person(row.get("record")),
         }
     return index
 
@@ -6424,8 +6432,9 @@ def _owner_relevance(group: dict, *, best: object, entry_index: dict, owner: str
 
     1. the subject resolves to the OWNER, or every landmark entry behind this
        claim is one of the OWNER's OWN LIFE domains (residences, schools,
-       work, military, birth) — their own axis, ``participated``, no evidence
-       owed. `landmark_projection.OWNER_RELEVANCE_BY_DOMAIN` is deliberately a
+       work, military, birth) and at least one of them names nobody else
+       (v420, `landmark_projection.A_RELATIVES_ENTRY_IS_THEIRS`) — their own
+       axis, ``participated``, no evidence owed. `landmark_projection.OWNER_RELEVANCE_BY_DOMAIN` is deliberately a
        table of the FOUR other-person domains, not the nine; an entry from any
        domain outside it never reaches the subject question at all;
     2. identity landed on more than one candidate and stopped rather than
@@ -6483,11 +6492,19 @@ def _owner_relevance(group: dict, *, best: object, entry_index: dict, owner: str
     }
     if normalized_mention_key(subject) == normalized_mention_key(owner):
         return owner_row
-    if entries and domains.isdisjoint(lp.OWNER_RELEVANCE_BY_DOMAIN):
+    if entries and domains.isdisjoint(lp.OWNER_RELEVANCE_BY_DOMAIN) \
+            and not all(entry.get("names_another_person") for entry in entries):
         # Every entry behind this claim is one of the owner's own-life
         # domains — a residence/school/work/military/birth entry's subject is
         # the owner whatever its raw mention text happens to be (a domain-word
         # fallback is common when the entry names nobody else).
+        #
+        # v420 (`landmark_projection.A_RELATIVES_ENTRY_IS_THEIRS`, lifehug#487):
+        # but only when it names nobody else. A `missions` entry filed with
+        # ``subject: "Dad"`` is his father's mission, and falls through to the
+        # `other_person` row below with its domain's relevance —
+        # `contextual_only`, since no chain domain grants any. One entry of
+        # his own behind the claim is still enough to make it his.
         return owner_row
     if _mention_is_ambiguous(group):
         return {

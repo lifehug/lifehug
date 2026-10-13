@@ -66,6 +66,7 @@ if str(SYSTEM_DIR) not in sys.path:
 import chronology as chrono  # noqa: E402
 import cornerstones as cs  # noqa: E402
 import landmark_identity as lid  # noqa: E402
+import landmark_projection as lp  # noqa: E402
 import landmarks_interaction as li  # noqa: E402
 from temporal_claims import collapsed_text, normalized_mention_key  # noqa: E402
 
@@ -858,6 +859,15 @@ def landmarks_view(domains: object, *, nodes: object = (), work_items: object = 
     :func:`cornerstone_markers`.
     """
     filed = domains if isinstance(domains, dict) else {}
+    # v420 (`landmark_projection.A_RELATIVES_ENTRY_IS_THEIRS`, lifehug#487): a
+    # lane is HIS stretches. An entry whose own subject names somebody else
+    # ("Dad's mission in Washington", subject "Dad") is that person's and is
+    # drawn on no lane of his — so it never suppresses the mission lane his
+    # own covered stretch derives (below), and never covers his own stays.
+    filed = {domain: [entry for entry in (entries or ())
+                      if not lp.entry_subject_is_another_person(entry)]
+             if domain in DOMAIN_ORDER and isinstance(entries, list) else entries
+             for domain, entries in filed.items()}
     nodes_by_kind: dict[str, list[dict]] = {}
     for node in nodes or ():
         if isinstance(node, dict):
@@ -870,7 +880,8 @@ def landmarks_view(domains: object, *, nodes: object = (), work_items: object = 
     stretches = covered_stretches(by_domain)
     gap_keys = _residence_gap_keys(filed)
     # Mission is mention-opened (item 3, 2026-09-25): a REAL `missions` domain
-    # entry wins; absent one, it is derived from the covered stretch. Built
+    # entry OF HIS OWN wins (v420: a relative's was dropped above, so it can
+    # never hide his); absent one, it is derived from the covered stretch. Built
     # BEFORE Homes is trimmed, from every residence stay inside the stretch.
     mission_row = None if by_domain.get("missions") else _mission_domain_row(stretches, by_domain)
     if mission_row and by_domain.get("residences"):
