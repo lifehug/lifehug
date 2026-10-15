@@ -415,7 +415,13 @@ from temporal_claims import (  # noqa: E402
 #: school tellings of one identity that state different places are two stays
 #: (`landmarks_interaction.TWO_STATED_PLACE_STRETCHES_ARE_TWO_STAYS`). The same
 #: claims calculate to different subject scopes, relations and stay bounds.
-CALCULATION_RULE_VERSION = "timeline-rules:32"
+#: timeline-rules:33 (v421, owner 2026-10-15): who-is-who
+#: (`cornerstones.Relations`) names a landmark entry's person by its ``who``
+#: and ``label`` only, never its ``subject``
+#: (`cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`), and reads STANDING entries
+#: only, so a retired entry introduces nobody. The same claims calculate to
+#: different cornerstone keys, titles and cards (his sister's false "died").
+CALCULATION_RULE_VERSION = "timeline-rules:33"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all

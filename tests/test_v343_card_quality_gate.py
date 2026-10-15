@@ -494,7 +494,7 @@ class EndToEndIdentityCardsTests(unittest.TestCase):
 
 class CalculationRuleVersionTests(unittest.TestCase):
     def test_the_rule_version_is_the_one_in_force(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:32")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:33")
 
 
 if __name__ == "__main__":

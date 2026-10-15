@@ -1720,6 +1720,8 @@ def describe_migration(report: object) -> list[str]:
         f"event(s) across {row.get('deduped_sources')} source(s)",
         f"  undated restatements of recorder records: "
         f"{row.get('deduped_undated_recorder_records', 0)}",
+        f"  read back from refiled / withdrawn landmark entries: "
+        f"{row.get('deduped_refiled_records', 0)} / {row.get('deduped_withdrawn_records', 0)}",
         f"  superseded by re-classification: {row.get('superseded_claims')} claim(s) "
         f"across {row.get('superseded_classifications')} classification(s)",
         f"  nodes: {row.get('nodes_before')} -> {row.get('nodes_after')}"

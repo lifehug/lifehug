@@ -121,8 +121,12 @@ the person's nodes and the form's own entry for it (for a death, every
 string; the owner's own birth is never cleared
 (`landmark_edit.A_CLEARED_CELL_IS_THE_OWNERS_NO`). A landmark-form stay may
 carry its own `"where"`, filed for that stay only
-(`landmark_edit.A_STAY_NAMES_ITS_OWN_PLACE`). Never add an entry's `subject`
-to the names of the person it is about.
+(`landmark_edit.A_STAY_NAMES_ITS_OWN_PLACE`). The who-is-who change is a
+fold-time READING: `CALCULATION_RULE_VERSION` is `timeline-rules:33`, so an
+upgraded vault re-derives on its first publish with no vault edit and no new
+step; `migrate-classifier-moments` (the weekly sweep, or by hand) supersedes a
+retired entry's classifier claims. Never add an entry's `subject` to the names
+of the person it is about.
 
 **A birthday anniversary is not a birth (v403, owner 2026-10-10).** A dated
 birthday is a birth (v344) only when it can be one: a birthday whose year

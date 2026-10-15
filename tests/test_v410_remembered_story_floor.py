@@ -317,7 +317,7 @@ class ThePhrasesAndTheTable(unittest.TestCase):
             self.assertGreater(len(rule), 40)
 
     def test_the_rule_version_moved(self):
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:32")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:33")
 
 
 if __name__ == "__main__":

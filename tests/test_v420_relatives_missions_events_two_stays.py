@@ -159,7 +159,7 @@ class ARelativesMissionFoldTests(Vault):
         self.assertEqual(node["owner_timeline_relation"], "participated")
 
     def test_the_rule_version_moved(self) -> None:
-        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:32")
+        self.assertEqual(tt.CALCULATION_RULE_VERSION, "timeline-rules:33")
 
 
 def his_mission_domains() -> dict:

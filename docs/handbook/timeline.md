@@ -153,7 +153,8 @@ asks you for a year.
   subject is the mourner, whose line the loss sits on, so his sister's loss
   of Brett never again makes her the one who died — and a withdrawn
   (retired or refiled) entry introduces nobody
-  (`cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`). Nor does the story
+  (`cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`, `timeline-rules:33`, so an
+  upgraded vault re-derives on its first publish). Nor does the story
   classifier's reading of a withdrawn entry's own file: it is skipped like a
   refiled record's, and what it filed before is superseded on the next
   migration run (`classifier_claims.A_WITHDRAWN_RECORD_READ_BACK_SAYS_NOTHING`,

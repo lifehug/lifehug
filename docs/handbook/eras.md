@@ -386,8 +386,14 @@ container, no rebuild, sweep or rule bump puts it back — and event identity I1
 longer the owner by default — a relative's own milestone left the axis and a
 scene the owner told about them stayed on it as `lived_effect`. The version in
 force is
-<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:32 -->
-`timeline-rules:32` — whose stretch, and how many (v420, lifehug#487): a
+<!-- parity: temporal_timeline.CALCULATION_RULE_VERSION = timeline-rules:33 -->
+`timeline-rules:33` — whose line (v421, owner 2026-10-15): who-is-who names a
+landmark entry's person by its `who` and `label` only — in `losses` the
+`subject` is the mourner, in `partnerships` whose partnership it is — and
+reads standing entries only, so a retired entry introduces nobody
+(`cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`); his sister's false "died ·
+2024" (her loss of somebody else, keyed to her) is gone, and an upgraded vault
+re-derives on its first publish. Before it, `timeline-rules:32` — whose stretch, and how many (v420, lifehug#487): a
 chain-domain entry whose own `subject` names somebody else by a relation word
 (a `missions` entry with `subject: "Dad"`) is that person's — `other_person`,
 `contextual_only` — and never the owner's own stretch

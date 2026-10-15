@@ -212,7 +212,8 @@ classifier's "Brett's death" (subject "Brett") was keyed to her. Three rules:
   is never a name of the person the entry is about. `Relations` is built from
   STANDING entries only (`landmark_projection.standing_landmark_sources`, at
   the fold, the views and the person form's settle seat), so a withdrawn entry
-  introduces nobody. The fold's claim-driven readers of the landmark sources
+  introduces nobody; `CALCULATION_RULE_VERSION` is `timeline-rules:33`, so an
+  upgraded vault re-derives on its first publish. The fold's claim-driven readers of the landmark sources
   (participation episodes, the entry index, the ladder drawing) are unchanged:
   they already read only active claims.
 * `classifier_claims.A_WITHDRAWN_RECORD_READ_BACK_SAYS_NOTHING` — the story
