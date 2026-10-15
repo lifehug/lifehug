@@ -427,6 +427,23 @@ def _encode_marker(payload: dict) -> str:
     return MARKER_PREFIX + base64.b64encode(raw).decode("ascii") + MARKER_SUFFIX
 
 
+def restamp_marker_question(marker_line: str, question_id: str, question_text: str) -> str:
+    """The promotion marker line re-stamped for a rewritten question (ADR 0045,
+    `question_bank.A_REWRITE_IS_THE_SAME_QUESTION_RESAID`).
+
+    The marker pins the promoted question's bytes (``question_revision``); a
+    rewrite through `question_bank.rewrite_question` is the owner re-saying
+    that same promoted question, so only ``question_revision`` moves — the
+    candidate, its provenance and ``promoted_at`` stay as promoted. The old
+    text survives in the row's ``craft: rewritten`` comment.
+    """
+    payload = _decode_marker(marker_line)
+    if payload["question_id"] != question_id:
+        raise CandidatePromotionError("promotion marker question line id mismatch")
+    payload["question_revision"] = _question_revision(question_id, question_text)
+    return _encode_marker(payload)
+
+
 def _decode_marker(line: str) -> dict:
     match = MARKER_RE.fullmatch(line)
     if not match:

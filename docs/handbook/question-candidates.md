@@ -290,6 +290,13 @@ The two bands that decide a candidate's fate: **auto-promote** at or above
 to that, and simply **stay a candidate** below 0.70 — no separate craft
 gate, per ADR 0008.
 
+Since ADR 0042 a craft verdict (`question_craft.evaluate`) gates before the
+score: a `fail` never promotes, a `review` parks. Once a question is in the
+bank the owner can **Keep** it (`question-keep`, the owner's pass beats the
+rule — ADR 0045), **Rewrite** it in place under the same id
+(`question-rewrite --text`, re-evaluated; a promoted row's marker is
+re-stamped), or **Retire** it (`question-retire`).
+
 ### Duplicate detection
 
 A near-duplicate is caught semantically, not just by exact text match:
@@ -431,5 +438,6 @@ field-overwrite fix).
 - [ADR 0007 — The Question-Judgment Interaction](https://github.com/lifehug/lifehug/blob/main/docs/adr/0007-question-judgment-interaction.md) — the priority/penalty vocabulary §4 quotes, and the JUDGE/RUBRIC-EDIT split §5 describes; see also the interaction's own [behavior contract](https://github.com/lifehug/lifehug/blob/main/interactions/question_judgment/prompt/behavior.md).
 - [ADR 0008 — One published quality score, craft penalties folded in](https://github.com/lifehug/lifehug/blob/main/docs/adr/0008-unified-quality-score.md) — the formula in §4.
 - [ADR 0009 — Decisions Feed The Loop](https://github.com/lifehug/lifehug/blob/main/docs/adr/0009-decisions-feed-the-loop.md) — the `decision_reason` field, owner judgment signals, and the weekly rubric-edit runtime.
+- [ADR 0045 — The owner's keep beats the rule](../adr/0045-the-owners-keep-beats-the-rule.md) — Keep / Rewrite beside Retire; a question anywhere is a question (amends ADR 0042).
 - [ADR 0019 — Git-tree candidate promotion receipts](../adr/0019-candidate-promotion-receipts.md) — the one mutation authority, structured marker, replay, and receipt contract.
 - The hosted platform's review-loop contracts (parallel PR review, owner closeout, executable walkthroughs) that this feature's Review lane is built against: [`lifehug-platform` docs/BUILDING.md](https://github.com/lifehug/lifehug-platform/blob/main/docs/BUILDING.md) and [docs/REVIEWING.md](https://github.com/lifehug/lifehug-platform/blob/main/docs/REVIEWING.md) (external repo — platform orchestrates this package, never forks it).

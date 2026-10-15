@@ -24,6 +24,29 @@ Every rule is written to be NARROW. A rule that fails a good question is worse
 than no rule: an imperative ("Tell me about…") is a good question without a
 question mark; ``day-to-day`` is a word, not a slug; "When did you…" is the
 person's own date, not a template.
+
+v422 (ADR 0045, owner 2026-10-15) — three named rules, after seven good
+questions in a real bank were held back as craft FAILs:
+
+* ``A_QUESTION_ANYWHERE_IS_A_QUESTION`` — ``not_a_question`` fires only when
+  NO sentence of the text ends with "?" and NO clause opens with an imperative
+  opener. A clause opens at the start of the text, after sentence punctuation
+  (. ! ?), after a dash (— – or " - "), a colon or a semicolon, optionally
+  behind an opening quote. "You described X. Where did you build it?" and
+  "You said 'X' — tell me about one moment…" are questions.
+* ``A_PLURAL_IS_NOT_A_NOMINALIZATION`` — ``garbled_repeat`` never pairs a word
+  with its own plural ("moments … moment"); it pairs a stem with its
+  nominalization only where the SHORTER word does not itself end in the
+  suffix ("graduate … graduation", "settle … settlement").
+* ``A_KEPT_QUESTION_IS_THE_OWNERS_PASS`` — ``evaluate(text, context={"kept":
+  True})`` is a PASS whatever the rules say: ``reasons`` is empty, the score
+  is computed as usual, and the ADDITIVE key ``overridden`` lists the reasons
+  it would otherwise have had (``[]`` when it would have passed anyway). The
+  key is present only when ``kept`` is truthy. The owner's keep is written on
+  the bank row (``question_bank.THE_OWNERS_KEEP_IS_ON_THE_ROW``); every caller
+  that re-evaluates a bank row — the lint, the planner, the hosted send-time
+  gate replaying this function — passes it. ``fail_reasons`` and
+  ``review_reasons`` stay pure: they report what the rules see.
 """
 
 from __future__ import annotations
@@ -33,6 +56,11 @@ import json
 import re
 import sys
 from typing import TypedDict
+
+#: v422 rule names (ADR 0045) — see the module docstring.
+A_QUESTION_ANYWHERE_IS_A_QUESTION = "a_question_anywhere_is_a_question"
+A_PLURAL_IS_NOT_A_NOMINALIZATION = "a_plural_is_not_a_nominalization"
+A_KEPT_QUESTION_IS_THE_OWNERS_PASS = "a_kept_question_is_the_owners_pass"
 
 #: The three verdicts, in order of severity.
 PASS = "pass"
@@ -122,6 +150,8 @@ _EVENT_NOUNS = frozenset({
     "span", "transition", "episode", "period", "event", "loss",
 })
 _NOMINAL_SUFFIX_RE = re.compile(r"(?:tion|sion|ment|ance|ence)$", re.IGNORECASE)
+#: A nominalization, optionally plural ("graduations") — `_garbled_repeat` only.
+_NOMINAL_SUFFIX_PLURAL_RE = re.compile(r"(?:tion|sion|ment|ance|ence)s?$", re.IGNORECASE)
 
 #: Internal identifiers: the substrate's ``<prefix>:<hex>`` ids (any length a
 #: person could not have typed), and slugs — but only a slug that carries a
@@ -182,6 +212,10 @@ _VAGUE_WORDS = frozenset({
 })
 _WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9'’-]*")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.?!])\s+")
+#: Where a clause opens (A_QUESTION_ANYWHERE_IS_A_QUESTION): after sentence
+#: punctuation, a dash (— – or a spaced hyphen), a colon or a semicolon. The
+#: opening quote that may follow is stripped by `opens_as_imperative`.
+_CLAUSE_SPLIT_RE = re.compile(r"(?<=[.?!])\s+|\s*[\u2014\u2013]\s*|\s+-\s+|[:;]\s*")
 _TRAILING_JUNK = " \t\r\n\"'“”‘’*)"
 
 
@@ -233,10 +267,16 @@ def near_duplicate_of(text: str, other_texts: list[tuple[str, str]],
     return None
 
 
-class Verdict(TypedDict):
+class _VerdictCore(TypedDict):
     verdict: str
     reasons: list[str]
     score: float
+
+
+class Verdict(_VerdictCore, total=False):
+    #: A_KEPT_QUESTION_IS_THE_OWNERS_PASS: present only for a kept question —
+    #: the reasons the rules would have given (``[]`` if none).
+    overridden: list[str]
 
 
 def _clean(text: object) -> str:
@@ -263,6 +303,18 @@ def opens_as_imperative(text: str) -> bool:
     return any(re.match(re.escape(opener) + r"\b", lowered) for opener in IMPERATIVE_OPENERS)
 
 
+def asks_anywhere(text: str) -> bool:
+    """A_QUESTION_ANYWHERE_IS_A_QUESTION: some sentence ends with "?" or some
+    clause opens with an imperative opener. Built from `_ends_as_question` and
+    `opens_as_imperative`, applied sentence by sentence and clause by clause."""
+    if _ends_as_question(text):
+        return True
+    if any(_ends_as_question(sentence) for sentence in _SENTENCE_SPLIT_RE.split(text)):
+        return True
+    return any(opens_as_imperative(clause) for clause in _CLAUSE_SPLIT_RE.split(text)
+               if clause.strip())
+
+
 def _content_tokens(text: str) -> list[str]:
     return [w.lower().strip("'’") for w in words(text)
             if w.lower().strip("'’") not in _STOPWORDS]
@@ -287,15 +339,27 @@ def _label_template(text: str) -> bool:
     return last in _EVENT_NOUNS or bool(_NOMINAL_SUFFIX_RE.search(last))
 
 
+def _is_plural_of(longer: str, shorter: str) -> bool:
+    return longer in (shorter + "s", shorter + "es")
+
+
 def _garbled_repeat(text: str) -> bool:
     """The same stem twice where one is its nominalization: "graduate from
-    high school graduation". Both tokens six letters or longer."""
+    high school graduation". Both tokens six letters or longer.
+
+    A_PLURAL_IS_NOT_A_NOMINALIZATION: a word and its own plural ("moments …
+    moment") is never a pair, and the pair is stem + suffix only where the
+    LONGER word carries the suffix and the SHORTER one does not."""
     tokens = [t.lower() for t in words(text) if len(t) >= 6]
     for i, left in enumerate(tokens):
         for right in tokens[i + 1:]:
             if left == right or left[:6] != right[:6]:
                 continue
-            if _NOMINAL_SUFFIX_RE.search(left) or _NOMINAL_SUFFIX_RE.search(right):
+            shorter, longer = sorted((left, right), key=len)
+            if _is_plural_of(longer, shorter):
+                continue
+            if (_NOMINAL_SUFFIX_PLURAL_RE.search(longer)
+                    and not _NOMINAL_SUFFIX_PLURAL_RE.search(shorter)):
                 return True
     return False
 
@@ -360,7 +424,7 @@ def fail_reasons(text: str, context: dict | None = None) -> list[str]:
     reasons: list[str] = []
     if len(words(body)) < MIN_WORDS:
         reasons.append("too_short")
-    if not _ends_as_question(body) and not opens_as_imperative(body):
+    if not asks_anywhere(body):
         reasons.append("not_a_question")
     if _label_template(body):
         reasons.append("label_template")
@@ -410,24 +474,33 @@ def evaluate(text: object, *, context: dict | None = None, with_score: bool = Tr
     for the duplicate check; ``self_id`` — the bank id being re-evaluated, so a
     question is never its own duplicate; ``slugs``/``anchors``/``roster`` —
     slug-shaped handles a template might leak; ``candidate`` — candidate fields
-    (``priority``, ``story_function``, ``source_path``) for the score.
+    (``priority``, ``story_function``, ``source_path``) for the score;
+    ``kept`` — truthy when the owner kept this bank row
+    (A_KEPT_QUESTION_IS_THE_OWNERS_PASS): the verdict is PASS, ``reasons`` is
+    empty, and ``overridden`` carries what the rules would have said.
     """
     ctx = context if isinstance(context, dict) else {}
     body = _clean(text)
     failed = fail_reasons(body, ctx)
+    reviewed = [] if failed else review_reasons(body, ctx)
+    if ctx.get("kept"):
+        result: Verdict = {"verdict": PASS, "reasons": [],
+                           "score": _score(body, ctx) if with_score else 0.0,
+                           "overridden": failed or reviewed}
+        return result
     if failed:
         return {"verdict": FAIL, "reasons": failed, "score": 0.0}
-    reviewed = review_reasons(body, ctx)
     if reviewed:
         return {"verdict": REVIEW, "reasons": reviewed, "score": 0.0}
-    score = 0.0
-    if with_score:
-        from question_candidates import unified_quality_score  # noqa: PLC0415
+    return {"verdict": PASS, "reasons": [], "score": _score(body, ctx) if with_score else 0.0}
 
-        candidate = dict(ctx.get("candidate") or {})
-        candidate["text"] = body
-        score = float(unified_quality_score(candidate)["score"])
-    return {"verdict": PASS, "reasons": [], "score": score}
+
+def _score(body: str, ctx: dict) -> float:
+    from question_candidates import unified_quality_score  # noqa: PLC0415
+
+    candidate = dict(ctx.get("candidate") or {})
+    candidate["text"] = body
+    return float(unified_quality_score(candidate)["score"])
 
 
 def main(argv: list[str] | None = None) -> int:

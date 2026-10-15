@@ -62,6 +62,26 @@ POSITIVES = [
     "What did your mother always say when you left the house?",
     "When did you first feel like an adult?",
     "Pick one photo from your childhood and tell me what is in it.",
+    # v422 (ADR 0045): seven good questions from the owner's own bank that the
+    # first-sentence test and the plural pairing held back as FAILs.
+    ("You called economic insecurity 'a wound I felt from being young' — tell me about one "
+     "specific moment growing up when you first felt that insecurity."),
+    ("You described moments with your grandmother that were meaningful to you — can you pick "
+     "one single moment, a specific day or scene, and walk me through it: where you were, what "
+     "she did or said, and what you felt in your body at the time?"),
+    ("You've said Etherfuse was built to support the family — tell me about one day when the "
+     "weight of running the company and the pull of being present for Charlee or your kids hit "
+     "you at the same time, and what you did."),
+    ("You described building a scoring model to evaluate countries — cost of credit, financial "
+     "access, remittance flows, sovereign debt quality. Where did you and AJ build this? Was it "
+     "a spreadsheet at a kitchen table, a whiteboard session? Walk me through the process."),
+    "You named your son James. Tell me about that decision.",
+    ("You said 'nothing she did for me went without meaning or impact' — tell me about one "
+     "specific thing she did, something small or routine, that you now see differently than "
+     "you did when it happened."),
+    ("When AJ was a kid and you were in ninth grade, you played trampoline in the backyard even "
+     "though you had little in common yet. Tell me about one specific afternoon from those "
+     "years you can still see clearly."),
 ]
 
 

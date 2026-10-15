@@ -3,6 +3,8 @@
 Date: 2026-10-04
 Status: ratified (owner, 2026-10-04 — "continue with the fix and full plan then merge on green"; lifehug-platform#984)
 
+> Amended by [ADR 0045](0045-the-owners-keep-beats-the-rule.md) (v422): a question anywhere is a question, a plural is not a nominalization, and the owner's keep beats the rule — Keep and Rewrite stand beside Retire.
+
 ## Context
 
 On 2026-10-04 the owner's daily question read **"update"**; the queue's next

@@ -203,6 +203,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # ADR 0042: rewrites one bank row to the retired grammar `- [-]` — a
     # single-file bank mutation, the same family as candidates-promote.
     "question-retire",
+    # ADR 0045 (v422): keep writes a `craft: kept` comment under one open
+    # row; rewrite re-says one open row in place — single-file bank
+    # mutations, the question-retire family.
+    "question-keep", "question-rewrite",
     "ingest", "ingest-story",
     # documents (v412, letters D1): `documents file` writes immutable letter
     # records under sources/letters/ and registers them in the manifest.
@@ -3098,6 +3102,24 @@ def cmd_question_retire(args: argparse.Namespace) -> int:
     return run_python("question_bank.py", flags)
 
 
+def cmd_question_keep(args: argparse.Namespace) -> int:
+    flags = ["keep", args.question_id]
+    if getattr(args, "reason", None):
+        flags.extend(["--reason", args.reason])
+    if getattr(args, "json", False):
+        flags.append("--json")
+    return run_python("question_bank.py", flags)
+
+
+def cmd_question_rewrite(args: argparse.Namespace) -> int:
+    flags = ["rewrite", args.question_id, "--text", args.text]
+    if getattr(args, "reason", None):
+        flags.extend(["--reason", args.reason])
+    if getattr(args, "json", False):
+        flags.append("--json")
+    return run_python("question_bank.py", flags)
+
+
 def cmd_entity_roster(args: argparse.Namespace) -> int:
     flags = ["--type", args.type]
     if getattr(args, "convert_identity", False):
@@ -4141,6 +4163,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reason", help="Why (default: the craft evaluation's fail reasons)")
     p.add_argument("--json", action="store_true", help="Print the receipt as JSON")
     p.set_defaults(func=cmd_question_retire)
+
+    p = sub.add_parser("question-keep",
+                       help="Keep one open question-bank entry: `<!-- craft: kept DATE: reason "
+                            "-->` — the owner's pass beats the craft rules everywhere (ADR 0045)")
+    p.add_argument("question_id", help="The open bank id to keep (e.g. A57)")
+    p.add_argument("--reason", help="Why (default: 'kept by the owner')")
+    p.add_argument("--json", action="store_true", help="Print the receipt as JSON")
+    p.set_defaults(func=cmd_question_keep)
+
+    p = sub.add_parser("question-rewrite",
+                       help="Re-say one open question-bank entry in place (same id); the new "
+                            "text is re-evaluated and a craft FAIL is refused (ADR 0045)")
+    p.add_argument("question_id", help="The open bank id to rewrite (e.g. M13)")
+    p.add_argument("--text", required=True, help="The new question text")
+    p.add_argument("--reason", help="Why (recorded on the rewritten comment)")
+    p.add_argument("--json", action="store_true",
+                   help='Print the receipt as JSON (refused: {"refused": true, "reasons": [...]})')
+    p.set_defaults(func=cmd_question_rewrite)
 
     p = sub.add_parser("entity-roster",
                        help="Resolve mentioned entities (person/place/period/object/theme) into a canonical roster")
