@@ -103,6 +103,27 @@ state different places are two stays
 (`landmarks_interaction.TWO_STATED_PLACE_STRETCHES_ARE_TWO_STAYS`). Never file
 a relative's mission as the owner's by leaving out its subject.
 
+**A subject is whose line, not who; a withdrawn record read back says
+nothing; a cleared cell is the owner's no; a stay names its own place (v421,
+owner 2026-10-15).** A landmark entry's person is named by its `who` and
+`label` only — in `losses` the `subject` is the mourner, in `partnerships`
+whose partnership it is — and `cornerstones.Relations` reads STANDING entries
+only (`landmark_projection.standing_landmark_sources`), so a retired entry
+introduces nobody (`cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`). The story
+classifier's reading of a withdrawn entry's own file is skipped like a
+refiled record's and what it filed is superseded on the next migration
+(`classifier_claims.A_WITHDRAWN_RECORD_READ_BACK_SAYS_NOTHING`, report key
+`deduped_withdrawn_records`). The person form's `"cleared": [...]` (the ×)
+supersedes, in one undoable correction, every claim dating that milestone on
+the person's nodes and the form's own entry for it (for a death, every
+`losses` entry naming them), and clears the roster date through
+`entity_verdict.apply_verdict(clear_born=/clear_died=)` — never an empty
+string; the owner's own birth is never cleared
+(`landmark_edit.A_CLEARED_CELL_IS_THE_OWNERS_NO`). A landmark-form stay may
+carry its own `"where"`, filed for that stay only
+(`landmark_edit.A_STAY_NAMES_ITS_OWN_PLACE`). Never add an entry's `subject`
+to the names of the person it is about.
+
 **A birthday anniversary is not a birth (v403, owner 2026-10-10).** A dated
 birthday is a birth (v344) only when it can be one: a birthday whose year
 disagrees with a birth the vault already knows for that person — roster

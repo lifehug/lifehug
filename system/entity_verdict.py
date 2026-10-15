@@ -9,7 +9,7 @@ and the candidate lane's promote-override.
 
     entity-verdict <type> <slug> graduate|never|clear
         [--alias A]... [--relationship R] [--living|--not-living]
-        [--born EDTF [--born-basis B]] [--died EDTF [--died-basis B]]
+        [--born EDTF [--born-basis B] | --no-born] [--died EDTF [--died-basis B] | --no-died]
         [--fold-into ROW | --focus FOCUS] [--retract-alias A]...
         [--share-alias A --with WHO] [--located-in PLACE] [--handle H | --clear-handle]
         [--ensure [--name NAME]]   (--maps-to: deprecated, rewritten)
@@ -359,7 +359,9 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
                   shared_with: str | None = None,
                   located_in: str | None = None,
                   handle: str | None = None,
-                  clear_handle: bool = False) -> dict:
+                  clear_handle: bool = False,
+                  clear_born: bool = False,
+                  clear_died: bool = False) -> dict:
     """Apply one verdict — and, since v190, one round of identity facts — to
     one roster entity, atomically. Returns the entity's post-verdict record
     (the same dict object written to disk). Raises `EntityVerdictError` on
@@ -375,7 +377,12 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
     .GRANDPARENT_SIDE_FIELD`, the field the side card asks for) and
     ``relation_word`` (the word he calls them by — "Grandpa", "Mom"; ``""``
     clears) ride the same one write. Both are settled identity fields a
-    refresh keeps."""
+    refresh keeps.
+
+    v421 (`landmark_edit.A_CLEARED_CELL_IS_THE_OWNERS_NO`): ``clear_born`` /
+    ``clear_died`` remove the row's ``born`` / ``died`` — the owner's "it has
+    not happened" (``--no-born`` / ``--no-died``). Explicit flags, never an
+    empty date; passing a date and its clear together is refused."""
     if entity_type not in ENTITY_TYPES:
         raise EntityVerdictError(
             f"unknown entity type: {entity_type!r} (known: {', '.join(ENTITY_TYPES)})")
@@ -388,6 +395,10 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
         "born": parse_person_date("born", born, born_basis),
         "died": parse_person_date("died", died, died_basis),
     }
+    if clear_born and dates["born"] is not None:
+        raise EntityVerdictError("--born and --no-born are different acts — pass one")
+    if clear_died and dates["died"] is not None:
+        raise EntityVerdictError("--died and --no-died are different acts — pass one")
     if grandparent_side is not None:
         grandparent_side = str(grandparent_side).strip().casefold()
         if grandparent_side not in GRANDPARENT_SIDES + ("",):
@@ -590,6 +601,11 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
         chosen = _preferred_date(target.get(date_field), dates[date_field])
         if chosen is not None:
             target[date_field] = chosen
+    # v421: the owner's explicit "it has not happened".
+    if clear_born:
+        target.pop("born", None)
+    if clear_died:
+        target.pop("died", None)
 
     if fold_into is not None or focus is not None:
         # A fold or a Focus WINS over graduate (module docstring): the record
@@ -806,6 +822,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--died-basis", metavar="B", default=None,
                         help=f"How the death date was arrived at "
                              f"({', '.join(chronology.BASES)}; default stated)")
+    parser.add_argument("--no-born", dest="no_born", action="store_true",
+                        help="Clear the row's born date (v421: the owner's 'not so')")
+    parser.add_argument("--no-died", dest="no_died", action="store_true",
+                        help="Clear the row's died date (v421: has not died)")
     parser.add_argument("--maps-to", metavar="SLUG",
                         help="DEPRECATED (v386, one version): rewritten to "
                              "--fold-into when SLUG is a row, else --focus.")
@@ -843,6 +863,7 @@ def main(argv: list[str] | None = None) -> int:
             share_alias=args.share_alias, shared_with=args.shared_with,
             located_in=args.located_in, handle=args.handle,
             clear_handle=args.clear_handle,
+            clear_born=args.no_born, clear_died=args.no_died,
         )
     except EntityAliasContested as exc:
         # v383 (ADR 0041): the package's own refusal, verbatim, on stdout —

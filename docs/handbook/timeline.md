@@ -135,7 +135,29 @@ asks you for a year.
   the date he typed is superseded by one undoable correction, so ⚠ becomes ✓
   and the contradiction card closes; a reading that agrees with it (a coarser
   year, a day/month-ambiguous range that holds it) stays as evidence
-  (`landmark_edit.A_FORM_DATE_SETTLES_ITS_RIVALS`).
+  (`landmark_edit.A_FORM_DATE_SETTLES_ITS_RIVALS`). **A cleared cell is the
+  owner's no** (v421, owner 2026-10-15: *"there needs to be a way to say it
+  hasn't happened"*): an empty date on the form still leaves what is there,
+  but the × beside a born, married, divorced or died cell sends
+  `"cleared": ["died", ...]`, and after the save publishes every active claim
+  that dates or asserts that milestone on the person's milestone nodes, the
+  date claims of the form's own entry for it and — for a death — every
+  `losses` entry naming that person are superseded by ONE correction (scope
+  `cornerstones/cleared`, undone by the form's undo); the roster row's
+  `born`/`died` is cleared through `entity_verdict.apply_verdict`
+  (`clear_born`/`clear_died`, CLI `--no-born`/`--no-died`; a cleared death
+  sets `living` true). The cell reads empty and a cleared death is no longer
+  owed. Your own birth is never cleared
+  (`landmark_edit.A_CLEARED_CELL_IS_THE_OWNERS_NO`). Who a row is comes only
+  from an entry's `who` and `label`, never its `subject` — in `losses` the
+  subject is the mourner, whose line the loss sits on, so his sister's loss
+  of Brett never again makes her the one who died — and a withdrawn
+  (retired or refiled) entry introduces nobody
+  (`cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`). Nor does the story
+  classifier's reading of a withdrawn entry's own file: it is skipped like a
+  refiled record's, and what it filed before is superseded on the next
+  migration run (`classifier_claims.A_WITHDRAWN_RECORD_READ_BACK_SAYS_NOTHING`,
+  report key `deduped_withdrawn_records`).
 - **Landmark brackets** (v365, owner 2026-09-26) — the thin lines left of
   the Timeline's rows, one lane per kind (home, school, work, mission when
   mentioned), ONE colour per kind: *"I want the bands to be continuous. This
@@ -820,7 +842,12 @@ calculating placement against a spine**:
   chain reads stay → stay → next employer with no invented hole. A telling
   that names several places ("Cedarport, Harbor City, AZ, WA") never
   separates by place; its stretch decides which stay it joins, and it never
-  respells that stay's place.
+  respells that stay's place. **A stay names its own place on the landmark
+  form** (v421, `landmark_edit.A_STAY_NAMES_ITS_OWN_PLACE`): each stay in a
+  form save may carry `"where": "Harbor City, Washington"`, filed as that
+  stay's `where` (work), `place` (school) or `city` (home); a stay that names
+  none takes the form's shared city/state/country, so saving a two-city
+  landmark no longer stamps one city on both stays.
 - **An estimate is capped at about five years**
   (`resolver.AN_ESTIMATE_WIDER_THAN_FIVE_YEARS_STAYS_A_WINDOW`): a wider one
   stays the probable window and is asked about only when hot

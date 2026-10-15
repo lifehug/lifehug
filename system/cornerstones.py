@@ -330,6 +330,24 @@ def _collective(text: object) -> bool:
     return lp.is_collective_subject(text)
 
 
+#: v421 (owner, 2026-10-15). The cornerstones grid said his sister "died ·
+#: 2024": a `losses` entry {label/who "Brett", subject "Jacque"} made one
+#: Person named both "Brett" and "Jacque", it folded into her roster row, and
+#: the classifier's "Brett's death" resolved through ``person_for("Brett")``
+#: to her. In `losses` the ``subject`` is the MOURNER — whose line the loss
+#: sits on — and in `partnerships` it is whose partnership it is; it is never
+#: a name of ``who``. :class:`Relations` names an entry's person by ``who``
+#: and ``label`` alone, and reads only STANDING entries
+#: (`landmark_projection.A_WITHDRAWN_ENTRY_SAYS_NOTHING`) — every seat that
+#: builds one hands it `landmark_projection.standing_landmark_sources`.
+A_SUBJECT_IS_WHOSE_LINE_NOT_WHO = (
+    "a landmark entry's subject is whose line it sits on - the mourner of a "
+    "loss, whose partnership a partnership is - never a name of the person it "
+    "is about; that person is named by its who and its label alone, and a "
+    "withdrawn entry introduces nobody"
+)
+
+
 class Relations:
     """Who is who, read once per fold from the roster and the landmark entries.
 
@@ -338,6 +356,9 @@ class Relations:
     names the relationship its domain implies (`children` -> child; an owner's
     `partnerships` entry that dates a marriage -> spouse; `family` -> the entry's
     own ``relation`` rung). A collective row ("Kids", "Parents") is nobody.
+    An entry's ``subject`` is never one of its person's names
+    (:data:`A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`); callers hand it standing
+    entries only.
     """
 
     def __init__(self, roster_snapshot: object = (), landmark_entries: object = (), *,
@@ -394,7 +415,9 @@ class Relations:
                 relationship = "spouse"
             elif domain != "losses":
                 continue
-            names = {who, *[collapsed_text(record.get(key)) for key in ("label", "subject")
+            # :data:`A_SUBJECT_IS_WHOSE_LINE_NOT_WHO` — the entry's own names are
+            # ``who`` and ``label``; its ``subject`` is somebody else.
+            names = {who, *[collapsed_text(record.get(key)) for key in ("label",)
                             if collapsed_text(record.get(key))]}
             self._add(Person(key=f"landmark:{normalized_mention_key(who)}", name=who,
                              relationship=relationship, names=names))
@@ -733,7 +756,8 @@ def _grain(record: object) -> str | None:
 
 
 __all__ = [
-    "A_CORNERSTONE_IS_TITLED_BY_ITS_OWN_NAME", "A_WEDDING_OR_DIVORCE_BELONGS_TO_ITS_OWN_COUPLE",
+    "A_CORNERSTONE_IS_TITLED_BY_ITS_OWN_NAME", "A_SUBJECT_IS_WHOSE_LINE_NOT_WHO",
+    "A_WEDDING_OR_DIVORCE_BELONGS_TO_ITS_OWN_COUPLE",
     "owners_couple", "cornerstone_title", "name_words_of",
     "names_only_the_milestone",
     "CORNERSTONE", "CORNERSTONES", "CORNERSTONES_ARE_THE_FIXED_DAYS",

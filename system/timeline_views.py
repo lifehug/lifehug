@@ -1485,7 +1485,12 @@ def with_views(payloads: dict, *, projection_key: str, index: object,
     drawn = lp.project_landmark_entries(index, sources=landmark_entries or (),
                                         owner_names=owner_names or (), with_refs=True)
     domains = drawn.get("domains") or {}
-    relations = cs.Relations(roster, landmark_entries or (), owner_names=owner_names or ())
+    # v421 (`cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`): standing entries
+    # only (`lp.A_WITHDRAWN_ENTRY_SAYS_NOTHING`) — the drawing above already
+    # leaves a withdrawn one out.
+    relations = cs.Relations(roster, lp.standing_landmark_sources(
+        landmark_entries or (), index if isinstance(index, dict) else {}),
+        owner_names=owner_names or ())
     annotated = rr.with_called_by(roster, tt.telling_texts(claims))
     import axis_membership as axm  # noqa: PLC0415
     called = {rr.entity_ref("person", row): tuple(row.get("called_by") or ())
