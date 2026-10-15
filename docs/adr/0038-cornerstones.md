@@ -198,3 +198,34 @@ telling; the binder's `RULE_VERSION` does not move (a filed binding names the
 `R2` family, and the view change only adds a person to an R2b bucket the
 telling's own title already names).
 
+## Amendment (v421, owner 2026-10-15) — subject is whose line; a cleared cell is the owner's no
+
+The grid and the Timeline marker row said his sister "died · 2024". A `losses`
+entry {label/who "Brett", subject "Jacque"} — her loss of Brett, which the
+owner had already retired on the landmark form — made `Relations` build one
+Person named both "Brett" and "Jacque"; it folded into her roster row, and the
+classifier's "Brett's death" (subject "Brett") was keyed to her. Three rules:
+
+* `cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO` — an entry's person is named
+  by its `who` and `label` alone. In `losses` the `subject` is the mourner
+  (whose line the loss sits on), in `partnerships` whose partnership it is; it
+  is never a name of the person the entry is about. `Relations` is built from
+  STANDING entries only (`landmark_projection.standing_landmark_sources`, at
+  the fold, the views and the person form's settle seat), so a withdrawn entry
+  introduces nobody; `CALCULATION_RULE_VERSION` is `timeline-rules:33`, so an
+  upgraded vault re-derives on its first publish. The fold's claim-driven readers of the landmark sources
+  (participation episodes, the entry index, the ladder drawing) are unchanged:
+  they already read only active claims.
+* `classifier_claims.A_WITHDRAWN_RECORD_READ_BACK_SAYS_NOTHING` — the story
+  classifier's reading of a withdrawn entry's own file
+  (`landmark_projection.withdrawn_record_paths`) is skipped like a refiled
+  record's, so the migration supersedes what it filed before.
+* `landmark_edit.A_CLEARED_CELL_IS_THE_OWNERS_NO` — the person form's ×
+  (`"cleared": [...]`) supersedes, in one undoable correction (scope
+  `cornerstones/cleared`), every claim dating that milestone on the person's
+  milestone nodes and the form's own entry for it, and for a death every
+  `losses` entry naming the person, so the cell reads empty and a death is no
+  longer owed; the roster's `born`/`died` is cleared explicitly
+  (`entity_verdict.apply_verdict(clear_born=…, clear_died=…)`). The owner's
+  own birth is never cleared. Undo reinstates the claims; the roster's cleared
+  date is not restored by undo (the cell reads from the claims).

@@ -480,6 +480,24 @@ real page on a real vault.
   no stated birth is on file. And a birth record whose subject field holds the
   domain's own vocabulary — `Born`, `birthday`, `date of birth` — names
   **nobody**: it says which domain this is, not whose birth it is.
+- **A subject is whose line, not who; a cleared cell is the owner's no; a
+  stay names its own place** (v421, owner 2026-10-15). On the Cornerstones
+  grid a landmark entry's person is named by its `who` and `label` only — in
+  `losses` the `subject` is the mourner, in `partnerships` whose partnership
+  it is — and a withdrawn (retired or refiled) entry introduces nobody
+  (`cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`); the story classifier's
+  reading of a withdrawn entry's own file mints nothing and what it filed is
+  superseded on the next `migrate-classifier-moments`
+  (`classifier_claims.A_WITHDRAWN_RECORD_READ_BACK_SAYS_NOTHING`). The person
+  form (`person-edit`) takes `"cleared": ["born"|"married"|"divorced"|"died"]`
+  — the × beside a cell: every claim dating that milestone on the person's
+  nodes, the form's own entry for it and, for a death, every `losses` entry
+  naming them are superseded by one undoable correction, and the roster's
+  date is cleared (`entity-verdict --no-born`/`--no-died`); your own birth is
+  never cleared (`landmark_edit.A_CLEARED_CELL_IS_THE_OWNERS_NO`). The
+  landmark form (`landmark-edit`) takes a per-stay `"where"`, so two stints of
+  one employer in two cities keep their own places
+  (`landmark_edit.A_STAY_NAMES_ITS_OWN_PLACE`).
 
 ## `CALCULATION_RULE_VERSION` — the fold's contract version
 

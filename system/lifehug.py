@@ -3178,6 +3178,10 @@ def cmd_entity_verdict(args: argparse.Namespace) -> int:
         value = getattr(args, flag, None)
         if value:
             flags.extend([f"--{flag.replace('_', '-')}", str(value)])
+    # v421 (`landmark_edit.A_CLEARED_CELL_IS_THE_OWNERS_NO`): an explicit clear.
+    for flag in ("no_born", "no_died"):
+        if getattr(args, flag, False):
+            flags.append(f"--{flag.replace('_', '-')}")
     if args.maps_to:
         flags.extend(["--maps-to", args.maps_to])
     # v202 (family-landmark §D): a person the FAMILY landmark set named may
@@ -4193,6 +4197,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="When this person died (same date forms as --born)")
     p.add_argument("--died-basis", dest="died_basis", metavar="B",
                    help="How the death date was arrived at (chronology.BASES; default stated)")
+    # v421: an explicit clear, never an empty date.
+    p.add_argument("--no-born", dest="no_born", action="store_true",
+                   help="Clear the row's born date")
+    p.add_argument("--no-died", dest="no_died", action="store_true",
+                   help="Clear the row's died date (has not died)")
     p.add_argument("--maps-to", dest="maps_to", metavar="SLUG",
                    help="This entity is really that existing page — wins over graduate")
     # v396: the I-1 identity flags are ONE definition in entity_verdict.py.

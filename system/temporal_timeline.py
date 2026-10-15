@@ -415,7 +415,13 @@ from temporal_claims import (  # noqa: E402
 #: school tellings of one identity that state different places are two stays
 #: (`landmarks_interaction.TWO_STATED_PLACE_STRETCHES_ARE_TWO_STAYS`). The same
 #: claims calculate to different subject scopes, relations and stay bounds.
-CALCULATION_RULE_VERSION = "timeline-rules:32"
+#: timeline-rules:33 (v421, owner 2026-10-15): who-is-who
+#: (`cornerstones.Relations`) names a landmark entry's person by its ``who``
+#: and ``label`` only, never its ``subject``
+#: (`cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`), and reads STANDING entries
+#: only, so a retired entry introduces nobody. The same claims calculate to
+#: different cornerstone keys, titles and cards (his sister's false "died").
+CALCULATION_RULE_VERSION = "timeline-rules:33"
 
 #: E-L2a retired `place_co_location` (design §0.2 M1, §4.1). The rule, its
 #: episode-kind list, its provenance sentences and its ``order`` basis are all
@@ -7769,7 +7775,16 @@ def derive_calculated_timeline(
     # follow-up rules need it that early: a cornerstone is titled by its own
     # name (`cs.A_CORNERSTONE_IS_TITLED_BY_ITS_OWN_NAME`), and a handle naming
     # one ("Dad's death") binds to it (:data:`A_HANDLE_NAMING_A_CORNERSTONE_BINDS_TO_IT`).
-    relations = cs.Relations(roster_snapshot, landmark_entries, owner_names=owner_names)
+    # v421 (`cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`): who is who is read
+    # from STANDING entries only (`lp.A_WITHDRAWN_ENTRY_SAYS_NOTHING`); a
+    # retired losses entry introduces nobody. The other readers of
+    # ``landmark_entries`` here (participation, the entry index) are claim-
+    # driven and keep the whole filing, as before.
+    relations = cs.Relations(
+        roster_snapshot,
+        lp.standing_landmark_sources(
+            landmark_entries, active_index if isinstance(active_index, dict) else {}),
+        owner_names=owner_names)
     cornerstone_of_group = _cornerstone_of_groups(groups, labels, relations)
     _retitle_cornerstones(groups, cornerstone_of_group, relations, labels=labels,
                           whats=whats, displays=displays, owner_flags=owner_flags,

@@ -1172,6 +1172,23 @@ A_RECORDED_RECORD_IS_CANONICAL_DATED_OR_NOT = (
 )
 
 
+#: v421 (owner, 2026-10-15). A `losses` entry the owner RETIRED on the
+#: landmark form (2026-10-10) still put "Brett's death" on his timeline: the
+#: story classifier had read the entry's own file
+#: (``sources/landmarks/entry-….md``, source_type ``landmark_entry``) and its
+#: claims kept standing after the entry was withdrawn. A withdrawn entry says
+#: nothing (`landmark_projection.A_WITHDRAWN_ENTRY_SAYS_NOTHING`), and the
+#: classifier's reading of its file is that entry read back: it is skipped
+#: exactly as a refiled record is
+#: (`landmark_projection.A_RECORD_IS_FILED_WHERE_IT_BELONGS`), so the next
+#: migration run supersedes what it filed before.
+A_WITHDRAWN_RECORD_READ_BACK_SAYS_NOTHING = (
+    "the classifier's reading of a withdrawn (retired or refiled) landmark "
+    "entry's own file is that entry read back and says nothing: no claim is "
+    "minted from it, and what it filed before is superseded"
+)
+
+
 def _recorder_source_paths(index: object) -> frozenset:
     """Every ``source_path`` a non-classifier ACTIVE claim cites
     (:data:`A_RECORDED_RECORD_IS_CANONICAL_DATED_OR_NOT`)."""
@@ -1407,6 +1424,7 @@ def _empty_report(dry_run: bool) -> dict:
         "subjects": {"self": 0, "named_other": 0},
         "deduped_against_recorder": 0,
         "deduped_undated_recorder_records": 0, "deduped_refiled_records": 0,
+        "deduped_withdrawn_records": 0,
         "deduped_sources": 0,
         "receipts": 0,
         "receipts_written": 0,
@@ -1455,6 +1473,8 @@ def migrate_classifier_moments(
     recorder_dates = _recorder_dates_by_source_path(index)
     recorder_sources = _recorder_source_paths(index)
     refiled_paths = lp.refiled_record_paths(root)
+    # v421 (:data:`A_WITHDRAWN_RECORD_READ_BACK_SAYS_NOTHING`).
+    withdrawn_paths = lp.withdrawn_record_paths(root, active_index=index) - refiled_paths
     answer_ages = _answer_ages_by_source_path(index)
     claims_by_source_id = _claims_by_source_id(index)
     projection = pub.read_projection(root) or {}
@@ -1518,6 +1538,12 @@ def migrate_classifier_moments(
                 # a refiled record read back by the classifier is the record
                 # again, and its refile already says what it is.
                 report["deduped_refiled_records"] += 1
+                deduped_here += 1
+                continue
+            if source_path in withdrawn_paths:
+                # v421 (:data:`A_WITHDRAWN_RECORD_READ_BACK_SAYS_NOTHING`): a
+                # retired entry's own file, read back, says nothing either.
+                report["deduped_withdrawn_records"] += 1
                 deduped_here += 1
                 continue
             claims = event_claims(
@@ -1694,6 +1720,8 @@ def describe_migration(report: object) -> list[str]:
         f"event(s) across {row.get('deduped_sources')} source(s)",
         f"  undated restatements of recorder records: "
         f"{row.get('deduped_undated_recorder_records', 0)}",
+        f"  read back from refiled / withdrawn landmark entries: "
+        f"{row.get('deduped_refiled_records', 0)} / {row.get('deduped_withdrawn_records', 0)}",
         f"  superseded by re-classification: {row.get('superseded_claims')} claim(s) "
         f"across {row.get('superseded_classifications')} classification(s)",
         f"  nodes: {row.get('nodes_before')} -> {row.get('nodes_after')}"
@@ -1727,6 +1755,7 @@ def describe_migration(report: object) -> list[str]:
 __all__ = [
     "A_CARD_ANSWER_IS_READ_ONCE",
     "A_RECORDED_RECORD_IS_CANONICAL_DATED_OR_NOT",
+    "A_WITHDRAWN_RECORD_READ_BACK_SAYS_NOTHING",
     "AGE_CLAIM_CONFIDENCE",
     "CLASSIFIER_EXTRACTOR",
     "ERROR_CODES",

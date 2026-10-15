@@ -3871,6 +3871,25 @@ def refiled_record_paths(vault_root: str | Path) -> frozenset[str]:
     return frozenset(found)
 
 
+def withdrawn_record_paths(vault_root: str | Path, *,
+                           active_index: object = None) -> frozenset[str]:
+    """The ``sources/landmarks/entry-*.md`` paths of WITHDRAWN entries.
+
+    v421 (`classifier_claims.A_WITHDRAWN_RECORD_READ_BACK_SAYS_NOTHING`): a
+    retired entry says nothing (:data:`A_WITHDRAWN_ENTRY_SAYS_NOTHING`), and
+    neither does the story classifier's reading of its file — the twin of
+    :func:`refiled_record_paths`. ``active_index`` defaults to a fresh
+    `temporal_store.fold_active_index`."""
+    root = _root(vault_root)
+    index = active_index if isinstance(active_index, dict) else store.fold_active_index(root)
+    withdrawn = withdrawn_source_ids(index)
+    if not withdrawn:
+        return frozenset()
+    return frozenset(
+        row["relative_path"] for row in load_landmark_sources(root, apply_merges=False)
+        if row.get("source_id") in withdrawn and row.get("relative_path"))
+
+
 def moment_claims_for(step: dict, claims: object, *, source_ref: object,
                       now: object = None) -> list[dict]:
     """The ORDINARY MOMENT a refiled record is, one claim per date it carried.

@@ -119,6 +119,45 @@ A_FORM_DATE_SETTLES_ITS_RIVALS = (
 )
 SETTLE_SCOPE = "cornerstones/settled"
 
+#: v421 (owner, 2026-10-15): *"there needs to be a way to say it hasn't
+#: happened."* An empty date on the person form leaves what is there, so a
+#: milestone a reader invented (his sister's "died 2024") could never be taken
+#: back from the grid. The form's × beside a cell sends ``"cleared": [field,
+#: ...]`` (``born``/``married``/``divorced``/``died``), and that is the owner's
+#: NO: after the save publishes, every active claim that dates or asserts that
+#: milestone on the person's milestone nodes (`timeline_views.milestone_nodes`,
+#: the grid's grouping), the date claims of the form's own landmark entry for
+#: it, and — for ``died`` — every `losses` entry naming that person (so the
+#: cell is no longer owed), are superseded by ONE correction (scope
+#: :data:`CLEAR_SCOPE`) whose id comes back for undo; the roster's
+#: ``born``/``died`` is cleared through `entity_verdict.apply_verdict`
+#: (``clear_born``/``clear_died``; ``died`` also sets ``living`` true). His own
+#: birth is never cleared — he has one.
+A_CLEARED_CELL_IS_THE_OWNERS_NO = (
+    "a born/married/divorced/died cell the owner clears on the person form "
+    "says the milestone has not happened: every active claim dating it on that "
+    "person's milestone nodes and the form's own entry for it are superseded "
+    "by one undoable correction, a cleared death retires every losses entry "
+    "naming the person, and the roster's date is cleared; his own birth is "
+    "never cleared"
+)
+CLEAR_SCOPE = "cornerstones/cleared"
+CLEARABLE = ("born", "married", "divorced", "died")
+
+#: v421 (owner, 2026-10-15). Since v420 two stints of one employer in two
+#: cities are two stays of one landmark
+#: (`landmarks_interaction.TWO_STATED_PLACE_STRETCHES_ARE_TWO_STAYS`), and the
+#: drawing publishes each stay's own ``detail.where`` — but the form applied
+#: ONE city/state/country to every stay it filed, so saving a two-city
+#: landmark stamped one city on both. A stay may name its own place,
+#: ``"where": "Mesa, Arizona"`` (the shape :func:`_place` writes): work files
+#: it as ``where``, a school as ``place``, a home as ``city``, for THAT stay
+#: only; a stay that names none takes the form's fields, as before.
+A_STAY_NAMES_ITS_OWN_PLACE = (
+    "a stay on the landmark form may name its own place, and that stay is "
+    "filed at it; only a stay that names none takes the form's shared place"
+)
+
 EDIT_SCOPE = "landmarks/{domain}"
 PERSON_SCOPE = "cornerstones/others"
 FORM_MARK = "owner"
@@ -203,12 +242,16 @@ def build_record(kind: str, fields: object, stay: object, *, carried: object = N
     """The one record a form files for ONE stay. PURE.
 
     ``carried`` is the drawn entry the form was opened on; the keys the form
-    does not control are kept from it (a residence's ``place_ref``)."""
+    does not control are kept from it (a residence's ``place_ref``). A
+    ``stay`` that names its own ``where`` is filed at it
+    (:data:`A_STAY_NAMES_ITS_OWN_PLACE`)."""
     if kind not in FORM_KINDS:
         raise LandmarkEditError(f"the form does not edit {kind!r}")
     f = fields if isinstance(fields, dict) else {}
     text = {key: collapsed_text(value) for key, value in f.items() if isinstance(value, (str, int))}
     domain = FILED_DOMAIN[kind]
+    # :data:`A_STAY_NAMES_ITS_OWN_PLACE` — this stay's own place, if it names one.
+    own_place = collapsed_text(stay.get("where")) if isinstance(stay, dict) else ""
     record: dict = {}
     if isinstance(carried, dict):
         for key, value in carried.items():
@@ -219,7 +262,8 @@ def build_record(kind: str, fields: object, stay: object, *, carried: object = N
         nickname = text.get("nickname") or text.get("area")
         address = text.get("address")
         place = _place(text.get("city"), text.get("state"), text.get("country"))
-        label = nickname or address or place
+        label = nickname or address or place or own_place
+        place = own_place or place
         if not label:
             raise LandmarkEditError("a home needs a nickname, an address or a city")
         record.update({"label": label})
@@ -236,7 +280,7 @@ def build_record(kind: str, fields: object, stay: object, *, carried: object = N
         if level and level not in SCHOOL_LEVELS:
             raise LandmarkEditError(f"a school's level is one of {', '.join(SCHOOL_LEVELS)}")
         record.update({"label": name, "name": name})
-        place = _place(text.get("city"), text.get("state"), text.get("country"))
+        place = own_place or _place(text.get("city"), text.get("state"), text.get("country"))
         for key, value in (("level", level), ("grades", text.get("grades")), ("place", place),
                            ("link", text.get("link")), ("note", text.get("note"))):
             if value:
@@ -246,7 +290,7 @@ def build_record(kind: str, fields: object, stay: object, *, carried: object = N
         if not employer:
             raise LandmarkEditError("work needs the employer")
         record.update({"label": employer, "what": text.get("role") or employer})
-        place = _place(text.get("city"), text.get("state"), text.get("country"))
+        place = own_place or _place(text.get("city"), text.get("state"), text.get("country"))
         if place:
             record["where"] = place
         if text.get("note"):
@@ -346,9 +390,10 @@ def edit_landmark(vault_root: object, payload: object) -> dict:
     """File one landmark form. ``payload``:
 
     ``{"mode": "save", "kind", "fields": {...}, "stays": [{"ref"?, "from",
-    "to", "still_here"}], "retire": [ref, ...]}`` — every stay the form holds,
-    each with the ref it was opened on (none for a new stay), and the refs of
-    stays the form removed;
+    "to", "still_here", "where"?}], "retire": [ref, ...]}`` — every stay the
+    form holds, each with the ref it was opened on (none for a new stay) and,
+    optionally, its own place (:data:`A_STAY_NAMES_ITS_OWN_PLACE`), and the
+    refs of stays the form removed;
     ``{"mode": "delete", "refs": [ref, ...]}`` — the whole landmark;
     ``{"mode": "undo", "corrections": [correction_id, ...]}``.
 
@@ -484,8 +529,11 @@ def edit_person(vault_root: object, payload: object) -> dict:
     """File one person form. ``payload``:
 
     ``{"mode": "save", "person_ref", "name", "category", "relation_word",
-    "side", "born", "died", "married": {"date", "to"}, "divorced"}`` — each
-    date a form date (day optional); an empty field leaves what is there;
+    "side", "born", "died", "married": {"date", "to"}, "divorced",
+    "cleared": ["born"|"married"|"divorced"|"died", ...]}`` — each date a
+    form date (day optional); an empty field leaves what is there, and a
+    field named in ``cleared`` (the form's ×) says the milestone has not
+    happened (:data:`A_CLEARED_CELL_IS_THE_OWNERS_NO`);
     ``{"mode": "delete", "person_ref", "milestone", "claim_ids": [...]}`` —
     an Others row's 🗑;
     ``{"mode": "undo", "corrections": [...]}``.
@@ -493,6 +541,7 @@ def edit_person(vault_root: object, payload: object) -> dict:
     body = payload if isinstance(payload, dict) else {}
     mode = collapsed_text(body.get("mode")) or "save"
     root, timeline = _bound(vault_root)
+    cleared = _cleared_fields(body) if mode == "save" else []
     summary: dict = {"mode": mode, "roster": None, "filed": [], "corrections": []}
     with timeline.landmark_publication_batch(root):
         if mode == "undo":
@@ -513,7 +562,184 @@ def edit_person(vault_root: object, payload: object) -> dict:
         if settled:
             with timeline.landmark_publication_batch(root):
                 timeline.redraw_landmarks()
+        # :data:`A_CLEARED_CELL_IS_THE_OWNERS_NO` — the same seat, for the
+        # same reason: it reads the milestone nodes the fold just published.
+        if cleared:
+            _clear_milestones(root, body, cleared, summary)
+            with timeline.landmark_publication_batch(root):
+                timeline.redraw_landmarks()
     return summary
+
+
+def _said_dates(body: dict) -> dict:
+    married = body.get("married") if isinstance(body.get("married"), dict) else {}
+    return {"born": body.get("born"), "died": body.get("died"),
+            "divorced": body.get("divorced"), "married": married.get("date")}
+
+
+def _cleared_fields(body: dict) -> list[str]:
+    """The person form's ``cleared`` list, validated before anything is
+    written (:data:`A_CLEARED_CELL_IS_THE_OWNERS_NO`)."""
+    raw = body.get("cleared")
+    if raw is None:
+        return []
+    if not isinstance(raw, (list, tuple)):
+        raise LandmarkEditError("cleared is a list of born, married, divorced, died")
+    out: list[str] = []
+    for item in raw:
+        field = collapsed_text(item).casefold()
+        if field not in CLEARABLE:
+            raise LandmarkEditError(f"only {', '.join(CLEARABLE)} can be cleared, not {item!r}")
+        if field not in out:
+            out.append(field)
+    person_ref = collapsed_text(body.get("person_ref"))
+    is_self = collapsed_text(body.get("category")).casefold() == "self" or person_ref == "self"
+    if is_self and "born" in out:
+        raise LandmarkEditError("your own birth is never cleared — you have one")
+    if is_self and "died" in out:
+        raise LandmarkEditError("there is no death of your own to clear")
+    said = _said_dates(body)
+    for field in out:
+        if form_date(said[field]) is not None:
+            raise LandmarkEditError(f"{field} is either a date or cleared, not both")
+    return out
+
+
+def _form_person(relations, body: dict) -> tuple:
+    """``(person, key, couple, is_self)`` for the form's person, the grid's
+    own reading (`cornerstones.Relations.person_for`); person ``None`` when
+    the grid holds nobody by that ref or name."""
+    import cornerstones as cs  # noqa: PLC0415
+
+    person_ref = collapsed_text(body.get("person_ref"))
+    category = collapsed_text(body.get("category")).casefold()
+    is_self = category == "self" or person_ref == "self"
+    person = cs.SELF if is_self else (relations.person_for(person_ref)
+                                      or relations.person_for(collapsed_text(body.get("name"))))
+    if person is None:
+        return None, None, False, is_self
+    key = cs.SELF if person == cs.SELF else getattr(person, "key", None)
+    couple = person == cs.SELF or getattr(person, "relationship", "") == "spouse"
+    return person, key, couple, is_self
+
+
+#: Claims that say a milestone HAPPENED (when, at what age, or that it did).
+_ASSERTING_CLAIM_TYPES = ("date", "age", "occurrence")
+
+
+def _clear_milestones(root: Path, body: dict, cleared: list, summary: dict) -> list[str]:
+    """:data:`A_CLEARED_CELL_IS_THE_OWNERS_NO`. Returns the superseded claim
+    ids (``[]`` when nothing stood); the roster is cleared either way."""
+    import cornerstones as cs  # noqa: PLC0415
+    import entity_roster as er  # noqa: PLC0415
+    import entity_verdict as ev  # noqa: PLC0415
+    import landmark_projection as lp  # noqa: PLC0415
+    import temporal_publication as pub  # noqa: PLC0415
+    import temporal_store as store  # noqa: PLC0415
+    import timeline_views as tv  # noqa: PLC0415
+    from lifehug_core import read_json  # noqa: PLC0415
+
+    projection = pub.read_projection(root) or {}
+    nodes = [n for n in projection.get("nodes") or () if isinstance(n, dict)]
+    index = store.fold_active_index(root)
+    sources = lp.load_landmark_sources(root)
+    roster, owner_names = pub.owner_identity_inputs(root)
+    relations = cs.Relations(roster, lp.standing_landmark_sources(sources, index),
+                             owner_names=owner_names)
+    person, key, couple, is_self = _form_person(relations, body)
+    rows = store.active_claims(index)
+    active = {row["claim_id"]: row for row in rows}
+    by_source: dict[str, list[dict]] = {}
+    for row in rows:
+        ref = row.get("source_ref")
+        source_id = collapsed_text(ref.get("source_id")) if isinstance(ref, dict) else ""
+        if source_id:
+            by_source.setdefault(source_id, []).append(row)
+    held = tv.milestone_nodes(nodes, relations) if person is not None else {}
+    milestone_of = dict(_FIELD_MILESTONE)
+    ids: list[str] = []
+    touched: set[str] = set()
+
+    def take(claim_id: object) -> None:
+        claim_id = collapsed_text(claim_id)
+        if claim_id and claim_id in active and claim_id not in ids:
+            ids.append(claim_id)
+
+    def names_the_person(text: object) -> bool:
+        if person is None or not collapsed_text(text):
+            return False
+        found = relations.person_for(text)
+        return found == person or (found not in (None, cs.SELF)
+                                   and getattr(found, "key", None) == key)
+
+    for field in cleared:
+        milestone = milestone_of[field]
+        whose = cs.SELF if milestone in ("wedding", "divorce") and couple else key
+        for node in held.get((milestone, whose)) or ():
+            for claim_id in node.get("input_claim_refs") or ():
+                row = active.get(collapsed_text(claim_id))
+                if row is not None and collapsed_text(row.get("claim_type")) in _ASSERTING_CLAIM_TYPES:
+                    take(claim_id)
+        for source in sources:
+            record = source.get("record") or {}
+            domain = source.get("domain")
+            sid = source["source_id"]
+            if field == "died" and domain == "losses" and (
+                    names_the_person(record.get("who")) or names_the_person(record.get("label"))):
+                # A loss that never happened names nobody: every claim behind
+                # it, its identity too, so the cell is no longer owed.
+                for row in by_source.get(sid) or ():
+                    take(row["claim_id"])
+                continue
+            if record.get("form") != FORM_MARK:
+                continue
+            if field == "born" and domain in ("children", "family") and (
+                    names_the_person(record.get("who")) or names_the_person(record.get("label"))):
+                wanted = None
+            elif field in ("married", "divorced") and domain == "partnerships" and (
+                    (is_self and (not collapsed_text(record.get("subject"))
+                                  or relations.is_owner_text(record.get("subject"))))
+                    or (not is_self and names_the_person(record.get("subject")))):
+                wanted = field
+            else:
+                continue
+            for row in by_source.get(sid) or ():
+                if collapsed_text(row.get("claim_type")) != "date":
+                    continue
+                ends = collapsed_text(row.get("event_kind")) == lp.SPAN_END_EVENT_KIND
+                if wanted is None or (wanted == "divorced") == ends:
+                    take(row["claim_id"])
+            touched.add(sid)
+    # The form's own entry with no date left standing says nothing: withdraw it.
+    chosen = set(ids)
+    for sid in touched:
+        left = [row for row in by_source.get(sid) or ()
+                if row["claim_id"] not in chosen and row.get("claim_type") == "date"]
+        if not left:
+            for row in by_source.get(sid) or ():
+                take(row["claim_id"])
+    if ids:
+        who = collapsed_text(body.get("name")) or ("self" if is_self else
+                                                   collapsed_text(body.get("person_ref")))
+        correction = store.supersede_claims(
+            root, sorted(ids), scope=CLEAR_SCOPE,
+            reason=(f"cleared by the owner's person form for {who} "
+                    f"({', '.join(cleared)} has not happened); person-edit undo reinstates it"))
+        summary["corrections"].append(correction.correction_id)
+        summary["cleared_claims"] = sorted(ids)
+    summary["cleared"] = list(cleared)
+    if not is_self and ({"born", "died"} & set(cleared)):
+        slug = _person_slug(collapsed_text(body.get("person_ref")),
+                            collapsed_text(body.get("name")))
+        data = read_json(er.roster_file("person"), default=None) or {}
+        row = next((e for e in data.get("entities") or ()
+                    if isinstance(e, dict) and e.get("slug") == slug), None)
+        if row is not None:
+            verdict = row.get("owner_verdict") or "clear"
+            ev.apply_verdict("person", slug, verdict if verdict in ev.VERDICTS else "clear",
+                             clear_born="born" in cleared, clear_died="died" in cleared,
+                             living=True if "died" in cleared else None)
+    return ids
 
 
 #: The person form's date fields -> the grid's milestone (`timeline_views.COLUMNS`).
@@ -540,8 +766,12 @@ def _settle_rival_dates(root: Path, body: dict, summary: dict) -> list[str]:
     nodes = [n for n in projection.get("nodes") or () if isinstance(n, dict)]
     if not nodes:
         return []
+    index = store.fold_active_index(root)
     roster, owner_names = pub.owner_identity_inputs(root)
-    relations = cs.Relations(roster, lp.load_landmark_sources(root), owner_names=owner_names)
+    # v421: standing entries only (`landmark_projection.A_WITHDRAWN_ENTRY_SAYS_NOTHING`,
+    # `cornerstones.A_SUBJECT_IS_WHOSE_LINE_NOT_WHO`).
+    relations = cs.Relations(roster, lp.standing_landmark_sources(
+        lp.load_landmark_sources(root), index), owner_names=owner_names)
     person_ref = collapsed_text(body.get("person_ref"))
     category = collapsed_text(body.get("category")).casefold()
     is_self = category == "self" or person_ref == "self"
@@ -552,7 +782,6 @@ def _settle_rival_dates(root: Path, body: dict, summary: dict) -> list[str]:
     key = cs.SELF if person == cs.SELF else getattr(person, "key", None)
     couple = person == cs.SELF or getattr(person, "relationship", "") == "spouse"
     held = tv.milestone_nodes(nodes, relations)
-    index = store.fold_active_index(root)
     active = {row["claim_id"]: row for row in store.active_claims(index)}
     rivals: list[str] = []
     for milestone, record in stated.items():
@@ -728,7 +957,8 @@ def main(verb: str, raw: str, vault_root: object) -> tuple[int, dict]:
 
 
 __all__ = [
-    "A_FORM_DATE_SETTLES_ITS_RIVALS", "CATEGORY_RELATIONSHIP", "FORM_KINDS", "LandmarkEditError", "OWNER_EDIT_IS_EXACT",
+    "A_CLEARED_CELL_IS_THE_OWNERS_NO", "A_FORM_DATE_SETTLES_ITS_RIVALS",
+    "A_STAY_NAMES_ITS_OWN_PLACE", "CLEARABLE", "CLEAR_SCOPE", "CATEGORY_RELATIONSHIP", "FORM_KINDS", "LandmarkEditError", "OWNER_EDIT_IS_EXACT",
     "SCHOOL_LEVELS", "build_record", "comparable", "drawn_with_refs", "edit_digest",
     "edit_landmark", "edit_person", "form_date", "main",
 ]
