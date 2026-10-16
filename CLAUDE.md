@@ -128,6 +128,30 @@ step; `migrate-classifier-moments` (the weekly sweep, or by hand) supersedes a
 retired entry's classifier claims. Never add an entry's `subject` to the names
 of the person it is about.
 
+**A question anywhere is a question; the owner's keep is the owner's pass; a
+rewrite is the same question resaid (v422, owner 2026-10-15).** Seven good
+open questions showed as craft FAILs (ADR 0045, amends 0042). `not_a_question`
+fires only when no sentence ends with "?" and no clause — the text's start, or
+after `. ! ?`, a dash, a colon or a semicolon, behind an optional opening
+quote — opens with an imperative opener
+(`question_craft.A_QUESTION_ANYWHERE_IS_A_QUESTION`); `garbled_repeat` never
+pairs a word with its own plural, only a stem with a longer nominalization
+(`question_craft.A_PLURAL_IS_NOT_A_NOMINALIZATION`). Beside Retire the owner
+has two verbs on an open row: **Keep** (`question-keep ID [--reason]`) writes
+`  <!-- craft: kept DATE: reason -->` under the row
+(`question_bank.THE_OWNERS_KEEP_IS_ON_THE_ROW`, read by
+`question_bank.craft_kept_index`), and `evaluate(text, context={"kept":
+True})` is then a PASS with `reasons: []` and an additive `overridden` list
+(`question_craft.A_KEPT_QUESTION_IS_THE_OWNERS_PASS`) — the bank lint, the
+planner's `drop_craft_fails` and the hosted send-time gate (which replays
+`evaluate` through the REPLAY seam) must all pass `kept`; **Rewrite**
+(`question-rewrite ID --text "…"`) re-says the row in place, same id, refuses a
+FAIL (`question_bank.CraftRefused`, nothing written), files a REVIEW with a
+fresh review comment, drops prior review/kept comments, writes
+`  <!-- craft: rewritten DATE: was "…" -->` and re-stamps a promoted row's
+marker (`question_bank.A_REWRITE_IS_THE_SAME_QUESTION_RESAID`). Never re-run
+`evaluate` on a bank row without its `kept`.
+
 **A birthday anniversary is not a birth (v403, owner 2026-10-10).** A dated
 birthday is a birth (v344) only when it can be one: a birthday whose year
 disagrees with a birth the vault already knows for that person — roster

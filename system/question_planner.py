@@ -807,18 +807,37 @@ def _week_seed(generated_at: str) -> int:
     return iso[0] * 100 + iso[1]
 
 
-def drop_craft_fails(pending: list[dict]) -> tuple[list[dict], list[dict]]:
+def kept_question_ids(bank_text: str | None = None) -> set[str]:
+    """The bank ids the owner kept (ADR 0045,
+    `question_bank.THE_OWNERS_KEEP_IS_ON_THE_ROW`). Guarded: a bank that
+    cannot be read keeps nothing, and the queue still builds."""
+    try:
+        import question_bank  # noqa: PLC0415
+
+        text = QUESTIONS_FILE.read_text(encoding="utf-8") if bank_text is None else bank_text
+        return set(question_bank.craft_kept_index(text))
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def drop_craft_fails(pending: list[dict], kept_ids: object = None) -> tuple[list[dict], list[dict]]:
     """Split pending bank questions into (askable, skipped) — ADR 0042.
 
     Only a ``fail`` is skipped; a ``review`` is still askable (it was filed on
-    purpose). ``skipped`` is ``[{id, reasons}]`` for the plan's report.
+    purpose). ``skipped`` is ``[{id, reasons}]`` for the plan's report. A row
+    the owner kept (its id in ``kept_ids``, or ``question["kept"]``) is
+    evaluated with ``kept`` and is never dropped
+    (`question_craft.A_KEPT_QUESTION_IS_THE_OWNERS_PASS`, ADR 0045).
     """
     import question_craft  # noqa: PLC0415
 
+    owner_kept = {str(q) for q in (kept_ids or ())}
     kept: list[dict] = []
     skipped: list[dict] = []
     for question in pending:
-        verdict = question_craft.evaluate(str(question.get("text") or ""), with_score=False)
+        is_kept = bool(question.get("kept")) or str(question.get("id") or "") in owner_kept
+        verdict = question_craft.evaluate(str(question.get("text") or ""), with_score=False,
+                                          context={"kept": True} if is_kept else None)
         if verdict["verdict"] == question_craft.FAIL:
             skipped.append({"id": str(question.get("id") or ""), "reasons": verdict["reasons"]})
             continue
@@ -857,7 +876,8 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
         questions, categories, coverage, planner_state.get("active_objectives", []), findex)
     # ADR 0042: every bank question is re-evaluated as the queue is built; a
     # craft FAIL is never queued, whatever its focus or coverage weight.
-    pending, skipped_craft_fail = drop_craft_fails(pending)
+    # ADR 0045: a row the owner kept is the owner's pass, never dropped.
+    pending, skipped_craft_fail = drop_craft_fails(pending, kept_question_ids())
     recently_asked = previous_queue_focuses(previous_queue)
 
     # v196: a MINTED keystone question is an ordinary pending bank question

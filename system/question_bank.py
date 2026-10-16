@@ -21,6 +21,27 @@ reason)*``. A retired row keeps its id and its history and is never deleted;
 it is neither open nor answered (`lifehug_core.QUESTION_LINE_RE` reads only
 ``[ ]``/``[x]``), so selection, planning, coverage and rotation never see it.
 Ids are still allocated past it (`next_bank_id`), so an id is never reused.
+
+v422 (ADR 0045, owner 2026-10-15) gives the owner two more verbs on an OPEN
+row, beside retire:
+
+* KEEP — ``THE_OWNERS_KEEP_IS_ON_THE_ROW``: ``keep_question`` writes
+  ``  <!-- craft: kept DATE: reason -->`` on the line after the row (where a
+  ``craft: review:`` comment goes, and it replaces one: the owner has
+  looked). A kept row is the owner's pass
+  (`question_craft.A_KEPT_QUESTION_IS_THE_OWNERS_PASS`): ``lint_bank`` and the
+  planner pass ``kept`` into ``evaluate``, so a kept row is never held back,
+  and the hosted send-time gate must pass it too.
+* REWRITE — ``A_REWRITE_IS_THE_SAME_QUESTION_RESAID``: ``rewrite_question``
+  re-says the row in place — same id, same position, same box — after
+  evaluating the new text against the bank. A FAIL is refused
+  (``CraftRefused``, nothing written); a REVIEW is written with a fresh
+  review comment; a PASS is written clean. Any prior review or kept comment
+  is dropped (a rewrite stands on its own) and
+  ``  <!-- craft: rewritten DATE: was "old text" -->`` records what it said.
+  A promoted row's ``lifehug:candidate-promotion:v1`` marker is re-stamped
+  for the new text (`candidate_promotion.restamp_marker_question`) so the
+  promotion ledger still verifies.
 """
 
 from __future__ import annotations
@@ -31,6 +52,7 @@ import re
 import sys
 from datetime import date
 
+from question_craft import A_KEPT_QUESTION_IS_THE_OWNERS_PASS as A_KEPT_QUESTION_IS_THE_OWNERS_PASS_CRAFT
 from question_craft import FAIL, REVIEW, evaluate
 
 QUESTION_ID_PATTERN = r"[A-Z]\d+[a-z]*"
@@ -42,11 +64,30 @@ ANY_BANK_LINE_RE = re.compile(
 )
 RETIRED_BOX = "-"
 CRAFT_REVIEW_MARKER = "craft: review:"
+CRAFT_KEPT_MARKER = "craft: kept"
+CRAFT_REWRITTEN_MARKER = "craft: rewritten"
+
+#: v422 rule names (ADR 0045) — see the module docstring. The craft side of
+#: the keep is `question_craft.A_KEPT_QUESTION_IS_THE_OWNERS_PASS`.
+THE_OWNERS_KEEP_IS_ON_THE_ROW = "the_owners_keep_is_on_the_row"
+A_REWRITE_IS_THE_SAME_QUESTION_RESAID = "a_rewrite_is_the_same_question_resaid"
+A_KEPT_QUESTION_IS_THE_OWNERS_PASS = A_KEPT_QUESTION_IS_THE_OWNERS_PASS_CRAFT
+DEFAULT_KEEP_REASON = "kept by the owner"
+
+
+class CraftRefused(ValueError):
+    """A rewrite whose new text is a craft FAIL — nothing was written."""
+
+    def __init__(self, question_id: str, reasons: list[str]):
+        self.question_id = question_id
+        self.reasons = list(reasons)
+        super().__init__(f"rewrite of {question_id} refused: {', '.join(self.reasons)}")
 
 
 def bank_rows(bank_text: str) -> list[dict]:
     """Every row with its state: ``open`` / ``answered`` / ``retired``."""
     rows = []
+    kept = craft_kept_index(bank_text)
     for match in ANY_BANK_LINE_RE.finditer(bank_text or ""):
         box = match.group("box")
         status = ("retired" if box == RETIRED_BOX
@@ -57,6 +98,7 @@ def bank_rows(bank_text: str) -> list[dict]:
             "text": match.group("text").strip(),
             "status": status,
             "note": (match.group("note") or "").strip(),
+            "kept": match.group("qid") in kept,
         })
     return rows
 
@@ -162,24 +204,181 @@ def append_questions(bank_text: str, rows: list[dict], *,
     return text, filed, refused
 
 
-def craft_review_index(bank_text: str) -> dict[str, list[str]]:
-    """``{bank_id: [reasons]}`` for rows filed with a craft-review comment."""
-    index: dict[str, list[str]] = {}
-    lines = (bank_text or "").splitlines()
+def _row_comments(bank_text: str, marker: str) -> dict[str, str]:
+    """``{bank_id: body}`` — the text after ``marker`` in the comment lines
+    that follow a row (the one comment walk every craft index reads)."""
+    index: dict[str, str] = {}
     current = None
-    for line in lines:
+    for line in (bank_text or "").splitlines():
         match = ANY_BANK_LINE_RE.match(line)
         if match:
             current = match.group("qid")
             continue
         stripped = line.strip()
         if current and stripped.startswith("<!--"):
-            if CRAFT_REVIEW_MARKER in stripped:
-                body = stripped.split(CRAFT_REVIEW_MARKER, 1)[1].rsplit("-->", 1)[0]
-                index[current] = [r.strip() for r in body.split(";") if r.strip()]
+            if marker in stripped:
+                index[current] = stripped.split(marker, 1)[1].rsplit("-->", 1)[0].strip()
             continue
         current = None
     return index
+
+
+def craft_review_index(bank_text: str) -> dict[str, list[str]]:
+    """``{bank_id: [reasons]}`` for rows filed with a craft-review comment."""
+    return {qid: [r.strip() for r in body.split(";") if r.strip()]
+            for qid, body in _row_comments(bank_text, CRAFT_REVIEW_MARKER).items()}
+
+
+def craft_kept_index(bank_text: str) -> dict[str, dict[str, str]]:
+    """``{bank_id: {"date", "reason"}}`` for rows the owner kept
+    (THE_OWNERS_KEEP_IS_ON_THE_ROW)."""
+    index: dict[str, dict[str, str]] = {}
+    for qid, body in _row_comments(bank_text, CRAFT_KEPT_MARKER).items():
+        stamp, _, reason = body.partition(":")
+        index[qid] = {"date": stamp.strip(), "reason": reason.strip()}
+    return index
+
+
+def craft_kept_comment(kept_on: str, reason: str) -> str:
+    return f"  <!-- {CRAFT_KEPT_MARKER} {kept_on}: {_safe_comment(reason)} -->"
+
+
+def craft_rewritten_comment(rewritten_on: str, old_text: str, reason: str | None = None) -> str:
+    was = _safe_comment(old_text).replace('"', "'")
+    why = _safe_comment(reason or "")
+    return (f'  <!-- {CRAFT_REWRITTEN_MARKER} {rewritten_on}: was "{was}"'
+            + (f"; {why}" if why else "") + " -->")
+
+
+def _safe_comment(value: str) -> str:
+    """One line that cannot close the HTML comment it sits in."""
+    return " ".join(str(value or "").replace("-->", "-- >").split())
+
+
+def _open_row_span(bank_text: str, question_id: str) -> tuple[list[str], int, int, re.Match]:
+    """``(lines, row_index, end, match)`` for one OPEN row: ``lines`` keep
+    their endings; ``lines[row_index + 1:end]`` are the row's comment lines.
+    ValueError for an unknown, answered or retired id."""
+    qid = str(question_id or "").strip()
+    lines = (bank_text or "").splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        match = ANY_BANK_LINE_RE.match(line.rstrip("\r\n"))
+        if not match or match.group("qid") != qid:
+            continue
+        box = match.group("box")
+        if box == RETIRED_BOX:
+            raise ValueError(f"question is retired: {qid}")
+        if box.lower() == "x":
+            raise ValueError(f"question is already answered: {qid}")
+        end = index + 1
+        while end < len(lines) and lines[end].strip().startswith("<!--"):
+            end += 1
+        return lines, index, end, match
+    raise ValueError(f"question not found in the bank: {qid}")
+
+
+def _without_markers(comment_lines: list[str], *markers: str) -> tuple[list[str], list[str]]:
+    """Bare comment lines split into (kept, dropped-for-a-marker)."""
+    kept, dropped = [], []
+    for line in comment_lines:
+        bare = line.rstrip("\r\n")
+        (dropped if any(m in bare for m in markers) else kept).append(bare)
+    return kept, dropped
+
+
+def _splice(bank_text: str, lines: list[str], index: int, end: int, block: list[str]) -> str:
+    """Replace ``lines[index:end]`` with ``block`` (bare lines), keeping the
+    row's own line ending and whether the text ended with one."""
+    row = lines[index]
+    newline = row[len(row.rstrip("\r\n")):] or "\n"
+    spliced = "".join(line + newline for line in block)
+    new_text = "".join(lines[:index]) + spliced + "".join(lines[end:])
+    if end == len(lines) and not (bank_text or "").endswith(("\n", "\r")):
+        new_text = new_text[:-len(newline)]
+    return new_text
+
+
+def _restamp_promotion(line: str, question_id: str, text: str) -> str:
+    """A promoted row's marker pins the question's bytes; a rewrite re-stamps it
+    (`candidate_promotion.restamp_marker_question`) so promotion still reads
+    the bank. Any other comment line is returned unchanged."""
+    if "lifehug:candidate-promotion:v1" not in line:
+        return line
+    import candidate_promotion  # noqa: PLC0415 - it imports this module
+
+    return candidate_promotion.restamp_marker_question(line, question_id, text)
+
+
+def keep_question(bank_text: str, question_id: str, *, reason: str | None = None,
+                  kept_on: str | None = None) -> tuple[str, dict]:
+    """THE_OWNERS_KEEP_IS_ON_THE_ROW: write ``  <!-- craft: kept DATE: reason -->``
+    under one OPEN row. Pure.
+
+    Re-keeping replaces the earlier kept comment (the reason is updated); a
+    ``craft: review:`` comment on the row is dropped (the owner has looked).
+    The row itself is untouched. ValueError for unknown, answered or retired.
+    """
+    lines, index, end, match = _open_row_span(bank_text, question_id)
+    qid = match.group("qid")
+    stamp = kept_on or date.today().isoformat()
+    why = _safe_comment(reason or "") or DEFAULT_KEEP_REASON
+    previous = craft_kept_index("".join(lines[index:end])).get(qid)
+    comments, dropped = _without_markers(lines[index + 1:end], CRAFT_KEPT_MARKER,
+                                         CRAFT_REVIEW_MARKER)
+    new_text = _splice(bank_text, lines, index, end,
+                       [lines[index].rstrip("\r\n"), *comments, craft_kept_comment(stamp, why)])
+    verdict = evaluate(match.group("text").strip(), with_score=False,
+                       context={"bank": [(r["id"], r["text"]) for r in bank_rows(bank_text)],
+                                "self_id": qid, "kept": True})
+    return new_text, {
+        "id": qid, "text": match.group("text").strip(), "kept_on": stamp, "reason": why,
+        "rekept": previous is not None,
+        "dropped_review": bool([d for d in dropped if CRAFT_REVIEW_MARKER in d]),
+        "overridden": verdict.get("overridden", []),
+    }
+
+
+def rewrite_question(bank_text: str, question_id: str, text: str, *,
+                     reason: str | None = None,
+                     rewritten_on: str | None = None) -> tuple[str, dict]:
+    """A_REWRITE_IS_THE_SAME_QUESTION_RESAID: re-say one OPEN row in place. Pure.
+
+    Same id, same position, same box; only the text segment of the line
+    changes. The new text is evaluated against the bank (``self_id`` = the
+    row): a FAIL raises ``CraftRefused`` (``.reasons``) and nothing is
+    written; a REVIEW is written with a fresh ``craft: review:`` comment; a
+    PASS is written clean. Prior review and kept comments are dropped, and
+    ``  <!-- craft: rewritten DATE: was "…" -->`` records the old text.
+    """
+    lines, index, end, match = _open_row_span(bank_text, question_id)
+    qid = match.group("qid")
+    body = str(text or "").strip()
+    if "\n" in body or "\r" in body:
+        raise CraftRefused(qid, ["multiline"])
+    old = match.group("text").strip()
+    if not body:
+        raise ValueError(f"a rewrite needs text: {qid}")
+    if body == old:
+        raise ValueError(f"the rewrite is the same text: {qid}")
+    pairs = [(r["id"], r["text"]) for r in bank_rows(bank_text)]
+    verdict = evaluate(body, context={"bank": pairs, "self_id": qid}, with_score=False)
+    if verdict["verdict"] == FAIL:
+        raise CraftRefused(qid, verdict["reasons"])
+    stamp = rewritten_on or date.today().isoformat()
+    bare = lines[index].rstrip("\r\n")
+    row = bare[:match.start("text")] + body + bare[match.end("text"):]
+    comments, dropped = _without_markers(lines[index + 1:end], CRAFT_KEPT_MARKER,
+                                         CRAFT_REVIEW_MARKER)
+    comments = [_restamp_promotion(line, qid, body) for line in comments]
+    block = [row, *comments, craft_rewritten_comment(stamp, old, reason)]
+    if verdict["verdict"] == REVIEW:
+        block.append(craft_review_comment(verdict["reasons"]))
+    new_text = _splice(bank_text, lines, index, end, block)
+    return new_text, {
+        "id": qid, "was": old, "text": body, "rewritten_on": stamp,
+        "verdict": verdict["verdict"], "reasons": verdict["reasons"],
+        "dropped": [d.strip() for d in dropped],
+    }
 
 
 def _safe_note(value: str) -> str:
@@ -220,23 +419,33 @@ def retire_question(bank_text: str, question_id: str, *, reason: str | None = No
 
 
 def lint_bank(bank_text: str) -> list[dict]:
-    """Every row with its verdict and reasons — read-only."""
+    """Every row with its verdict and reasons — read-only.
+
+    A kept row is evaluated with ``kept`` (THE_OWNERS_KEEP_IS_ON_THE_ROW): its
+    verdict is the owner's pass and ``overridden`` lists what the rules said.
+    """
     rows = bank_rows(bank_text)
     pairs = [(r["id"], r["text"]) for r in rows]
     out = []
     for row in rows:
-        verdict = evaluate(row["text"], context={"bank": pairs, "self_id": row["id"]},
-                           with_score=False)
+        context = {"bank": pairs, "self_id": row["id"]}
+        if row["kept"]:
+            context["kept"] = True
+        verdict = evaluate(row["text"], context=context, with_score=False)
         out.append({"id": row["id"], "status": row["status"], "text": row["text"],
-                    "verdict": verdict["verdict"], "reasons": verdict["reasons"]})
+                    "verdict": verdict["verdict"], "reasons": verdict["reasons"],
+                    "kept": row["kept"], "overridden": verdict.get("overridden", [])})
     return out
 
 
 def _format_table(entries: list[dict]) -> str:
-    lines = [f"{'ID':<8} {'STATUS':<9} {'VERDICT':<7} REASONS / TEXT"]
+    lines = [f"{'ID':<8} {'STATUS':<9} {'VERDICT':<7} {'KEPT':<4} REASONS / TEXT"]
     for entry in entries:
         reasons = ", ".join(entry["reasons"]) or "-"
-        lines.append(f"{entry['id']:<8} {entry['status']:<9} {entry['verdict']:<7} "
+        if entry.get("kept") and entry.get("overridden"):
+            reasons = "overridden: " + ", ".join(entry["overridden"])
+        kept = "kept" if entry.get("kept") else "-"
+        lines.append(f"{entry['id']:<8} {entry['status']:<9} {entry['verdict']:<7} {kept:<4} "
                      f"{reasons} | {entry['text']}")
     counts = {v: sum(1 for e in entries if e["verdict"] == v) for v in ("pass", "review", "fail")}
     lines.append(f"\n{len(entries)} entries: {counts['pass']} pass, {counts['review']} review, "
@@ -274,6 +483,52 @@ def cmd_retire(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_keep(args: argparse.Namespace) -> int:
+    from lifehug_core import QUESTIONS_FILE, write_text  # noqa: PLC0415
+
+    text = QUESTIONS_FILE.read_text(encoding="utf-8")
+    try:
+        new_text, receipt = keep_question(text, args.question_id, reason=args.reason)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    write_text(QUESTIONS_FILE, new_text)
+    if args.json:
+        print(json.dumps(receipt, indent=2, ensure_ascii=False))
+    else:
+        overridden = ", ".join(receipt["overridden"]) or "nothing"
+        print(f"Kept {receipt['id']} ({receipt['kept_on']}: {receipt['reason']}); "
+              f"overrides {overridden}")
+    return 0
+
+
+def cmd_rewrite(args: argparse.Namespace) -> int:
+    from lifehug_core import QUESTIONS_FILE, write_text  # noqa: PLC0415
+
+    text = QUESTIONS_FILE.read_text(encoding="utf-8")
+    try:
+        new_text, receipt = rewrite_question(text, args.question_id, args.text,
+                                             reason=args.reason)
+    except CraftRefused as exc:
+        if args.json:
+            print(json.dumps({"refused": True, "id": exc.question_id, "reasons": exc.reasons},
+                             indent=2, ensure_ascii=False))
+        else:
+            print(f"Refused: the rewrite of {exc.question_id} is not a question "
+                  f"({', '.join(exc.reasons)}); nothing written", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    write_text(QUESTIONS_FILE, new_text)
+    if args.json:
+        print(json.dumps({"refused": False, **receipt}, indent=2, ensure_ascii=False))
+    else:
+        tail = f" ({', '.join(receipt['reasons'])})" if receipt["reasons"] else ""
+        print(f"Rewrote {receipt['id']} [{receipt['verdict']}{tail}]: {receipt['text']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="The question bank's one door (ADR 0042)")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -287,6 +542,19 @@ def build_parser() -> argparse.ArgumentParser:
     retire.add_argument("--reason")
     retire.add_argument("--json", action="store_true")
     retire.set_defaults(func=cmd_retire)
+    keep = sub.add_parser("keep", help="Keep one open bank entry: the owner's pass beats the "
+                                       "craft rules everywhere (ADR 0045)")
+    keep.add_argument("question_id")
+    keep.add_argument("--reason", help=f"Why (default: {DEFAULT_KEEP_REASON!r})")
+    keep.add_argument("--json", action="store_true")
+    keep.set_defaults(func=cmd_keep)
+    rewrite = sub.add_parser("rewrite", help="Re-say one open bank entry in place: same id, "
+                                             "re-evaluated; a FAIL is refused (ADR 0045)")
+    rewrite.add_argument("question_id")
+    rewrite.add_argument("--text", required=True, help="The new question text")
+    rewrite.add_argument("--reason", help="Why (recorded on the rewritten comment)")
+    rewrite.add_argument("--json", action="store_true")
+    rewrite.set_defaults(func=cmd_rewrite)
     return parser
 
 
