@@ -1362,6 +1362,8 @@ python3 system/lifehug.py focus-autopilot --dry-run # preview the next auto-appr
 python3 system/lifehug.py focus-dupes --report      # duplicate/near-duplicate Focuses + pending ideas (zero AI, zero writes)
 python3 system/lifehug.py focus-curate --dry-run    # judge first-encounter near-name duplicates (ADR 0010)
 python3 system/lifehug.py focus-merge <survivor> <loser> --dry-run  # heal a duplicate pair (ADR 0012)
+python3 system/lifehug.py focus-unselect <id>         # Remove a Focus: no longer preferred in the queue, nothing deleted (ADR 0046)
+python3 system/lifehug.py focus-select <id>           # Add it back: preferred again; the weekly sweep never undoes it
 python3 system/lifehug.py question-bank-lint --verdict fail  # bank entries that fail the craft evaluation (ADR 0042, read-only)
 python3 system/lifehug.py question-retire <id> --reason "…"  # retire one: `- [-]`, never deleted (ADR 0042)
 python3 system/lifehug.py question-keep <id> --reason "…"    # keep one: the owner's pass beats the craft rules everywhere (ADR 0045)

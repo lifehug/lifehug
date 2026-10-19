@@ -176,6 +176,10 @@ class RestAndReopen(Base):
     def test_planner_weights_a_reopened_focus_again(self):
         self.put(bank(3, 0), [PRIMARY, katie()])
         self.sweep()
+        # v423 (ADR 0046): the sweep rested it as complete; the reopen that
+        # persists (a rebuild or the next sweep) selects it again.
+        self.bank_file.write_text(bank(3, 1))
+        roadmap.rebuild_roadmap(write=True)
         qs = lifehug_core.parse_questions(bank(3, 1))
         index = question_planner.build_focus_index(roadmap.load_roadmap()["focuses"], qs)
         self.assertGreater(index["info"]["katie"]["weight"], 0.0)
@@ -187,7 +191,10 @@ class RestAndReopen(Base):
         self.assertEqual(len(recommend_focuses._developing_focuses(roadmap.load_roadmap(), qs)), 1)
         self.sweep()
         self.assertEqual(recommend_focuses._developing_focuses(roadmap.load_roadmap(), qs), [])
-        # A new question is approved: developing again, before any persist.
+        # A new question is approved: developing again once the reopen
+        # persists (v423, ADR 0046: the sweep's complete-rest is undone).
+        self.bank_file.write_text(bank(3, 1))
+        self.sweep(now="2026-10-11T12:00:00Z")
         qs = lifehug_core.parse_questions(bank(3, 1))
         self.assertEqual(len(recommend_focuses._developing_focuses(roadmap.load_roadmap(), qs)), 1)
 
@@ -221,6 +228,13 @@ class RestAndReopen(Base):
     def test_foundation_shows_a_quiet_complete_mark(self):
         self.put(bank(3, 0), [PRIMARY, katie()])
         self.sweep()
+        # v423 (ADR 0046, amending this ADR): the sweep rests a complete
+        # Focus, so it leaves Foundation; the mark shows while the owner keeps
+        # it selected (keep_going).
+        with mock.patch.object(serve_wiki, "QUESTIONS_FILE", self.bank_file):
+            html = serve_wiki.view_foundation()[1]
+        self.assertNotIn("fnd-complete", html)
+        fc.play("katie", "keep_going")
         with mock.patch.object(serve_wiki, "QUESTIONS_FILE", self.bank_file):
             html = serve_wiki.view_foundation()[1]
         self.assertIn("complete", html)

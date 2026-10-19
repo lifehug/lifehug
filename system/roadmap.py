@@ -41,6 +41,7 @@ from lifehug_core import (  # noqa: E402
     write_json,
     write_text,
 )
+from focus_selection import is_selected, reopen_selection  # noqa: E402
 
 # Tier → default target depth (number of answers that count as "well-known").
 TIER_TARGETS = {"basic": 8, "standard": 20, "extreme": 50}
@@ -409,7 +410,10 @@ _USER_FIELDS = ("label", "tier", "objective", "deliverable", "target_depth",
                 # v394 (ADR 0044): the completion record (completed_at, the
                 # coverage snapshot, the one Mirror row's state) is the
                 # person's history, not derived: it survives a re-derive.
-                "completion")
+                "completion",
+                # v423 (ADR 0046): a Focus is a queue preference. The owner's
+                # (or the sweep's) selection is never re-derived.
+                "selected", "selection")
 
 
 def derive_roadmap(md_text: str, existing: dict | None = None) -> dict:
@@ -465,6 +469,10 @@ def reopen_completed(focuses: list[dict], md_text: str, *, when: str | None = No
 
     Called from :func:`derive_roadmap`, so ANY roadmap rebuild after a new
     question is approved persists the reopen. There is no second door.
+
+    v423 (ADR 0046): a Focus the sweep rested BECAUSE it was complete is
+    selected again on reopen (`by: sweep, reason: reopened`), since the reason
+    no longer holds. An owner's Remove, or a rest at the tier target, stays.
     """
     questions = parse_questions(md_text)
     reopened: list[str] = []
@@ -475,6 +483,7 @@ def reopen_completed(focuses: list[dict], md_text: str, *, when: str | None = No
         if fill["pending"] <= 0:
             continue
         focus["phase"] = "active"
+        reopen_selection(focus, when=when)
         completion = dict(focus.get("completion") or {})
         completion["reopened_at"] = when or now_utc()
         focus["completion"] = completion
@@ -711,12 +720,15 @@ def _print_roadmap(roadmap: dict) -> None:
         fill = focus_fill(f, qs)
         phase = f.get("phase", "active")
         phase_tag = f" «{phase}»" if phase != "active" else ""
+        if not is_selected(f):
+            phase_tag += " «unselected»"
         bar = "█" * int(fill["saturation"] * 10) + "·" * (10 - int(min(fill["saturation"], 1) * 10))
         print(f"  [{f['tier']:8}] {f['label']:24}{phase_tag:12} {f['type']:11} "
               f"{bar} {fill['answered']:3}/{fill['target']:<3} (sat {fill['saturation']:.0%})"
               f"{'  SATURATED' if fill['saturated'] else ''}")
         cats = ",".join(f.get("categories", []))
-        print(f"            objective: {f.get('objective','-')}  →  {f.get('deliverable','-')}  [{cats}]")
+        print(f"            objective: {f.get('objective','-')}  →  {f.get('deliverable','-')}  [{cats}]"
+              f"  selected: {'yes' if is_selected(f) else 'no'}")
 
 
 def find_focus(roadmap: dict, focus_id: str) -> dict | None:

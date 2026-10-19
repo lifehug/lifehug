@@ -117,4 +117,4 @@ python3 system/lifehug.py focus-new "<existing zombie label>" --type person \
 ## Notes
 - Don't create a Focus from a weak signal — confirm the objective with the user first.
 - A Focus over **existing** categories doesn't need `focus-new`; use `focus-add … --category X`.
-- Deleting a Focus is manual for now (remove it from `state/roadmap.json` and the category from `question-bank.md`); offer to do it carefully if asked.
+- A Focus is a queue preference, never deleted (ADR 0046). To remove one, `python3 system/lifehug.py focus-unselect <focus-id>`: it stops being preferred in the queue and leaves Foundation; its category, questions, answers and wiki page stay. `focus-select <focus-id>` adds it back. The weekly sweep unselects a Focus at its tier target unless the owner selected it.

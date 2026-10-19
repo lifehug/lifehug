@@ -188,6 +188,9 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # and files second-pass candidates; the Play records its row's outcome.
     # Classified BY NAME like focus-autopilot (--dry-run writes nothing).
     "focus-complete-sweep", "focus-complete-play",
+    # v423 (ADR 0046): select/unselect write one Focus row's `selected` and
+    # `selection` in state/roadmap.json — the focus-set family.
+    "focus-select", "focus-unselect",
     # entity-identity-context (v190): the entity -> focus hand-off appends one
     # row to state/focus_recommendations.json — same single-file writer-lock
     # family as focus-dismiss/recommend-focuses. It creates no Focus.
@@ -1927,6 +1930,16 @@ def cmd_focus_complete_sweep(args: argparse.Namespace) -> int:
 
 def cmd_focus_complete_play(args: argparse.Namespace) -> int:
     return run_python("focus_complete.py", ["play", args.focus_id, args.which])
+
+
+def cmd_focus_select(args: argparse.Namespace) -> int:
+    flags = ["select", args.focus_id] + (["--json"] if args.json else [])
+    return run_python("focus_selection.py", flags)
+
+
+def cmd_focus_unselect(args: argparse.Namespace) -> int:
+    flags = ["unselect", args.focus_id] + (["--json"] if args.json else [])
+    return run_python("focus_selection.py", flags)
 
 
 def cmd_focus_finish(args: argparse.Namespace) -> int:
@@ -4786,6 +4799,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("focus_id")
     p.add_argument("which", choices=["keep_going", "rest", "make"])
     p.set_defaults(func=cmd_focus_complete_play)
+
+    p = sub.add_parser("focus-select",
+                       help="Prefer a Focus in the question queue again (ADR 0046); "
+                            "the sweep never undoes it")
+    p.add_argument("focus_id")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_focus_select)
+
+    p = sub.add_parser("focus-unselect",
+                       help="Stop preferring a Focus in the question queue (ADR 0046); "
+                            "nothing is deleted, focus-select brings it back")
+    p.add_argument("focus_id")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_focus_unselect)
 
     p = sub.add_parser("serve", help="Serve the local owner-only wiki")
     p.add_argument("--host", default="127.0.0.1")
