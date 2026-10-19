@@ -351,6 +351,66 @@ def _build_focus_merge(payload: dict) -> tuple[Invocation, ...]:
     return (_cli(*args),)
 
 
+_FOCUS_TYPE_RE = re.compile(r"^[a-z_]{1,32}$")
+_FOCUS_TIERS = ("basic", "standard", "extreme")
+
+
+def _build_focus_select(payload: dict) -> tuple[Invocation, ...]:
+    """Add back (v424, ADR 0046): `focus-select ID`. The verb owns the semantics."""
+    _expect_payload(payload, required={"focus_id"})
+    return (_cli("focus-select", _focus_id(payload)),)
+
+
+def _build_focus_unselect(payload: dict) -> tuple[Invocation, ...]:
+    """Remove (v424, ADR 0046): `focus-unselect ID` - nothing is deleted."""
+    _expect_payload(payload, required={"focus_id"})
+    return (_cli("focus-unselect", _focus_id(payload)),)
+
+
+def _build_focus_tier(payload: dict) -> tuple[Invocation, ...]:
+    _expect_payload(payload, required={"focus_id", "tier"})
+    tier = _text(payload, "tier", maximum=16)
+    if tier not in _FOCUS_TIERS:
+        raise ValueError("invalid tier")
+    return (_cli("focus-set", _focus_id(payload), "--tier", tier),)
+
+
+def _build_focus_new(payload: dict) -> tuple[Invocation, ...]:
+    """Add a Focus from the viewer (v424): `focus-new LABEL --no-generate
+    [--person SLUG] [--primer-file -]`. The primer rides the job's private
+    stdin envelope as JSON, never argv; `normalize_primer` (run by the verb)
+    is the one parser and the one 2000-character limit. Seeding questions is
+    not this job's work (`--no-generate`: scaffold only)."""
+    _expect_payload(payload, required={"label", "type", "tier"}, optional={"person", "primer"})
+    label = _text(payload, "label", maximum=120)
+    if label.startswith("-"):
+        raise ValueError("invalid label")
+    focus_type = _text(payload, "type", maximum=32)
+    if not _FOCUS_TYPE_RE.fullmatch(focus_type):
+        raise ValueError("invalid type")
+    tier = _text(payload, "tier", maximum=16)
+    if tier not in _FOCUS_TIERS:
+        raise ValueError("invalid tier")
+    args = ["focus-new", label, "--type", focus_type, "--tier", tier, "--no-generate"]
+    if payload.get("person") is not None:
+        args += ["--person", _token(payload, "person")]
+    primer = payload.get("primer")
+    stdin_text = None
+    if primer is not None:
+        if not isinstance(primer, dict):
+            raise ValueError("invalid primer")
+        args += ["--primer-file", "-"]
+        stdin_text = json.dumps(primer)
+    return (_cli(*args, stdin_text=stdin_text),)
+
+
+def _focus_id(payload: dict) -> str:
+    value = _text(payload, "focus_id", maximum=64)
+    if not _FOCUS_ID_RE.fullmatch(value):
+        raise ValueError("invalid focus id")
+    return value
+
+
 def _build_entity_verdict(payload: dict) -> tuple[Invocation, ...]:
     """The Graduate-now / Not-a-page / Clear actions' envelope (ADR 0013).
     Entity type is checked against entity_roster.ENTITY_TYPES (a lazy import
@@ -831,7 +891,11 @@ COMMANDS: dict[str, CommandSpec] = {
     "focus-approve": CommandSpec(_build_focus_approve, "never", timeout_seconds=1800),
     "focus-dismiss": CommandSpec(_build_focus_dismiss, "never"),
     "focus-merge": CommandSpec(_build_focus_merge, "never"),
+    "focus-new": CommandSpec(_build_focus_new, "never"),
     "focus-recommend-from-entity": CommandSpec(_build_focus_recommend_from_entity, "never"),
+    "focus-select": CommandSpec(_build_focus_select, "never"),
+    "focus-tier": CommandSpec(_build_focus_tier, "never"),
+    "focus-unselect": CommandSpec(_build_focus_unselect, "never"),
     "monthly": CommandSpec(_build_schedule("monthly_research.sh"), "never", timeout_seconds=21600),
     "process-answer": CommandSpec(_build_process_answer, "never", timeout_seconds=1800),
     "reflect-source": CommandSpec(_build_reflect, "never"),

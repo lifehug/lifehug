@@ -594,6 +594,51 @@ def normalize_onboarding_context(value: object) -> dict:
     return context
 
 
+#: The Focus primer (v424): what the person says to start a Focus, in one
+#: closed shape. `context` is free text (the "what should this story cover?"
+#: box); the three setup fields go through the SAME closed layer as the
+#: onboarding context (`validate_focus_setup`) — one parser, not a second copy.
+MAX_PRIMER_CHARS = 2000
+_PRIMER_KEYS = frozenset({"objective", "relationship", "living", "context"})
+
+
+def normalize_primer(value: object) -> dict:
+    """Parse a `--primer-file` payload: ``{"objective","relationship","living",
+    "context"}`` (every key optional). Returns the usable subset; raises
+    ``ValueError`` (a clear message, nothing written) for a non-object, an
+    unknown key, a non-string `context`, or a `context` over
+    :data:`MAX_PRIMER_CHARS` after trimming. An invalid `relationship` or
+    `living` drops that key exactly as :func:`validate_focus_setup` does."""
+    if not isinstance(value, dict):
+        raise ValueError("primer must be a JSON object")
+    unknown = sorted(set(value) - _PRIMER_KEYS)
+    if unknown:
+        raise ValueError(f"primer has unknown key(s): {', '.join(unknown)}")
+    out: dict[str, object] = dict(validate_focus_setup(
+        {k: v for k, v in value.items() if k != "context"}) or {})
+    context = value.get("context")
+    if context is not None:
+        if not isinstance(context, str):
+            raise ValueError("primer context must be text")
+        context = context.strip()
+        if len(context) > MAX_PRIMER_CHARS:
+            raise ValueError(
+                f"primer context is {len(context)} characters; the limit is {MAX_PRIMER_CHARS}")
+        if context:
+            out["context"] = context
+    return out
+
+
+def read_primer_file(path: str) -> dict:
+    """Read and normalize a primer file; ``-`` reads standard input (the
+    viewer's job envelope passes the primer that way, never as argv)."""
+    try:
+        raw = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+        return normalize_primer(json.loads(raw))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read primer file {path!r}: {exc}") from exc
+
+
 def interview_bank_key(relationship: str | None, *, living: object = None) -> str | None:
     """Which ``research_expand.INTERVIEW_BANKS`` bank fits this person
     (Design §E.2). ``living is False`` wins over everything — the

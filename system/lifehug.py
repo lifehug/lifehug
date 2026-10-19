@@ -1918,6 +1918,8 @@ def cmd_focus_set(args: argparse.Namespace) -> int:
         flags.extend(["--cap", str(args.cap)])
     for c in args.category or []:
         flags.extend(["--category", c])
+    if getattr(args, "primer_file", None):
+        flags.extend(["--primer-file", args.primer_file])
     return run_python("roadmap.py", flags)
 
 
@@ -1955,6 +1957,17 @@ def cmd_focus_new(args: argparse.Namespace) -> int:
         flags.append("--no-generate")
     if getattr(args, "context_file", None):
         flags.extend(["--context-file", args.context_file])
+    # v424: the primer door and the record binding.
+    if getattr(args, "primer_file", None):
+        flags.extend(["--primer-file", args.primer_file])
+    if getattr(args, "person", None):
+        flags.extend(["--person", args.person])
+    if getattr(args, "relationship", None):
+        flags.extend(["--relationship", args.relationship])
+    if getattr(args, "living", None) is True:
+        flags.append("--living")
+    elif getattr(args, "living", None) is False:
+        flags.append("--not-living")
     return run_python("roadmap.py", flags)
 
 
@@ -4749,6 +4762,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-generate", action="store_true")
     p.add_argument("--context-file", metavar="PATH",
                    help="Onboarding-context JSON to ground the seeded questions (v189)")
+    p.add_argument("--primer-file", metavar="PATH",
+                   help='Primer JSON {"objective","relationship","living","context"}; '
+                        "context <= 2000 chars; '-' reads stdin (v424)")
+    p.add_argument("--person", metavar="SLUG",
+                   help="Bind this person Focus to that roster record; a twin is refused (v424)")
+    p.add_argument("--relationship", choices=list(FOCUS_RELATIONSHIPS))
+    new_living = p.add_mutually_exclusive_group()
+    new_living.add_argument("--living", dest="living", action="store_true", default=None)
+    new_living.add_argument("--not-living", dest="living", action="store_false", default=None)
     p.set_defaults(func=cmd_focus_new)
 
     p = sub.add_parser("focus-add", help="Add a Focus (objective + tier)")
@@ -4779,6 +4801,8 @@ def build_parser() -> argparse.ArgumentParser:
     living.add_argument("--living", dest="living", action="store_true", default=None)
     living.add_argument("--not-living", dest="living", action="store_false", default=None)
     p.add_argument("--category", action="append", default=[])
+    p.add_argument("--primer-file", metavar="PATH",
+                   help="Replace the Focus's primer (JSON {\"context\": ...}, <= 2000 chars); '-' reads stdin (v424)")
     p.set_defaults(func=cmd_focus_set)
 
     p = sub.add_parser("focus-finish",

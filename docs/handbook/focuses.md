@@ -328,6 +328,8 @@ preference. The weekly sweep rests a Focus automatically when its bar reaches
 the queue's space; choosing **keep going** on its Mirror row, or
 `focus-select`, brings it back, and the sweep never rests it again on its own.
 
+Start a Focus with a primer: `focus-new "Grandpa Joe" --type person --person grandpa-joe --primer-file primer.json` (`{"objective","relationship","living","context"}`, context up to 2000 characters); `focus-set <id> --primer-file` replaces it. The viewer's Foundation has ＋ Add and Edit (Remove, Tier) for the same verbs.
+
 ## 5. In the loop
 
 **What feeds it:** every answer, manual source, and weekly classification

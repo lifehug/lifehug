@@ -494,6 +494,13 @@ def layout(title: str, body: str, active_rel: str | None = None, wide: bool = Fa
     .rev-diff ins {{ background: #dcedc8; text-decoration: none; }}
     .rev-diff del {{ background: #f8d7d5; }}
     details.qb-cat > summary .barwrap {{ flex: 1; margin: 0; }}
+    .fnd-bar {{ display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; margin: 0 0 14px; }}
+    .fnd-bar details {{ border: 0; }}
+    .fnd-bar details[open] {{ flex-basis: 100%; }}
+    .fnd-bar summary {{ display: inline-block; cursor: pointer; list-style: none; }}
+    .fnd-bar summary::-webkit-details-marker {{ display: none; }}
+    .fnd-bar textarea, .fnd-bar input[type=text], .fnd-bar input[type=search] {{ width: 100%; box-sizing: border-box; }}
+    ul.fnd-used {{ list-style: none; padding: 0; margin: 4px 0 10px; }}
     details.fnd-focus {{ margin-bottom: 10px; border: 1px solid #e5dfd5; border-radius: 8px; background: #fffdf9; overflow: hidden; }}
     details.fnd-focus > summary {{ list-style: none; cursor: pointer; padding: 12px 16px; }}
     details.fnd-focus > summary::-webkit-details-marker {{ display: none; }}
@@ -813,6 +820,86 @@ def _foundation_category(cid: str, name: str, qs: list[dict]) -> str:
     )
 
 
+_FOUNDATION_BACK = "/views/foundation"
+_FOCUS_TYPE_CHOICES = ("person", "place", "period", "project", "theme", "event")
+_FOCUS_TIER_CHOICES = (("basic", "basic · 8 questions"), ("standard", "standard · 20"),
+                       ("extreme", "extreme · 50"))
+
+
+def _tier_select(name: str = "tier", selected: str = "standard") -> str:
+    return (f'<select name="{name}">' + "".join(
+        f'<option value="{t}"{" selected" if t == selected else ""}>{html.escape(label)}</option>'
+        for t, label in _FOCUS_TIER_CHOICES) + "</select>")
+
+
+def _roster_without_focus() -> list[dict]:
+    """Person records no Focus attends to (and that are not folded away)."""
+    return [r for r in _identity_records("person")
+            if _record_slug(r) and not _ir.roster_home(r)]
+
+
+def _foundation_header(focuses: list[dict]) -> str:
+    """The Foundation header row (v424): ＋ Add and Edit. Native <details>
+    and a datalist, no script; every control posts to an /actions/focus-*
+    route that files a job, which runs the lifehug.py verb (the CLI door).
+    Selection is a queue preference (ADR 0046): Remove deletes nothing."""
+    from focus_candidate import FOCUS_RELATIONSHIPS, MAX_PRIMER_CHARS  # noqa: PLC0415
+
+    selected = [f for f in focuses if is_selected(f)]
+    unselected = [f for f in focuses if not is_selected(f)]
+    people = _roster_without_focus()
+    options = "".join(
+        f'<option value="{html.escape(_record_display(p, "person", people))}"></option>'
+        for p in people)
+    used = "".join(
+        '<li><form class="actform act-inline" method="post" action="/actions/focus-select">'
+        f'{_token_input()}<input type="hidden" name="id" value="{html.escape(str(f.get("id", "")))}">'
+        f'<span>{html.escape(str(f.get("label", f.get("id", "?"))))}</span> '
+        '<button class="btn quiet" type="submit">Add back</button></form></li>'
+        for f in unselected)
+    previously = (f'<h3>Previously used</h3><ul class="fnd-used">{used}</ul>' if used
+                  else '<p class="muted">No previously used Focuses.</p>')
+    type_options = "".join(f'<option value="{t}">{t}</option>' for t in _FOCUS_TYPE_CHOICES)
+    rel_options = '<option value="">—</option>' + "".join(
+        f'<option value="{html.escape(r)}">{html.escape(r)}</option>' for r in FOCUS_RELATIONSHIPS)
+    add = (
+        '<details class="fnd-add"><summary class="btn">\uFF0B Add</summary>'
+        f'{previously}'
+        '<h3>New Focus</h3>'
+        '<form class="actform" method="post" action="/actions/focus-new">'
+        f'{_token_input()}'
+        '<p><label>Search your people, or type a name '
+        '<input type="search" name="search" list="fnd-people" required maxlength="120"></label>'
+        f'<datalist id="fnd-people">{options}</datalist></p>'
+        f'<p><label>Type <select name="type">{type_options}</select></label> '
+        f'<label>Tier {_tier_select()}</label></p>'
+        '<p><label>Objective <input type="text" name="objective" maxlength="200"></label></p>'
+        f'<p><label>Relationship <select name="relationship">{rel_options}</select></label> '
+        '<label>Living <select name="living"><option value="">—</option>'
+        '<option value="yes">yes</option><option value="no">no</option></select></label></p>'
+        f'<p><label>What should this story cover? (up to {MAX_PRIMER_CHARS} characters)'
+        f'<textarea name="context" rows="4" maxlength="{MAX_PRIMER_CHARS}"></textarea></label></p>'
+        '<button class="btn" type="submit">Create</button></form></details>')
+    if selected:
+        boxes = "".join(
+            f'<li><label><input type="checkbox" name="id" value="{html.escape(str(f.get("id", "")))}"> '
+            f'{html.escape(str(f.get("label", f.get("id", "?"))))}</label></li>'
+            for f in selected)
+        edit_body = (
+            '<form class="actform" method="post" action="/actions/focus-unselect">'
+            f'{_token_input()}<ul class="fnd-used">{boxes}</ul>'
+            '<button class="btn quiet" type="submit" formaction="/actions/focus-unselect">Remove</button> '
+            f'<label>Tier {_tier_select()}</label> '
+            '<button class="btn quiet" type="submit" formaction="/actions/focus-tier">Set tier</button>'
+            '<p class="muted">Remove only stops the preference in the question queue; '
+            'nothing is deleted and Add back restores it.</p></form>')
+    else:
+        edit_body = '<p class="muted">No Focuses to edit.</p>'
+    return ('<div class="fnd-bar">' + add
+            + f'<details class="fnd-edit"><summary class="btn quiet">Edit</summary>{edit_body}</details>'
+            + '</div>')
+
+
 def view_foundation():
     """Focus → category → question drill-down: the supply side on one screen.
 
@@ -848,7 +935,7 @@ def view_foundation():
         qs = by_cat.get(cid, [])
         return (sum(1 for q in qs if q["answered"]) / len(qs)) if qs else 0.0
 
-    parts = ["<h1>Foundation</h1>"]
+    parts = ["<h1>Foundation</h1>", _foundation_header(focuses)]
     total_answered = total_target = 0
     claimed: set[str] = set()
     for focus in focuses:
@@ -4625,6 +4712,90 @@ def act_focus_rec(form):
     return ("/views/review", "✗ unknown recommendation action", None)
 
 
+def _focus_ids(form: dict) -> list[str]:
+    return [v.strip() for v in form.get("id", []) if v and v.strip()]
+
+
+def act_focus_select(form):
+    """Add back (ADR 0046): one `focus-select` job per id; nothing but the
+    queue preference changes."""
+    ids = _focus_ids(form)
+    if not ids:
+        return (_FOUNDATION_BACK, "✗ pick a Focus to add back", None)
+    job = None
+    for fid in ids:
+        job = _start_job("focus-select", {"focus_id": fid})
+    return (_FOUNDATION_BACK, f"queued: {', '.join(ids)} preferred in the queue again", job["id"])
+
+
+def act_focus_unselect(form):
+    """Remove (ADR 0046): no longer preferred in the queue; nothing is deleted."""
+    ids = _focus_ids(form)
+    if not ids:
+        return (_FOUNDATION_BACK, "✗ tick the Focuses to remove first", None)
+    job = None
+    for fid in ids:
+        job = _start_job("focus-unselect", {"focus_id": fid})
+    return (_FOUNDATION_BACK,
+            f"queued: {', '.join(ids)} no longer preferred in the queue (nothing is deleted)",
+            job["id"])
+
+
+def act_focus_tier(form):
+    ids = _focus_ids(form)
+    tier = _f(form, "tier")
+    if not ids:
+        return (_FOUNDATION_BACK, "✗ tick the Focuses to change first", None)
+    if tier not in ("basic", "standard", "extreme"):
+        return (_FOUNDATION_BACK, "✗ pick a tier", None)
+    job = None
+    for fid in ids:
+        job = _start_job("focus-tier", {"focus_id": fid, "tier": tier})
+    return (_FOUNDATION_BACK, f"queued: {', '.join(ids)} set to {tier}", job["id"])
+
+
+def act_focus_new(form):
+    """Add a Focus: a picked roster person binds with --person (a twin is
+    refused by the verb); a typed name is a plain Focus. The primer rides the
+    job envelope; the 2000-character limit is `focus_candidate.MAX_PRIMER_CHARS`."""
+    from focus_candidate import FOCUS_RELATIONSHIPS, MAX_PRIMER_CHARS  # noqa: PLC0415
+
+    search = " ".join(_f(form, "search").split())
+    if not search or len(search) > 120:
+        return (_FOUNDATION_BACK, "✗ type a name or pick someone from your people", None)
+    tier = _f(form, "tier") or "standard"
+    if tier not in ("basic", "standard", "extreme"):
+        return (_FOUNDATION_BACK, "✗ pick a tier", None)
+    context = _f(form, "context")
+    if len(context) > MAX_PRIMER_CHARS:
+        return (_FOUNDATION_BACK,
+                f"✗ the story note is {len(context)} characters; the limit is {MAX_PRIMER_CHARS}", None)
+    people = _roster_without_focus()
+    match = next((p for p in people
+                  if search.casefold() in (_record_display(p, "person", people).casefold(),
+                                           _record_slug(p).casefold())), None)
+    primer: dict[str, object] = {}
+    if _f(form, "objective"):
+        primer["objective"] = _f(form, "objective")
+    if context:
+        primer["context"] = context
+    payload: dict[str, object] = {"tier": tier}
+    if match is not None:
+        payload.update(label=" ".join(str(match.get("name") or search).split()),
+                       type="person", person=_record_slug(match))
+        relationship, living = _f(form, "relationship"), _f(form, "living")
+        if relationship in FOCUS_RELATIONSHIPS:
+            primer["relationship"] = relationship
+        if living in ("yes", "no"):
+            primer["living"] = living == "yes"
+    else:
+        payload.update(label=search, type=_f(form, "type") or "theme")
+    if primer:
+        payload["primer"] = primer
+    job = _start_job("focus-new", payload)
+    return (_FOUNDATION_BACK, f"queued: starting the Focus “{payload['label']}”", job["id"])
+
+
 def act_focus_merge(form):
     """Combine two duplicate focuses (ADR 0012).
 
@@ -4871,6 +5042,10 @@ ACTIONS = {
     "/actions/candidate": act_candidate,
     "/actions/focus-rec": act_focus_rec,
     "/actions/focus-merge": act_focus_merge,
+    "/actions/focus-select": act_focus_select,
+    "/actions/focus-unselect": act_focus_unselect,
+    "/actions/focus-tier": act_focus_tier,
+    "/actions/focus-new": act_focus_new,
     "/actions/entity-verdict": act_entity_verdict,
     "/actions/second-voice-ack": act_second_voice,
     "/actions/artifact/new": act_artifact_new,
