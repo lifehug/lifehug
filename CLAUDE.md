@@ -128,6 +128,22 @@ step; `migrate-classifier-moments` (the weekly sweep, or by hand) supersedes a
 retired entry's classifier claims. Never add an entry's `subject` to the names
 of the person it is about.
 
+**A Focus is a queue preference; a Focus at 100% rests (v423, owner
+2026-10-19).** Removing a Focus "should only mean that it's no longer
+preferential in the queue, not anything more, no deletion or anything" (ADR
+0046, amends 0044). The roadmap row carries `selected` (absent ⇒ true) and
+`selection {by: owner|sweep, at, reason}`, kept across re-derives; read it ONLY
+through `focus_selection.is_selected` (a guard test fails an inline read).
+Unselected ⇒ `question_planner.focus_weight` is 0.0, the autopilot's
+keep-3-developing count and the completion gate skip it, Foundation leaves it
+out; nothing else changes (category, questions, answers, page, roster link).
+`focus-unselect ID` / `focus-select ID` are the owner's verbs. The weekly
+`focus-complete-sweep` unselects every non-primary Focus at its tier target
+(`saturation >= 1.0`) or complete unless the owner last selected it
+(`focus_selection.should_rest`); `keep_going` selects as the owner, `rest`
+leaves it unselected, a reopen undoes only the sweep's `complete` rest, and
+`focus-set --tier` never changes selection.
+
 **A question anywhere is a question; the owner's keep is the owner's pass; a
 rewrite is the same question resaid (v422, owner 2026-10-15).** Seven good
 open questions showed as craft FAILs (ADR 0045, amends 0042). `not_a_question`
@@ -517,6 +533,8 @@ python3 system/lifehug.py focus-set mom --tier standard --target 18
 python3 system/lifehug.py focus-finish etherfuse  # push a deliverable to done (lifts its variety cap to 50%)
 python3 system/lifehug.py progress                # are we graduating toward deliverables?
 python3 system/lifehug.py focus-complete-sweep    # weekly: a Focus at 100% of its category becomes `complete` (ADR 0044)
+python3 system/lifehug.py focus-unselect mom      # Remove: no longer preferred in the queue; nothing deleted (ADR 0046)
+python3 system/lifehug.py focus-select mom        # Add back: preferred again; the sweep never undoes it
 ```
 
 **A Focus at 100% is a milestone, not an end** (v394, ADR 0044). When a Focus's category has no open question left and at least one answered, the weekly `focus-complete-sweep` marks it `complete` automatically (coverage of the category is the rule, whatever the tier). A complete Focus is never queued, leaves the autopilot's keep-3-developing count, and keeps its page; it returns to `developing` the moment a new question for its category is approved. Its person's Timeline gaps are filed once as Review candidates (`source: focus_complete:<slug>`, parked at `needs_review`, never into the bank), and one Mirror row (`focus_complete`) says so with three Plays: `keep_going`, `rest`, `make`. `focus-finish` is unchanged: the manual accelerator, it marks nothing complete.

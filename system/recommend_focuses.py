@@ -44,6 +44,7 @@ from lifehug_core import (
     write_json,
 )
 from progress import READY, verdict  # noqa: E402
+import focus_selection  # noqa: E402
 from roadmap import focus_fill, is_complete, load_roadmap, rebuild_roadmap  # noqa: E402
 
 FOCUS_RECOMMENDATION_TYPES = ("person", "place", "period", "theme")
@@ -236,6 +237,8 @@ def focus_start_gate() -> dict:
             continue
         if focus.get("phase") == "maintenance":
             continue
+        if not focus_selection.is_selected(focus):
+            continue  # v423: an unselected Focus is not work the owner is tracking
         fill = focus_fill(focus, questions)
         if is_complete(focus, fill):
             continue  # v394: a finished Focus is not unfinished work
@@ -1171,6 +1174,10 @@ def _is_developing(focus: dict, questions: list[dict]) -> bool:
     if focus.get("primary"):
         return False
     if focus.get("phase") == "maintenance":
+        return False
+    if not focus_selection.is_selected(focus):
+        # v423 (ADR 0046): an unselected Focus is not a preference, so it
+        # holds no developing slot; the owner adds it back explicitly.
         return False
     fill = focus_fill(focus, questions)
     if is_complete(focus, fill):

@@ -42,6 +42,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
+import focus_selection
 from neighborhoods import apply_readiness
 from roadmap import (
     DEFAULT_CAP,
@@ -467,6 +468,10 @@ def focus_weight(focus: dict, fill: dict) -> float:
     if is_complete(focus, fill):
         # v394 (ADR 0044): a complete Focus is never queued. `room` already
         # reads False at 100%; this keeps the rule true by NAME too.
+        return 0.0
+    if not focus_selection.is_selected(focus):
+        # v423 (ADR 0046): an unselected Focus is no longer a preference. Its
+        # questions can still arrive by coverage rotation, never by weight.
         return 0.0
     base = PRIMARY_BASE if focus.get("primary") else TIER_BASE.get(focus.get("tier", "standard"), 1.0)
     sat = fill["saturation"]
@@ -1118,6 +1123,7 @@ def build_queue(limit: int, arc_max: int, expires_days: int = 8, planner_state: 
                     "saturation": d["fill"]["saturation"],
                     "saturated": d["fill"]["saturated"],
                     "weight": round(d["weight"], 3),
+                    "selected": focus_selection.is_selected(d["focus"]),
                     "queued": per_focus.get(fid, 0),
                     "cap": focus_max.get(fid),
                 }
@@ -2463,6 +2469,16 @@ def report(limit: int = 10) -> int:
             print(f"- {item['question_id']} ({item.get('group')}/{item.get('story_function')}): {item['reason']}")
     else:
         print("Active planned queue: none")
+
+    # v423 (ADR 0046): which Focuses the queue prefers, and which it does not.
+    allocation = (queue_data.get("allocation") or {}).get("focuses") or []
+    if allocation:
+        print()
+        print("Focus allocation (selected = preferred in the queue):")
+        for row in allocation:
+            selected = "yes" if focus_selection.is_selected(row) else "no"
+            print(f"- {row.get('id')}: weight {row.get('weight')}, queued {row.get('queued', 0)}, "
+                  f"selected {selected}")
 
     preview = build_queue(
         limit,

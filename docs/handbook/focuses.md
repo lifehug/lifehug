@@ -316,6 +316,18 @@ never straight into the bank, and one Mirror row says so with three choices:
 keep going, rest, make something. `focus-finish` is the manual accelerator and
 marks nothing complete.
 
+### A Focus is a queue preference
+
+A Focus is a preference in the question queue, nothing more (ADR 0046). Remove
+one with `focus-unselect <id>`: it stops being preferred (weight 0), leaves
+Foundation and the autopilot's developing count, and everything else stays —
+its category, questions, answers and page; its open questions can still come
+up by ordinary rotation. `focus-select <id>` adds it back with its tier
+preference. The weekly sweep rests a Focus automatically when its bar reaches
+100% (answered reaches the tier target) or it is complete, so other Focuses get
+the queue's space; choosing **keep going** on its Mirror row, or
+`focus-select`, brings it back, and the sweep never rests it again on its own.
+
 ## 5. In the loop
 
 **What feeds it:** every answer, manual source, and weekly classification

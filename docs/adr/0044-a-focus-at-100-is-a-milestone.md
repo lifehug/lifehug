@@ -69,3 +69,21 @@ pass the owner can ignore, and says so once.
   completion; auto-promotion of `focus_complete:*` candidates.
 - **Delete-when:** if the planner gains a first-class "rest" state for any
   saturated Focus, `complete` should fold into it.
+
+## Amendment 2026-10-19 — a Focus at 100% rests (ADR 0046, v423)
+
+The owner ruled: "A focus is a preference to get a question in the question
+queue — it gets a higher chance of being the daily question. To remove a focus
+should only mean that it's no longer preferential in the queue, not anything
+more, no deletion or anything. If I re-added that focus it would once again get
+preference based on the algorithm for the question queue." and "A Focus that
+reaches 100% automatically unselects so other Focuses get the queue's space."
+So the weekly sweep now also unselects (ADR 0046, `focus_selection.should_rest`)
+every non-primary Focus at its tier target (`saturation >= 1.0`) or complete,
+unless the owner last selected it; `keep_going` re-selects it as the owner's
+word, `rest` leaves it unselected. Because an unselected Focus leaves the
+Foundation list, the quiet complete mark ("✓ complete") moves off that list: it
+shows on a complete Focus only while the owner keeps it selected, belongs on the
+row's entry in the Add sheet's "previously used" list (the viewer Add sheet,
+next PR), and remains on the Mirror's `focus_complete` row. The completion rule
+itself (coverage of the category, not the tier) is unchanged.

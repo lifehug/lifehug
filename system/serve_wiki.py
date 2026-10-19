@@ -62,6 +62,7 @@ from recommend_focuses import (
     FOCUS_READY_SCORE_FLOOR,
     focus_start_gate,
 )
+from focus_selection import is_selected
 from roadmap import COMPLETE_PHASE, focus_fill, is_complete, load_roadmap, rebuild_roadmap
 from vault_paths import open_vault_fd, read_vault_bytes
 
@@ -820,6 +821,10 @@ def view_foundation():
     never disagree with each other the way the cached coverage.json could.
     The focus bar stays a saturation measure (answered / tier target); the
     category bars stay coverage measures (answered / total in the bank).
+
+    v423 (ADR 0046): only SELECTED Focuses are listed. An unselected Focus is
+    no longer a queue preference and leaves this list; its categories are
+    still its own (not "Not part of any focus"), and nothing else changes.
     """
     roadmap_data = load_roadmap()
     if not roadmap_data.get("focuses"):
@@ -847,6 +852,9 @@ def view_foundation():
     total_answered = total_target = 0
     claimed: set[str] = set()
     for focus in focuses:
+        if not is_selected(focus):
+            claimed.update(focus.get("categories", []))
+            continue
         fill = focus_fill(focus, questions)
         total_answered += fill["answered"]
         total_target += fill["target"]

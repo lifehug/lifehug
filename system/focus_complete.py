@@ -40,6 +40,13 @@ This is the whole of what happens now, in one place:
    are right on the next read, and `roadmap.reopen_completed` persists it on
    the next roadmap rebuild.
 
+5. **Rest at the target** (v423, ADR 0046). After the completion pass, every
+   non-primary Focus for which `focus_selection.should_rest` holds (selected,
+   at its tier target or complete, not last selected by the owner) is
+   unselected with `by = "sweep"` and `reason = "tier_target" | "complete"`,
+   so other Focuses get the queue's space. `keep_going` re-selects it as the
+   owner's word, which the sweep never undoes; `rest` leaves it unselected.
+
 Nothing here appends to the question bank. A second-pass question reaches the
 bank only through the existing candidate promotion path, on the owner's word.
 """
@@ -57,6 +64,7 @@ SYSTEM_DIR = Path(__file__).resolve().parent
 if str(SYSTEM_DIR) not in sys.path:
     sys.path.insert(0, str(SYSTEM_DIR))
 
+import focus_selection  # noqa: E402
 import question_craft  # noqa: E402
 import roadmap as roadmap_mod  # noqa: E402
 from lifehug_core import now_utc, parse_questions, write_json  # noqa: E402
@@ -327,13 +335,32 @@ def sweep(dry_run: bool = False, *, now: str | None = None, view: dict | None = 
         if not dry_run:
             focus["phase"] = COMPLETE_PHASE
             focus["completion"] = record
-    if not dry_run and (completed or reopened):
+    # v423 (ADR 0046): rest every non-primary Focus at its tier target or
+    # complete, unless the owner selected it. Dry runs report what would rest.
+    just_completed = {str(c["focus"]) for c in completed}
+    rested: list[dict] = []
+    for focus in rm.get("focuses", []):
+        if focus.get("primary"):
+            continue
+        fill = focus_fill(focus, qs)
+        fid = str(focus.get("id"))
+        candidate = dict(focus, phase=COMPLETE_PHASE) if fid in just_completed else focus
+        if not focus_selection.should_rest(candidate, fill):
+            continue
+        reason = (focus_selection.REASON_COMPLETE
+                  if roadmap_mod.is_complete(candidate, fill)
+                  else focus_selection.REASON_TIER_TARGET)
+        rested.append({"focus": fid, "label": focus.get("label"), "reason": reason,
+                       "answered": fill["answered"], "target": fill["target"]})
+        if not dry_run:
+            focus_selection.unselect(focus, by=focus_selection.BY_SWEEP, reason=reason, now=when)
+    if not dry_run and (completed or reopened or rested):
         rm["generated_at"] = when
         write_json(roadmap_mod.ROADMAP_FILE, rm)
         if filed:
             qc.save_store(store, qc.QUESTION_CANDIDATES_FILE)
     return {"completed": completed, "reopened": reopened, "candidates": filed,
-            "dry_run": dry_run}
+            "rested": rested, "dry_run": dry_run}
 
 
 # --------------------------------------------------------------------------
@@ -396,8 +423,11 @@ def play(focus_id: str, which: str, *, roadmap: dict | None = None,
     """Run one of the row's three Plays. Returns what happened.
 
     `keep_going` gives the Focus's second-pass candidates Review attention
-    (a flag; they stay `needs_review`, so the owner still decides each one).
-    `rest` closes the row and does nothing else. `make` closes the row and
+    (a flag; they stay `needs_review`, so the owner still decides each one)
+    and selects the Focus again as the owner's word (`by = "owner"`,
+    `reason = "added"`, ADR 0046), which the sweep never undoes.
+    `rest` closes the row and leaves the Focus unselected (unselecting it as
+    the owner's `removed` if the sweep had not yet). `make` closes the row and
     records a `studio_card` hint for the platform. A Play on a Focus that is
     not complete, or a row already played, raises ValueError: the row is
     played once.
@@ -430,6 +460,12 @@ def play(focus_id: str, which: str, *, roadmap: dict | None = None,
         result["review_attention"] = marked
         if write and store is None:
             qc.save_store(data, qc.QUESTION_CANDIDATES_FILE)
+        focus_selection.select(focus, by=focus_selection.BY_OWNER,
+                               reason=focus_selection.REASON_ADDED, now=when)
+    elif which == "rest":
+        if focus_selection.is_selected(focus):
+            focus_selection.unselect(focus, by=focus_selection.BY_OWNER,
+                                     reason=focus_selection.REASON_REMOVED, now=when)
     elif which == "make":
         card = {
             "kind": STUDIO_CARD_KIND,
@@ -477,7 +513,12 @@ def cli(argv: list[str] | None = None) -> int:
                   f"{row['second_pass']} second-pass candidate(s) on Review")
         for fid in result["reopened"]:
             print(f"↺ Reopened: {fid} (a new question was approved)")
-        if not result["completed"] and not result["reopened"]:
+        rest_prefix = "Would rest" if result["dry_run"] else "Rested"
+        for row in result["rested"]:
+            why = "complete" if row["reason"] == "complete" else "at its tier target"
+            print(f"• {rest_prefix}: {row['label']} — {why} ({row['answered']}/{row['target']}); "
+                  "no longer preferred in the queue (focus-select brings it back)")
+        if not result["completed"] and not result["reopened"] and not result["rested"]:
             print("No Focus reached 100% this run.")
         return 0
     if args.cmd == "rows":
