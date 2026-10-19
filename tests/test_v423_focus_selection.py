@@ -312,7 +312,10 @@ class Foundation(Base):
         self.assertIn(">Katie<", self.html())
         fs.set_by_owner("katie", False, now=NOW)
         page = self.html()
-        self.assertNotIn(">Katie<", page)
+        # v424: she is offered in the Add sheet's "Previously used" list, but
+        # no longer a row of the Foundation list itself.
+        self.assertIsNone(re.search(r'focus-label">(?:<a[^>]*>)?Katie<', page))
+        self.assertIn("Previously used", page)
         self.assertNotIn("Not part of any focus", page)   # its category is still its own
         self.assertIn("My Life", page)
 

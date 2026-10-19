@@ -200,6 +200,25 @@ def resolve_focus_person(label: str) -> tuple[str | None, str]:
     return found.ref, ""
 
 
+def resolve_focus_person_slug(slug: str) -> tuple[str | None, str]:
+    """``(person_ref, focus already attending it)`` for a person-record SLUG
+    (`focus-new --person`), via the same identity roster and `focus_of` as
+    :func:`resolve_focus_person`; ``(None, "")`` when no such record exists."""
+    try:
+        import identity_resolution as ir  # noqa: PLC0415
+        from entity_roster import load_identity_roster  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return None, ""
+    people = load_identity_roster("person")
+    for row in people.get("entities") or []:
+        if not isinstance(row, dict) or ir.is_alias_row(row):
+            continue
+        view = ir.record_view(row, people)
+        if view.get("slug") == slug:
+            return view["ref"], ir.focus_of(row)
+    return None, ""
+
+
 class FocusKeyCollisionError(ValueError):
     """Raised by a Focus-creation door (focus_new, the `roadmap add` CLI)
     when the requested label's normalized_focus_key collides with an
@@ -407,6 +426,8 @@ _USER_FIELDS = ("label", "tier", "objective", "deliverable", "target_depth",
                 "living", "relationship",
                 # v386 (ADR 0043): the person record this Focus attends to.
                 "person_ref",
+                # v424: what the person said to start the Focus (<= 2000 chars).
+                "primer",
                 # v394 (ADR 0044): the completion record (completed_at, the
                 # coverage snapshot, the one Mirror row's state) is the
                 # person's history, not derived: it survives a re-derive.
@@ -637,7 +658,9 @@ def _generate_and_promote(label: str, focus_type: str, deliverable: str, categor
 
 def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
               deliverable: str = "chapter", generate: bool = True,
-              context_path: str | None = None, person_ref: str | None = None) -> dict:
+              context_path: str | None = None, person_ref: str | None = None,
+              person_slug: str | None = None, primer: dict | None = None,
+              relationship: str | None = None, living: bool | None = None) -> dict:
     """End-to-end: scaffold a category, register the Focus, and (optionally)
     generate + promote starter questions. Non-destructive to existing answers.
 
@@ -657,6 +680,16 @@ def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
     collision = find_focus_by_key(roadmap, label)
     if collision is not None and collision.get("id") != slugify(label):
         raise FocusKeyCollisionError(label, collision)
+    # v424: `--person SLUG` names the record outright; it must exist and no
+    # other Focus may already attend it (a twin is refused, as below).
+    if person_slug:
+        if focus_type != "person":
+            raise ValueError("--person binds a person Focus; use --type person")
+        person_ref, attending = resolve_focus_person_slug(person_slug)
+        if person_ref is None:
+            raise ValueError(f"no such person record: {person_slug!r}")
+        if attending and attending != slugify(label):
+            raise FocusTwinError(label, person_ref, attending)
     # v386 (ADR 0043): a person Focus RESOLVES first and attaches to the record
     # it names; a record another Focus already attends to is a twin, refused.
     if focus_type == "person":
@@ -665,6 +698,15 @@ def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
             person_ref = resolved_ref
         if attending and person_ref == resolved_ref and attending != slugify(label):
             raise FocusTwinError(label, str(person_ref), attending)
+
+    primer = dict(primer or {})
+    # The primer supplies objective/relationship/living when the flags are absent.
+    objective = objective or str(primer.get("objective") or "")
+    if relationship is None:
+        relationship = primer.get("relationship")
+    if living is None:
+        living = primer.get("living")
+    context_text = primer.get("context") or ""
 
     md = QUESTIONS_FILE.read_text(encoding="utf-8")
     tag = label if focus_type in ("project", "lifes_work") else None
@@ -689,6 +731,12 @@ def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
             or _wiki_node_for(focus_type, label))
         if person_ref:
             focus["person_ref"] = person_ref
+        if relationship:
+            focus["relationship"] = relationship
+        if living is not None:
+            focus["living"] = living
+        if context_text:
+            focus["primer"] = context_text
         roadmap["generated_at"] = now_utc()
         write_json(ROADMAP_FILE, roadmap)
     if person_ref and str(person_ref).startswith("person/"):
@@ -702,10 +750,29 @@ def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
 
     result = {"focus_id": fid, "category": letter, "type": focus_type,
               "tier": tier, "generated": 0, "generation_ran": False,
-              "person_ref": person_ref}
+              "person_ref": person_ref, "primer": bool(context_text)}
     if generate:
-        ran, n = _generate_and_promote(label, focus_type, deliverable, letter,
-                                       context_path=context_path)
+        seed_context = context_path
+        if seed_context is None and (context_text or objective or relationship
+                                     or living is not None):
+            # The primer grounds the seed prompt through the ONE existing
+            # door (--context-file, v189): its words are the first answer.
+            import json  # noqa: PLC0415
+            import tempfile  # noqa: PLC0415
+            ctx = {k: v for k, v in (("objective", objective), ("relationship", relationship),
+                                     ("living", living)) if v not in (None, "")}
+            if context_text:
+                ctx["first_answer"] = context_text
+            handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+            with handle:
+                json.dump(ctx, handle)
+            seed_context = handle.name
+        try:
+            ran, n = _generate_and_promote(label, focus_type, deliverable, letter,
+                                           context_path=seed_context)
+        finally:
+            if seed_context and seed_context != context_path:
+                Path(seed_context).unlink(missing_ok=True)
         result["generation_ran"] = ran
         result["generated"] = n
         rebuild_roadmap(write=True)
@@ -728,7 +795,8 @@ def _print_roadmap(roadmap: dict) -> None:
               f"{'  SATURATED' if fill['saturated'] else ''}")
         cats = ",".join(f.get("categories", []))
         print(f"            objective: {f.get('objective','-')}  →  {f.get('deliverable','-')}  [{cats}]"
-              f"  selected: {'yes' if is_selected(f) else 'no'}")
+              f"  selected: {'yes' if is_selected(f) else 'no'}"
+              f"  primer: {'yes' if f.get('primer') else 'no'}")
 
 
 def find_focus(roadmap: dict, focus_id: str) -> dict | None:
@@ -774,6 +842,8 @@ def cli(argv: list[str] | None = None) -> int:
     living.add_argument("--living", dest="living", action="store_true", default=None)
     living.add_argument("--not-living", dest="living", action="store_false", default=None)
     p.add_argument("--category", action="append", default=[], help="Replace categories (repeatable)")
+    p.add_argument("--primer-file", metavar="PATH",
+                   help="Replace the Focus's primer from a primer JSON (v424); '-' reads stdin")
 
     p = sub.add_parser("finish", help="Flag a Focus as finishing (lifts its variety cap). The manual "
                                       "accelerator: it marks nothing complete; completion at 100%% of "
@@ -789,6 +859,15 @@ def cli(argv: list[str] | None = None) -> int:
     p.add_argument("--no-generate", action="store_true", help="Scaffold only; don't AI-generate starter questions")
     p.add_argument("--context-file", metavar="PATH",
                    help="Onboarding-context JSON to ground the seeded questions (v189)")
+    p.add_argument("--primer-file", metavar="PATH",
+                   help='Primer JSON {"objective","relationship","living","context"} '
+                        "(context <= 2000 chars); '-' reads stdin (v424)")
+    p.add_argument("--person", metavar="SLUG",
+                   help="Bind this person Focus to that roster record (a twin is refused) (v424)")
+    p.add_argument("--relationship")
+    nl = p.add_mutually_exclusive_group()
+    nl.add_argument("--living", dest="living", action="store_true", default=None)
+    nl.add_argument("--not-living", dest="living", action="store_false", default=None)
 
     args = parser.parse_args(argv)
 
@@ -812,10 +891,17 @@ def cli(argv: list[str] | None = None) -> int:
             # the category and attach it; the roadmap rebuild merges by id.
             print(f"↺ Focus '{slugify(args.label)}' exists with no question category — healing it.")
         try:
+            import focus_candidate  # noqa: PLC0415
+            if args.relationship and args.relationship not in focus_candidate.FOCUS_RELATIONSHIPS:
+                raise ValueError(f"unknown relationship {args.relationship!r}")
+            primer = (focus_candidate.read_primer_file(args.primer_file)
+                      if args.primer_file else None)
             res = focus_new(args.label, args.type, args.tier, args.objective,
                             args.deliverable, generate=not args.no_generate,
-                            context_path=getattr(args, "context_file", None))
-        except FocusKeyCollisionError as exc:
+                            context_path=getattr(args, "context_file", None),
+                            person_slug=args.person, primer=primer,
+                            relationship=args.relationship, living=args.living)
+        except (FocusKeyCollisionError, FocusTwinError, ValueError) as exc:
             print(f"✗ {exc}")
             return 1
         verb = "healed with" if existing else "added as"
@@ -878,6 +964,18 @@ def cli(argv: list[str] | None = None) -> int:
         if args.cmd == "finish":
             focus["phase"] = "finishing"
         else:
+            if getattr(args, "primer_file", None):
+                import focus_candidate  # noqa: PLC0415
+                try:
+                    primer = focus_candidate.read_primer_file(args.primer_file)
+                except ValueError as exc:
+                    print(f"✗ {exc}")
+                    return 1
+                # Updates `primer` only — the one field this flag owns.
+                if primer.get("context"):
+                    focus["primer"] = primer["context"]
+                else:
+                    focus.pop("primer", None)
             if args.tier:
                 focus["tier"] = args.tier
             if args.target is not None:

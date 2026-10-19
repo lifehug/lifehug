@@ -142,7 +142,7 @@ out; nothing else changes (category, questions, answers, page, roster link).
 (`saturation >= 1.0`) or complete unless the owner last selected it
 (`focus_selection.should_rest`); `keep_going` selects as the owner, `rest`
 leaves it unselected, a reopen undoes only the sweep's `complete` rest, and
-`focus-set --tier` never changes selection.
+`focus-set --tier` never changes selection. v424: `focus-new --primer-file PATH` (JSON `{objective, relationship, living, context}`, context <= 2000 chars, parsed ONLY by `focus_candidate.normalize_primer`) writes the roadmap row's `primer`; `--person SLUG` binds a person Focus to that roster record (a twin is refused); `focus-set --primer-file` updates `primer`; Foundation's ＋ Add / Edit run these verbs as `focus-new|focus-select|focus-unselect|focus-tier` jobs.
 
 **A question anywhere is a question; the owner's keep is the owner's pass; a
 rewrite is the same question resaid (v422, owner 2026-10-15).** Seven good
