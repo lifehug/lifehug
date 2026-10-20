@@ -87,3 +87,7 @@ shows on a complete Focus only while the owner keeps it selected, belongs on the
 row's entry in the Add sheet's "previously used" list (the viewer Add sheet,
 next PR), and remains on the Mirror's `focus_complete` row. The completion rule
 itself (coverage of the category, not the tier) is unchanged.
+
+Amended again 2026-10-20 (ADR 0046 amendment, v425): the owner exemption is
+gone, and `keep_going` raises the tier one step and selects
+(`reason: kept_going`) instead of selecting as the owner's unrestable word.

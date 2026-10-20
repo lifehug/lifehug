@@ -42,10 +42,11 @@ This is the whole of what happens now, in one place:
 
 5. **Rest at the target** (v423, ADR 0046). After the completion pass, every
    non-primary Focus for which `focus_selection.should_rest` holds (selected,
-   at its tier target or complete, not last selected by the owner) is
-   unselected with `by = "sweep"` and `reason = "tier_target" | "complete"`,
-   so other Focuses get the queue's space. `keep_going` re-selects it as the
-   owner's word, which the sweep never undoes; `rest` leaves it unselected.
+   at its tier target or complete, whoever selected it: v425) is unselected
+   with `by = "sweep"` and `reason = "tier_target" | "complete"`, so other
+   Focuses get the queue's space. `keep_going` raises the tier one step
+   (`roadmap.raise_tier`) and selects it (`by = "owner"`,
+   `reason = "kept_going"`); `rest` leaves it unselected.
 
 Nothing here appends to the question bank. A second-pass question reaches the
 bank only through the existing candidate promotion path, on the owner's word.
@@ -336,7 +337,7 @@ def sweep(dry_run: bool = False, *, now: str | None = None, view: dict | None = 
             focus["phase"] = COMPLETE_PHASE
             focus["completion"] = record
     # v423 (ADR 0046): rest every non-primary Focus at its tier target or
-    # complete, unless the owner selected it. Dry runs report what would rest.
+    # complete, whoever selected it (v425). Dry runs report what would rest.
     just_completed = {str(c["focus"]) for c in completed}
     rested: list[dict] = []
     for focus in rm.get("focuses", []):
@@ -423,9 +424,12 @@ def play(focus_id: str, which: str, *, roadmap: dict | None = None,
     """Run one of the row's three Plays. Returns what happened.
 
     `keep_going` gives the Focus's second-pass candidates Review attention
-    (a flag; they stay `needs_review`, so the owner still decides each one)
-    and selects the Focus again as the owner's word (`by = "owner"`,
-    `reason = "added"`, ADR 0046), which the sweep never undoes.
+    (a flag; they stay `needs_review`, so the owner still decides each one),
+    raises the tier one step (`roadmap.raise_tier`, v425: the result's
+    `raised`) and selects the Focus (`by = "owner"`, `reason = "kept_going"`,
+    ADR 0046). A raise moves the tier target; a Focus whose category is still
+    drained reads complete and the next sweep rests it as `complete`, and the
+    reopen (a new question approved) selects it again.
     `rest` closes the row and leaves the Focus unselected (unselecting it as
     the owner's `removed` if the sweep had not yet). `make` closes the row and
     records a `studio_card` hint for the platform. A Play on a Focus that is
@@ -460,8 +464,9 @@ def play(focus_id: str, which: str, *, roadmap: dict | None = None,
         result["review_attention"] = marked
         if write and store is None:
             qc.save_store(data, qc.QUESTION_CANDIDATES_FILE)
+        result["raised"] = roadmap_mod.raise_tier(focus)
         focus_selection.select(focus, by=focus_selection.BY_OWNER,
-                               reason=focus_selection.REASON_ADDED, now=when)
+                               reason=focus_selection.REASON_KEPT_GOING, now=when)
     elif which == "rest":
         if focus_selection.is_selected(focus):
             focus_selection.unselect(focus, by=focus_selection.BY_OWNER,

@@ -838,7 +838,17 @@ def _roster_without_focus() -> list[dict]:
             if _record_slug(r) and not _ir.roster_home(r)]
 
 
-def _foundation_header(focuses: list[dict]) -> str:
+def _raises_on_add(focus: dict, questions: list[dict]) -> bool:
+    """v425: adding this Focus back raises its tier (it is at its target)."""
+    import focus_selection  # noqa: PLC0415
+
+    return focus_selection.raises_on_add(focus, focus_fill(focus, questions))
+
+
+_RAISE_NOTE = "at its target; adding it back raises the tier"
+
+
+def _foundation_header(focuses: list[dict], questions: list[dict] | None = None) -> str:
     """The Foundation header row (v424): ＋ Add and Edit. Native <details>
     and a datalist, no script; every control posts to an /actions/focus-*
     route that files a job, which runs the lifehug.py verb (the CLI door).
@@ -855,7 +865,9 @@ def _foundation_header(focuses: list[dict]) -> str:
         '<li><form class="actform act-inline" method="post" action="/actions/focus-select">'
         f'{_token_input()}<input type="hidden" name="id" value="{html.escape(str(f.get("id", "")))}">'
         f'<span>{html.escape(str(f.get("label", f.get("id", "?"))))}</span> '
-        '<button class="btn quiet" type="submit">Add back</button></form></li>'
+        + (f'<span class="muted">({_RAISE_NOTE})</span> '
+           if questions is not None and _raises_on_add(f, questions) else '')
+        + '<button class="btn quiet" type="submit">Add back</button></form></li>'
         for f in unselected)
     previously = (f'<h3>Previously used</h3><ul class="fnd-used">{used}</ul>' if used
                   else '<p class="muted">No previously used Focuses.</p>')
@@ -935,7 +947,7 @@ def view_foundation():
         qs = by_cat.get(cid, [])
         return (sum(1 for q in qs if q["answered"]) / len(qs)) if qs else 0.0
 
-    parts = ["<h1>Foundation</h1>", _foundation_header(focuses)]
+    parts = ["<h1>Foundation</h1>", _foundation_header(focuses, questions)]
     total_answered = total_target = 0
     claimed: set[str] = set()
     for focus in focuses:
@@ -4722,10 +4734,22 @@ def act_focus_select(form):
     ids = _focus_ids(form)
     if not ids:
         return (_FOUNDATION_BACK, "✗ pick a Focus to add back", None)
+    raising: list[str] = []
+    try:
+        rm = load_roadmap()
+        md = QUESTIONS_FILE.read_text(encoding="utf-8") if QUESTIONS_FILE.exists() else ""
+        questions = parse_questions(md)
+        by_id = {str(f.get("id")): f for f in rm.get("focuses", [])}
+        raising = [fid for fid in ids if fid in by_id and _raises_on_add(by_id[fid], questions)]
+    except Exception:  # noqa: BLE001 — the note is a courtesy; the verb decides
+        raising = []
     job = None
     for fid in ids:
         job = _start_job("focus-select", {"focus_id": fid})
-    return (_FOUNDATION_BACK, f"queued: {', '.join(ids)} preferred in the queue again", job["id"])
+    note = (f"; {', '.join(raising)} {'is' if len(raising) == 1 else 'are'} at the target, "
+            "so the add raises the tier" if raising else "")
+    return (_FOUNDATION_BACK,
+            f"queued: {', '.join(ids)} preferred in the queue again{note}", job["id"])
 
 
 def act_focus_unselect(form):
