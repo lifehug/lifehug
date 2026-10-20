@@ -128,6 +128,22 @@ step; `migrate-classifier-moments` (the weekly sweep, or by hand) supersedes a
 retired entry's classifier claims. Never add an entry's `subject` to the names
 of the person it is about.
 
+**The owner is one record (v426, ADR 0047, owner 2026-10-20).** "Dave and
+David James Taylor are both me." Who the owner is lives in ONE module,
+`system/owner_identity.py` (`owner_row`, `is_owner_row`, `owner_ref`,
+`is_owner_mention`, `owner_slug`, `hub_page`, and the profile readers
+`temporal_publication` re-exports); never read `profile["name"]` /
+`["full_name"]` inline (a guard test fails it). The owner's roster row carries
+`relationship: "self"`, `focus: <primary Focus>` and `page_eligible: false`
+(his page is the life hub) — the roster converter's owner step does it on
+every load, `lifehug.py owner-identity [--apply] [--json]` on demand. Every
+spelling of him ("Dave", "David Taylor", "David James Taylor", "Dave
+(narrator)") merges into that row; a classifier subject naming him is `self`;
+`entity-verdict` refuses a relationship, person Focus, graduate, never, retire
+or fold-as-loser on it (`ENTITY_IS_OWNER`); `focus-new` refuses a person Focus
+for him (`THE_OWNER_IS_NOT_A_PERSON_FOCUS`); recommendations never offer him;
+an owner possessive ("Dave's kids") is never his alias.
+
 **A Focus is a queue preference; a Focus at 100% rests (v423, owner
 2026-10-19).** Removing a Focus "should only mean that it's no longer
 preferential in the queue, not anything more, no deletion or anything" (ADR
@@ -539,6 +555,7 @@ python3 system/lifehug.py focus-finish etherfuse  # push a deliverable to done (
 python3 system/lifehug.py progress                # are we graduating toward deliverables?
 python3 system/lifehug.py focus-complete-sweep    # weekly: a Focus at 100% of its category becomes `complete` (ADR 0044)
 python3 system/lifehug.py focus-unselect mom      # Remove: no longer preferred in the queue; nothing deleted (ADR 0046)
+python3 system/lifehug.py owner-identity          # who the owner is: his roster row and what marking it self changes (ADR 0047); --apply writes it
 python3 system/lifehug.py focus-select mom        # Add back: preferred again; at its target, raised one tier
 ```
 

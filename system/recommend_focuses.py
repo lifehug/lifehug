@@ -723,13 +723,36 @@ def _resolved_person(entity: str, people: dict) -> dict | None:
         return None
     for row in people.get("entities") or []:
         if isinstance(row, dict) and ir.record_view(row, people).get("ref") == found.ref:
-            return {**ir.record_view(row, people), "focus": ir.focus_of(row)}
+            import owner_identity  # noqa: PLC0415
+
+            return {**ir.record_view(row, people), "focus": ir.focus_of(row),
+                    "is_owner": owner_identity.is_owner_row(row)}
     return None
 
 
 def _person_is_covered(resolved: dict, existing_pages: set[str]) -> bool:
-    """A resolved person already has a Focus or a wiki page (P1)."""
-    return bool(resolved.get("focus")) or resolved.get("slug") in existing_pages
+    """A resolved person already has a Focus or a wiki page (P1) — or is the
+    OWNER (v426, ADR 0047): the primary life-story Focus attends to him,
+    whether or not a page of his exists."""
+    return bool(resolved.get("is_owner")) or bool(resolved.get("focus")) \
+        or resolved.get("slug") in existing_pages
+
+
+def _owner_names() -> tuple[str, ...]:
+    """The bound profile's whole spellings (`owner_identity`)."""
+    try:
+        import owner_identity  # noqa: PLC0415
+
+        return owner_identity.owner_names_from_profile(owner_identity.bound_owner_profile())
+    except Exception:  # noqa: BLE001
+        return ()
+
+
+def _is_owner_detection(entity: str, owner_names: tuple[str, ...]) -> bool:
+    """A detected person string that names the owner is never recommended."""
+    import owner_identity  # noqa: PLC0415
+
+    return bool(owner_names) and owner_identity.is_owner_mention(entity, owner_names)
 
 
 def recommend(
@@ -753,6 +776,7 @@ def recommend(
     # v386 (ADR 0043, design §4.1.2): a detector string is RESOLVED to a person
     # record before it is scored. "Author's father" is the father's record.
     people = _identity_people()
+    owner_names = _owner_names()
 
     # Load existing state
     existing = load_recommendation_state()
@@ -787,6 +811,9 @@ def recommend(
     for (entity_type, entity), s in stats.items():
         # Skip already-focused entities
         if entity.lower() in existing_focuses:
+            continue
+        if entity_type == "person" and _is_owner_detection(entity, owner_names):
+            # v426 (ADR 0047): the owner is covered by the life story.
             continue
         resolved = _resolved_person(entity, people) if entity_type == "person" else None
         if resolved is not None and _person_is_covered(resolved, existing_pages):
@@ -1099,6 +1126,11 @@ def approve_recommendation(rec_id: str, *, tier: str = "standard",
         # v386 (ADR 0043): resolve first and ATTACH — "Author's father" is the
         # father's record; a record a Focus already attends to is a twin.
         resolved = _resolved_person(entity, _identity_people())
+        if (resolved is not None and resolved.get("is_owner")) \
+                or _is_owner_detection(entity, _owner_names()):
+            print(f"✗ Not approved: {entity} is the owner — the life story is his Focus "
+                  "(THE_OWNER_IS_NOT_A_PERSON_FOCUS)", file=sys.stderr)
+            return False
         if resolved is not None:
             if resolved.get("focus"):
                 print(f"✗ Not approved: {entity} is {resolved['display_name']} "

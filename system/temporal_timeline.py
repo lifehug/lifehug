@@ -1336,35 +1336,22 @@ ONE_OWNER_BIRTH = (
 DIAGNOSTIC_OWNER_BIRTH_TELLING_FOLDED = "owner_birth_telling_folded"
 
 
-def _owner_given_and_surnames(owner_names: object) -> tuple[frozenset, frozenset]:
-    given: set[str] = set()
-    surnames: set[str] = set()
-    for name in owner_names or ():
-        words = collapsed_text(name).casefold().split()
-        if not words:
-            continue
-        given.add(words[0])
-        if len(words) > 1:
-            surnames.add(words[-1])
-    return frozenset(given), frozenset(surnames)
-
-
 def _names_the_owner(text: object, *, owner: str, owner_names: object = ()) -> bool:
     """Is this subject text the OWNER — his ref, an owner-only word, or a name
-    of his own (his given name and his surname, "Dave Taylor")?"""
+    of his own (his given name and his surname, "Dave Taylor")?
+
+    v426: the name rule is `owner_identity.is_owner_mention`, the one
+    definition every seat asks (ADR 0047); this keeps only the ref and the
+    owner-reference reading the timeline owns."""
+    import owner_identity  # noqa: PLC0415
+
     body = collapsed_text(text)
     if not body:
         return False
     key = normalized_mention_key(body)
-    if key == normalized_mention_key(owner) or key in ident.OWNER_SUBJECT_MENTIONS \
-            or body.casefold() in ident.OWNER_SUBJECT_MENTIONS \
-            or is_owner_reference_only(body):
+    if key == normalized_mention_key(owner) or is_owner_reference_only(body):
         return True
-    words = body.casefold().split()
-    given, surnames = _owner_given_and_surnames(owner_names)
-    if any(body.casefold() == collapsed_text(name).casefold() for name in owner_names or ()):
-        return True
-    return (2 <= len(words) <= 4 and words[0] in given and words[-1] in surnames)
+    return owner_identity.is_owner_mention(body, owner_names)
 
 
 def _mention_reads_as_owner_birth(text: object, *, owner: str, owner_names: object) -> bool:

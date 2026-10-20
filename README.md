@@ -1363,6 +1363,7 @@ python3 system/lifehug.py focus-dupes --report      # duplicate/near-duplicate F
 python3 system/lifehug.py focus-curate --dry-run    # judge first-encounter near-name duplicates (ADR 0010)
 python3 system/lifehug.py focus-merge <survivor> <loser> --dry-run  # heal a duplicate pair (ADR 0012)
 python3 system/lifehug.py focus-unselect <id>         # Remove a Focus: no longer preferred in the queue, nothing deleted (ADR 0046)
+python3 system/lifehug.py owner-identity [--apply]     # the owner is one record: mark his roster row self, primary Focus, no person page (ADR 0047)
 python3 system/lifehug.py focus-select <id>           # Add it back: preferred again; at its target, raised one tier
 python3 system/lifehug.py focus-new "<label>" --person <slug> --primer-file primer.json   # start a Focus from a roster record + what you say about it (v424)
 python3 system/lifehug.py question-bank-lint --verdict fail  # bank entries that fail the craft evaluation (ADR 0042, read-only)

@@ -323,7 +323,8 @@ JAMES_ROSTER = roster(
 )
 
 DAVE_KIDS_ROSTER = roster(
-    person("Dave", slug="dave", aliases=["David Taylor", "David James Taylor"]),
+    person("Dave", slug="dave", relationship="self",
+           aliases=["David Taylor", "David James Taylor"]),
     person("Kids", slug="kids", qualifies=False,
            aliases=["his kids", "Dave's kids", "the kids", "Kids (unnamed)"]),
 )
@@ -438,7 +439,8 @@ class EndToEndIdentityCardsTests(unittest.TestCase):
     """The whole pipeline, owner's roster shape, owner's own name supplied."""
 
     ROSTER = roster(
-        person("Dave", slug="dave", aliases=["David Taylor", "David James Taylor"]),
+        person("Dave", slug="dave", relationship="self",
+               aliases=["David Taylor", "David James Taylor"]),
         person("Kids", slug="kids", qualifies=False,
                aliases=["his kids", "Dave's kids", "the kids", "Kids (unnamed)"]),
         person("Anthon James Taylor", slug="anthon-james-taylor", relationship="sibling",

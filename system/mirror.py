@@ -186,7 +186,9 @@ def build_mirror_prompt(entries: list[dict] | None = None) -> str:
     if entries is None:
         entries = load_mirror_entries()
     cfg = load_config()
-    name = cfg.get("name") or "the author"
+    import owner_identity  # noqa: PLC0415  (v426, ADR 0047: the one reader)
+
+    name = owner_identity.profile_name(cfg) or "the author"
 
     def block(kind: str, label: str) -> str:
         rows = _capped(entries, kind)

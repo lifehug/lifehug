@@ -251,11 +251,14 @@ UNRESOLVED_REASON = "unresolved"
 #: recorded on the record like every other resolution so it is visible and
 #: reversible rather than a silent rewrite of the receipt.
 OWNER_BIRTH_DOMAIN_REASON = "owner_birth_domain_word"
-#: A roster entity that bears the owner's own name IS the owner. A roster built
-#: from the owner's answers will list the owner among the people it found, and
-#: resolving "Dave" to that entity drew a hundred of the owner's own moments as
-#: somebody else's life. The profile names the owner; the roster does not get
-#: to make a stranger of that name.
+#: A roster entity that bears the owner's own name IS the owner — not a person
+#: who shares his name. The owner's roster row is his ONE record (v426, ADR
+#: 0047: marked ``relationship: "self"``, attended by the primary Focus, its
+#: page the life hub; `owner_identity.owner_row`), so a mention of his name
+#: resolves to him. Before the rule the fold drew a hundred of the owner's own
+#: moments on that row as if it were somebody else's life. The profile names
+#: the owner; the roster never makes a stranger of that name
+#: (`owner_identity.A_ROSTER_NEVER_MAKES_A_STRANGER_OF_THE_OWNER`).
 OWNER_NAME_REASON = "owner_own_name"
 
 #: The legacy spelling that rule answers to.

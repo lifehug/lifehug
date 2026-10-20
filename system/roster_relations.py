@@ -533,7 +533,8 @@ def _query_for(queries: list, word: str) -> dict:
     return query
 
 
-def convert_legacy_roster(snapshot: object, *, entity_type: str = "person") -> tuple[dict, dict]:
+def convert_legacy_roster(snapshot: object, *, entity_type: str = "person",
+                          owner: object = None) -> tuple[dict, dict]:
     """The one-version identity converter (:data:`A_CONVERTER_LOSES_NOTHING`).
 
     ``(converted snapshot, report)``. Pure; the caller persists. Steps:
@@ -552,7 +553,22 @@ def convert_legacy_roster(snapshot: object, *, entity_type: str = "person") -> t
        moved off a record into that relation's query, and the record gains
        ``relationship`` from it when it had none — the fact moves into the
        typed field, it is not lost.
+    4. (person, v426 — ADR 0047, the owner step; design D6 "step 3") with
+       ``owner`` (an `owner_identity.OwnerContext`: the profile names and the
+       primary Focus id): the row `owner_identity.find_owner_row` finds — the
+       one marked ``self``, else the one `identity_resolution.owner_name_refs`
+       finds, exactly one — is marked ``relationship: "self"``, its ``focus``
+       is the primary Focus (left alone when there is no roadmap),
+       ``page_eligible`` is false (its page is the life hub), and an alias that
+       is an owner possessive ("Dave's kids") leaves it for that relation's
+       query (:data:`AN_OWNER_POSSESSIVE_IS_NEVER_THE_OWNERS_NAME`). Byte-stable
+       on a second run.
+
+    Step 2 never reattributes a possessive onto its own possessor: "Dave's
+    kids" names Dave's children, not Dave (the v386 converter put it on the
+    owner's row), so it stays on its query.
     """
+    owner_names = tuple(getattr(owner, "names", ()) or ())
     snap = snapshot if isinstance(snapshot, dict) else {"type": entity_type,
                                                         "entities": list(snapshot or ())}
     entities = [dict(e) for e in roster_entities(snap)]
@@ -613,7 +629,8 @@ def convert_legacy_roster(snapshot: object, *, entity_type: str = "person") -> t
                     continue
                 if mention_names_someone(text):
                     found = ir.resolve_person(text, snap_live)
-                    if found.resolved:
+                    if found.resolved and not _possessive_of(text, found.ref, snap_live,
+                                                             owner_names):
                         decided = alias_decision("person", found.ref, text, snap_live)
                         if decided.get("applied"):
                             snap_live = decided["snapshot"]
@@ -644,12 +661,106 @@ def convert_legacy_roster(snapshot: object, *, entity_type: str = "person") -> t
                         entity["relationship"] = ir.role_relationship(alias)
             out.append(entity)
         entities = out
+        if owner is not None:
+            entities, report["owner"] = _convert_owner_row(entities, queries, owner)
 
     converted = {**snap, "entities": entities}
     if queries:
         converted[ir.RELATION_QUERIES_KEY] = queries
     report["changed"] = converted != snap
     return converted, report
+
+
+#: v426 (ADR 0047): "Dave's kids" is a phrase about the owner's children; it
+#: is never a name the owner answers to, and never moves onto his row.
+AN_OWNER_POSSESSIVE_IS_NEVER_THE_OWNERS_NAME = (
+    "an owner possessive (\"Dave's kids\") names somebody of the owner's, never "
+    "the owner: it is never an alias of his row and never reattributed onto it"
+)
+
+_POSSESSOR_RE = re.compile(r"^(?P<who>.+?)['\u2019]s?\s+(?P<rest>\S.*)$")
+
+
+def _possessive_of(text: str, ref: object, snapshot: object, owner_names: object) -> bool:
+    """Is ``text`` a possessive whose possessor IS ``ref`` ("Dave's kids" →
+    the owner's row)? A possessive names somebody OF its possessor, so moving
+    it onto the possessor's own row is never right."""
+    import owner_identity  # noqa: PLC0415
+
+    if owner_names and owner_identity.is_owner_possessive(text, owner_names):
+        return True
+    match = _POSSESSOR_RE.match(collapsed_text_of(text))
+    if not match:
+        return False
+    possessor = ir.resolve_person(match.group("who"), snapshot)
+    return bool(possessor.resolved and possessor.ref == ref)
+
+
+def _convert_owner_row(entities: list[dict], queries: list, owner: object) -> tuple[list[dict], dict]:
+    """The owner step (step 4 of :func:`convert_legacy_roster`). Pure on the
+    lists it is handed; ``(entities, report)``."""
+    import owner_identity  # noqa: PLC0415
+
+    names = tuple(getattr(owner, "names", ()) or ())
+    primary = collapsed_text_of(getattr(owner, "primary_focus", ""))
+    finding = owner_identity.find_owner_row({"entities": entities}, names)
+    report: dict = {"found": finding.note, "slug": None, "candidates": list(finding.candidates),
+                    "changes": {}}
+    if finding.row is None:
+        return entities, report
+    row = finding.row
+    out: list[dict] = []
+    whole = {"entities": entities}
+    for entity in entities:
+        if entity is not row:
+            out.append(entity)
+            continue
+        updated = dict(entity)
+        changes: dict = {}
+        if collapsed_text_of(updated.get(ir.ROSTER_RELATIONSHIP_KEY)) != owner_identity.SELF_RELATIONSHIP:
+            changes["relationship"] = {"was": updated.get(ir.ROSTER_RELATIONSHIP_KEY),
+                                       "now": owner_identity.SELF_RELATIONSHIP}
+            updated[ir.ROSTER_RELATIONSHIP_KEY] = owner_identity.SELF_RELATIONSHIP
+        if primary and ir.focus_of(updated) != primary:
+            changes["focus"] = {"was": ir.focus_of(updated) or None, "now": primary}
+            updated[ir.ROSTER_FOCUS_KEY] = primary
+            updated.setdefault(ir.ROSTER_FOLDED_INTO_KEY, None)
+        if updated.get("page_eligible") is not False:
+            changes["page_eligible"] = {"was": updated.get("page_eligible"), "now": False}
+            updated["page_eligible"] = False
+        kept, dropped = [], []
+        for alias in updated.get("aliases") or []:
+            text = collapsed_text_of(alias)
+            if text and (owner_identity.is_owner_possessive(text, names)
+                         or _possessive_of(text, owner_identity.row_ref(updated), whole, ())):
+                dropped.append(text)
+            else:
+                kept.append(alias)
+        if dropped:
+            changes["aliases_dropped"] = dropped
+            updated["aliases"] = kept
+            meta = updated.get(ir.ROSTER_ALIAS_META_KEY)
+            if isinstance(meta, dict):
+                gone = {ir.normalized_mention_key(text) for text in dropped} | set(dropped)
+                remaining = {k: v for k, v in meta.items() if k not in gone}
+                if remaining:
+                    updated[ir.ROSTER_ALIAS_META_KEY] = remaining
+                else:
+                    updated.pop(ir.ROSTER_ALIAS_META_KEY, None)
+            for text in dropped:
+                match = _POSSESSOR_RE.match(text)
+                rest = match.group("rest") if match else ""
+                if rest and ir.is_role_phrase(rest):
+                    query = _query_for(queries, rest)
+                    if text not in query["aliases"]:
+                        query["aliases"].append(text)
+                    stamp = {"slug": updated.get("slug"), "alias": text}
+                    if stamp not in query["stripped_from"]:
+                        query["stripped_from"].append(stamp)
+        report["slug"] = updated.get("slug")
+        report["changes"] = changes
+        out.append(updated)
+    return out, report
 
 
 def mention_names_someone(text: object) -> bool:
