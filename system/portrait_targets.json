@@ -14,8 +14,7 @@
       "mentor": 0.45,
       "colleague": 0.3,
       "other": 0.25,
-      "unknown": 0.3,
-      "owner": 1.0
+      "unknown": 0.3
     },
     "relationship": {
       "spouse": 1.0,
@@ -91,7 +90,7 @@
     "age_frame_pattern": "^(childhood|early-childhood|my-teens|teen-years|my-[0-9]+s)$"
   },
   "calibration": {
-    "_about": "Puts table weights on the credit scale. mode shared (v380, default): ONE scale for the whole portrait, anchored on people - the anchor scale is the anchor `quantile` of credit / (weight x tier x type_scale) over the credited anchor members (type anchor.type, kind in anchor.kinds; 1.0 = the best-told parent/spouse/partner sits exactly on its target), and every type's scale is type_scale[type] x that anchor scale. With no credited anchor member the anchor falls back to the same quantile over every credited entity. mode per_type (v378): each type calibrates on itself - scale = the `quantile` of credit / (weight x tier) over the type's credited members; a type with fewer than min_peers credited members borrows the median scale of the other types. exclude_kinds are never calibrated on in either mode (the owner's own person page duplicates the hub).",
+    "_about": "Puts table weights on the credit scale. mode shared (v380, default): ONE scale for the whole portrait, anchored on people - the anchor scale is the anchor `quantile` of credit / (weight x tier x type_scale) over the credited anchor members (type anchor.type, kind in anchor.kinds; 1.0 = the best-told parent/spouse/partner sits exactly on its target), and every type's scale is type_scale[type] x that anchor scale. With no credited anchor member the anchor falls back to the same quantile over every credited entity. mode per_type (v378): each type calibrates on itself - scale = the `quantile` of credit / (weight x tier) over the type's credited members; a type with fewer than min_peers credited members borrows the median scale of the other types. exclude_kinds are never calibrated on in either mode (empty since v427: the owner is one node, the life hub, so no kind duplicates another; a vault may still list kinds here).",
     "mode": "shared",
     "anchor": {
       "type": "person",
@@ -100,7 +99,7 @@
     },
     "quantile": 1.0,
     "min_peers": 2,
-    "exclude_kinds": ["owner"]
+    "exclude_kinds": []
   },
   "credit": {
     "_about": "How a source's telling is shared. split: equal = a source held by n entity pages gives 1/n to each (owner ruling 2026-09-29); whole = 1 to each. Answers under answer_prefixes: rule listed = every page that lists the answer holds it; tagged = only pages the answer's classification tags. Other sources under classified_prefixes (conversation, email, manual, landmarks) earn credit only for the entities their CURRENT classification tags as subjects in tag_fields (the relevance gate: never a bare name occurrence; an unclassified source earns nothing). A person tag needs at least min_person_mentions.",

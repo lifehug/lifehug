@@ -54,6 +54,7 @@ from entity_roster import ENTITY_TYPES, THRESHOLDS, load_identity_roster, load_r
 from design import palette as _palette
 import focus_pages
 import identity_resolution as _ir
+import owner_identity as _oi
 from question_candidates import AUTO_PROMOTE_THRESHOLD, unified_quality_score, _infer_category
 from progress import verdict
 from recommend_focuses import (
@@ -93,6 +94,53 @@ def wiki_pages(include_redirects: bool = False):
         return []
     return sorted(p for p in WIKI_DIR.rglob("*.md")
                   if p.is_file() and (include_redirects or not _is_redirect_page(p)))
+
+
+def _redirect_targets() -> dict[Path, Path]:
+    """``{stub page: the page it points at}`` for every redirect stub whose
+    target exists (v389 Focus moves, v427 the owner's old person page)."""
+    out: dict[Path, Path] = {}
+    if not WIKI_DIR.exists():
+        return out
+    for page in sorted(WIKI_DIR.rglob("*.md")):
+        if not page.is_file() or not _is_redirect_page(page):
+            continue
+        target = focus_pages.redirect_stub_fields(read_text(page, errors="replace"))[
+            focus_pages.REDIRECT_KEY]
+        dest = Path(target.lstrip("/")).with_suffix(".md")
+        if target and ".." not in dest.parts and (WIKI_DIR / dest).is_file():
+            out[page] = WIKI_DIR / dest
+    return out
+
+
+@dataclass(frozen=True)
+class _Owner:
+    """Who the owner is, for the viewer (v427, ADR 0047) — every field read
+    through `owner_identity`, never spelled here."""
+
+    author: str
+    full: str
+    hub_slug: str
+    hub: str  # vault-relative: wiki/life/<hub_slug>.md
+    row: dict | None
+    spellings: tuple[str, ...]
+    page_slugs: tuple[str, ...]
+
+    def keys(self) -> set[str]:
+        return {n.casefold() for n in self.spellings} | {slugify(n) for n in self.spellings}
+
+
+def _owner(roster: object = None) -> _Owner:
+    profile = load_config() or {}
+    if roster is None:
+        try:
+            roster = load_identity_roster("person")
+        except Exception:  # noqa: BLE001 — no roster is simply no record
+            roster = {"entities": []}
+    author, full = _oi.author_names(profile)
+    return _Owner(author, full, focus_pages.hub_slug(full), _oi.hub_page(profile),
+                  _oi.owner_row(roster, _oi.owner_names_from_profile(profile)),
+                  _oi.owner_spellings(profile, roster), _oi.owner_page_slugs(profile, roster))
 
 
 # Slug-collision priority when two page types share a stem (e.g. a person and a
@@ -146,9 +194,9 @@ def nav_html(active_rel: str | None = None) -> str:
     (their self-portrait hub + the life-story arcs), then content groups
     (People, Projects, Themes, …), then meta pages at the bottom. The compile
     log is omitted."""
-    cfg = load_config()
-    full_name = cfg.get("full_name") or cfg.get("name") or "Me"
-    hub_slug = slugify(full_name)
+    owner = _owner()
+    full_name = owner.full
+    hub_slug = owner.hub_slug
 
     meta_links: list[Path] = []
     groups: dict[str, list[Path]] = {}
@@ -162,6 +210,10 @@ def nav_html(active_rel: str | None = None) -> str:
 
     life_pages = groups.get("life", [])
     hub = next((p for p in life_pages if p.stem == hub_slug), None)
+    if hub is not None and groups.get("people"):
+        # v427 (design D5): the owner is listed once, as the hub — never also
+        # as a person page of his own (a pre-compile page at his slug).
+        groups["people"] = [p for p in groups["people"] if p.stem not in owner.page_slugs]
 
     def link(p: Path, cls: str, label: str | None = None) -> str:
         rel = str(p.relative_to(WIKI_DIR.parent))
@@ -214,7 +266,7 @@ def nav_html(active_rel: str | None = None) -> str:
         count = len(items)
         # People also carries a pointer to the life hub (the author themselves).
         if gtype == "people" and hub:
-            rows = link(hub, "sidebar-item", f"{full_name} →") + rows
+            rows = link(hub, "sidebar-item", f"You · {full_name} →") + rows
             count += 1
         if gtype == "people":
             # v389 (D2): records with no page are listed, muted, never faked.
@@ -251,6 +303,16 @@ def page_index() -> dict[str, str]:
             continue
         chosen_rank[slug] = rank
         index[slug] = str(page.relative_to(WIKI_DIR.parent))
+    # A redirect stub's slug resolves to the page it points at (v389, v427):
+    # ``[[katie]]`` lands on Katie's record page, ``[[dave]]`` on the hub.
+    for stub, dest in _redirect_targets().items():
+        index.setdefault(stub.stem, str(dest.relative_to(WIKI_DIR.parent)))
+    owner = _owner()
+    if (WIKI_DIR.parent / owner.hub).is_file():
+        for slug in owner.page_slugs:
+            index[slug] = owner.hub
+        for spelling in owner.spellings:
+            index.setdefault(slugify(spelling), owner.hub)
     return index
 
 
@@ -835,7 +897,7 @@ def _tier_select(name: str = "tier", selected: str = "standard") -> str:
 def _roster_without_focus() -> list[dict]:
     """Person records no Focus attends to (and that are not folded away)."""
     return [r for r in _identity_records("person")
-            if _record_slug(r) and not _ir.roster_home(r)]
+            if _record_slug(r) and not _ir.roster_home(r) and not _oi.is_owner_row(r)]
 
 
 def _raises_on_add(focus: dict, questions: list[dict]) -> bool:
@@ -966,6 +1028,8 @@ def view_foundation():
         if node:
             lbl = f'<a href="/page/{quote(str(node))}">{lbl}</a>'
         badges = _badge(focus.get("tier", "?"))
+        if focus.get("primary"):
+            badges += " " + _badge("you")  # v427: the life story attends to the owner
         phase = focus.get("phase", "active")
         if is_complete(focus, fill):
             # v394 (ADR 0044): a quiet mark, not a banner. A complete Focus
@@ -1239,9 +1303,13 @@ def _fold_form(entity_type: str, loser: dict, survivors: list[dict], records: li
     """"This is that record": the loser becomes a pointer to the chosen
     survivor (`--fold-into`). Never offered a place its own children."""
     slug = _record_slug(loser)
+    def shown(r: dict) -> str:
+        name = _record_display(r, entity_type, records)
+        # v427 (design D5): pickers label the owner's row "You".
+        return f"You ({name})" if _oi.is_owner_row(r) else name
+
     options = "".join(
-        f'<option value="{html.escape(_record_slug(r))}">'
-        f'{html.escape(_record_display(r, entity_type, records))}</option>'
+        f'<option value="{html.escape(_record_slug(r))}">{html.escape(shown(r))}</option>'
         for r in survivors if _record_slug(r) and _record_slug(r) != slug)
     if not slug or not options:
         return ""
@@ -1295,7 +1363,10 @@ def identity_header_html(text: str) -> str:
     shown = _record_display(record, entity_type, records)
     handle = _ir.record_view(record, {"entities": records}, entity_type=entity_type)
     facts = []
-    if entity_type == "person":
+    is_owner = entity_type == "person" and _oi.is_owner_row(record)
+    if is_owner:
+        facts.append("you")  # v427: the hub is the owner's page
+    elif entity_type == "person":
         label = _ir.relation_label(record)
         if label:
             facts.append(html.escape(label))
@@ -1312,7 +1383,10 @@ def identity_header_html(text: str) -> str:
     handles = html.escape(handle["handle"])
     if handle.get("short_handle"):
         handles += " " + html.escape(handle["short_handle"])
-    others = [r for r in records if _record_slug(r) != _record_slug(record)]
+    # The owner is never offered as the loser of a fold (ENTITY_IS_OWNER);
+    # folding another record INTO him, on the hub, stays allowed.
+    others = [r for r in records if _record_slug(r) != _record_slug(record)
+              and not _oi.is_owner_row(r)]
     # Folding ANOTHER record into this page's record: the duplicate is the loser.
     dup_options = "".join(
         f'<option value="{html.escape(_record_slug(r))}">'
@@ -1347,6 +1421,8 @@ def known_without_page(entity_type: str = "person") -> list[dict]:
     have = {p.stem for p in directory.glob("*.md")} if directory.exists() else set()
     out = []
     for record in records:
+        if _oi.is_owner_row(record):
+            continue  # v427: the owner's page is the hub, never "no page yet"
         slug = _record_slug(record)
         focus = focus_pages.slugify(focus_pages.clean_focus_name(_ir.focus_of(record))) \
             if _ir.focus_of(record) else ""
@@ -1412,7 +1488,8 @@ def _is_lane_row(entity: dict) -> bool:
     """A ROW of the Review entity lane: pending graduation, no Focus or page,
     not folded, not vetoed."""
     return (isinstance(entity, dict) and not entity.get("page_eligible")
-            and not _ir.has_home(entity) and entity.get("owner_verdict") != "never")
+            and not _ir.has_home(entity) and entity.get("owner_verdict") != "never"
+            and not _oi.is_owner_row(entity))  # v427: never the owner
 
 
 def _is_fold_target(entity: dict) -> bool:
@@ -2978,7 +3055,6 @@ def graph_data() -> dict:
     definition. Every number comes from ``portrait_targets`` (framework file
     + vault override). Problems are listed in ``warnings``.
     """
-    import focus_pages  # noqa: PLC0415
 
     pt = _pt()
     warnings: list[str] = []
@@ -3006,16 +3082,16 @@ def graph_data() -> dict:
     entities = [p for p in pages if p["type"] != "relationships"]
     relationships = [p for p in pages if p["type"] == "relationships"]
 
-    slug_to_id: dict[str, str] = {}
-    label_to_id: dict[str, str] = {}
-    for p in entities:
-        slug_to_id[Path(p["id"]).stem] = p["id"]
-        label_to_id[p["label"].casefold()] = p["id"]
-
-    author, author_full = focus_pages.author_names(load_config())
+    try:
+        person_roster = load_roster("person")
+    except Exception:  # noqa: BLE001 — reported below with the other rosters
+        person_roster = {"entities": []}
+    owner = _owner(person_roster)
+    owner_names = owner.spellings
+    owner_keys = owner.keys()
     ids = {p["id"] for p in entities}
     life_nodes = [p for p in entities if p["type"] == "life"]
-    life_id = focus_pages.hub_page(author_full)
+    life_id = owner.hub
     if life_id not in ids:
         life_id = None
         for p in life_nodes:
@@ -3026,8 +3102,32 @@ def graph_data() -> dict:
             life_id = life_nodes[0]["id"]
         elif life_id is None and life_nodes:
             life_id = max(life_nodes, key=lambda p: p["sources"])["id"]
-    owner_names = (author, author_full, focus_pages.hub_slug(author_full))
-    owner_keys = {n.casefold() for n in owner_names} | {slugify(n) for n in owner_names}
+
+    # v427 (design D5): the owner is ONE node, the hub. A person page at his
+    # slug (one not yet turned into a stub) is not a second node of him.
+    owner_pages: set[str] = set()
+    if life_id:
+        owner_pages = {p["id"] for p in entities if p["type"] == "people" and (
+            Path(p["id"]).stem in owner.page_slugs or p["label"].casefold() in owner_keys
+            or Path(p["id"]).stem in owner_keys)}
+        entities = [p for p in entities if p["id"] not in owner_pages]
+        ids -= owner_pages
+
+    slug_to_id: dict[str, str] = {}
+    label_to_id: dict[str, str] = {}
+    for p in entities:
+        slug_to_id[Path(p["id"]).stem] = p["id"]
+        label_to_id[p["label"].casefold()] = p["id"]
+    # A redirect stub is never a node; a link to it lands on its target.
+    for stub, dest in _redirect_targets().items():
+        dest_id = str(dest.relative_to(WIKI_DIR.parent))
+        if dest_id in ids:
+            slug_to_id.setdefault(stub.stem, dest_id)
+    if life_id:
+        for page_id in owner_pages:
+            slug_to_id[Path(page_id).stem] = life_id
+        for slug in owner.page_slugs:
+            slug_to_id[slug] = life_id
 
     # Name -> page, for resolving classifier tags. Exact spellings only:
     # the page slug, its title, and its roster entry's name, slug and aliases.
@@ -3146,8 +3246,6 @@ def graph_data() -> dict:
         etype = pt.DIR_TYPES.get(p["type"], p["type"])
         stem = Path(p["id"]).stem
         if etype == "person":
-            if p["label"].casefold() in owner_keys or stem in owner_keys:
-                return "owner"
             return person_relation(p["id"])
         if etype == "place":
             ent = rosters.get(p["id"]) or {}
@@ -3211,8 +3309,8 @@ def graph_data() -> dict:
         focus = rel_focus.get(p["id"])
         relation = (focus or {}).get("relationship") or (
             person_relation(other) if other in row_by_id else "unknown")
-        if relation == "owner":
-            relation = "unknown"
+        if relation == _oi.SELF_RELATIONSHIP:
+            relation = "unknown"  # the owner is the hub end, never the other end
         weight, mult, tier = base_of(p["id"], "relationship", relation, focus)
         rel_rows.append({"id": p["id"], "type": "relationship", "kind": relation,
                          "credit": told, "weight": weight, "tier": tier,
@@ -4778,6 +4876,17 @@ def act_focus_tier(form):
     return (_FOUNDATION_BACK, f"queued: {', '.join(ids)} set to {tier}", job["id"])
 
 
+def _is_owner_name(text: str) -> bool:
+    """Does a typed name name the owner — one of his spellings or aliases
+    (`owner_identity.owner_spellings`), or an owner mention
+    (`owner_identity.is_owner_mention`)?"""
+    profile = load_config() or {}
+    owner = _owner()
+    names = _oi.owner_names_from_profile(profile)
+    return (text.casefold() in {n.casefold() for n in owner.spellings}
+            or bool(names) and _oi.is_owner_mention(text, names))
+
+
 def act_focus_new(form):
     """Add a Focus: a picked roster person binds with --person (a twin is
     refused by the verb); a typed name is a plain Focus. The primer rides the
@@ -4794,6 +4903,10 @@ def act_focus_new(form):
     if len(context) > MAX_PRIMER_CHARS:
         return (_FOUNDATION_BACK,
                 f"✗ the story note is {len(context)} characters; the limit is {MAX_PRIMER_CHARS}", None)
+    if _is_owner_name(search):
+        return (_FOUNDATION_BACK,
+                f"✗ “{search}” is you — the life story is your Focus "
+                "(THE_OWNER_IS_NOT_A_PERSON_FOCUS)", None)
     people = _roster_without_focus()
     match = next((p for p in people
                   if search.casefold() in (_record_display(p, "person", people).casefold(),

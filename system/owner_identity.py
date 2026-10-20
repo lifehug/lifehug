@@ -219,6 +219,68 @@ def hub_page(profile: object) -> str:
     return focus_pages.hub_page(full)
 
 
+def hub_target(profile: object) -> str:
+    """The hub as a redirect target: wiki-relative, no extension
+    (``life/david-james-taylor``) — what the owner's old person page's
+    ``redirect_to`` says (v427, design D4)."""
+    import focus_pages  # noqa: PLC0415
+
+    _author, full = author_names(profile)
+    return f"{focus_pages.PAGE_DIRS['life']}/{focus_pages.hub_slug(full)}"
+
+
+#: v427 (design D4): the owner's page is the life hub. A person page at the
+#: owner's slug is a redirect stub to it, never a second page of him.
+THE_OWNERS_PAGE_IS_THE_HUB = (
+    "the owner's page is the life hub; wiki/people/<owner> is a redirect stub to "
+    "it, every link to the owner lands on it, and no surface lists, graphs or "
+    "offers the owner as a person of his own"
+)
+
+
+def owner_page_slugs(profile: object, roster: object = None) -> tuple[str, ...]:
+    """The person-page slugs that would be the owner's (``dave``): the self
+    row's slug and :func:`owner_slug`. Each one is a stub to the hub (D4)."""
+    from lifehug_core import slugify  # noqa: PLC0415
+
+    out: list[str] = []
+    row = owner_row(roster, owner_names_from_profile(profile)) if roster is not None else None
+    for slug in ((_slug_of(row) if row is not None else ""), owner_slug(profile)):
+        slug = slugify(slug) if slug else ""
+        if slug and slug not in out:
+            out.append(slug)
+    return tuple(out)
+
+
+def owner_spellings(profile: object, roster: object = None) -> tuple[str, ...]:
+    """Every spelling that names the owner's PAGE: the profile ``name`` and
+    ``full_name``, the hub's slug, and — when the roster has his row — its
+    name, slug and every alias that is a name of his (never a possessive like
+    "Dave's kids"). The graph, the relationship ends and the wiki links read
+    this set so "David Taylor" lands on the hub (D5)."""
+    import focus_pages  # noqa: PLC0415
+
+    author, full = author_names(profile)
+    names = owner_names_from_profile(profile)
+    out: list[str] = []
+
+    def add(value: object) -> None:
+        text = _spelling(value)
+        if text and text not in out:
+            out.append(text)
+
+    for value in (*names, author, full, focus_pages.hub_slug(full)):
+        add(value)
+    row = owner_row(roster, names) if roster is not None else None
+    if row is not None:
+        add(row.get("name"))
+        add(row.get("slug"))
+        for alias in row.get("aliases") or ():
+            if not is_owner_possessive(alias, names):
+                add(alias)
+    return tuple(out)
+
+
 # --------------------------------------------------------------------------
 # The primary Focus (the life story attends to the owner, J2)
 # --------------------------------------------------------------------------
@@ -487,11 +549,13 @@ __all__ = [
     "OwnerRowFinding",
     "SELF_RELATIONSHIP",
     "THE_OWNER_IS_NOT_A_PERSON_FOCUS",
+    "THE_OWNERS_PAGE_IS_THE_HUB",
     "THE_OWNER_IS_ONE_RECORD",
     "author_names",
     "bound_owner_profile",
     "find_owner_row",
     "hub_page",
+    "hub_target",
     "is_owner_mention",
     "is_owner_possessive",
     "is_owner_row",
@@ -499,11 +563,13 @@ __all__ = [
     "owner_context",
     "owner_identity_inputs",
     "owner_name_variants",
+    "owner_page_slugs",
     "owner_names_from_profile",
     "owner_profile",
     "owner_ref",
     "owner_row",
     "owner_slug",
+    "owner_spellings",
     "primary_focus_id",
     "profile_name",
     "render_report",

@@ -136,7 +136,8 @@ def validate_override(framework: dict, override: dict) -> list[str]:
             errors.append(f"{key}: {value!r} not all in {list(FOCUS_PHASES)}")
         if key.endswith(".opacity") and not 0 <= float(value) <= 1:
             errors.append(f"{key}: must be in [0, 1]")
-        if key == "calibration.anchor.kinds" and not all(isinstance(v, str) and v for v in value):
+        if key in ("calibration.anchor.kinds", "calibration.exclude_kinds") and not all(
+                isinstance(v, str) and v for v in value):
             errors.append(f"{key}: must be a list of kind names")
     return errors
 

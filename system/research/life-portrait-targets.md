@@ -209,7 +209,7 @@ nothing here asks the owner a new question.
 
 | Type (wiki folder) | Kind, and where it is read from |
 |---|---|
-| person (`people/`) | the relation, in order: the Focus's `relationship` (roadmap, `focus-set --relationship`); the roster entry's `relationship` (`entity-verdict --relationship`); the classifier's relation words for that person across current classifications, mapped through `roster_relations.roster_relationship_for` (mother → parent, wife → spouse, brother → sibling, …) by majority. The vocabulary is `focus_candidate.FOCUS_RELATIONSHIPS`: parent, grandparent, child, sibling, spouse, partner, friend, colleague, mentor, other; `unknown` when nothing says. The owner's own person page is `owner`. |
+| person (`people/`) | the relation, in order: the Focus's `relationship` (roadmap, `focus-set --relationship`); the roster entry's `relationship` (`entity-verdict --relationship`); the classifier's relation words for that person across current classifications, mapped through `roster_relations.roster_relationship_for` (mother → parent, wife → spouse, brother → sibling, …) by majority. The vocabulary is `focus_candidate.FOCUS_RELATIONSHIPS`: parent, grandparent, child, sibling, spouse, partner, friend, colleague, mentor, other; `unknown` when nothing says. The owner is never a person node (v427: his page is the hub). |
 | relationship (`relationships/`) | the relation of its non-owner end, as above |
 | place (`places/`) | `residence` when a landmark residence (`state/landmarks.json`) or the roster's `place_kind` names it; `school` / `workplace` when a landmark school or job names it; else the roster `place_kind`, else the classifier's place `type` by majority (city, building, region, country, neighborhood, other) |
 | period (`periods/`) | `age_frame` for the calculated frames (Childhood, My Teens, My 20s …, ADR 0030); `job` when a landmark job names it; else `era` (a named era: College, the Mission) |
@@ -272,10 +272,13 @@ per_type`.*
 | colleague | 0.3 | The convoy's outer, role-based circle (§1.3); the owner's "jobs are smaller". |
 | other | 0.25 | Aunts, cousins, in-laws — the owner's ruling puts them outside immediate family (`axis_membership.DISTANT_RELATIONSHIPS`). |
 | unknown | 0.3 | No relation recorded yet: a little above `other`, because an unrecorded relation is as often close as distant. |
-| owner (person page only) | 1.0 | The owner's own person page; excluded from calibration (§5.1). |
 
-A relationship edge uses the same weights for the relation of its other end
-(no `owner` row).
+A relationship edge uses the same weights for the relation of its other end.
+
+*Amendment 2026-10-20 (v427, ADR 0047):* the `owner` row and its
+`exclude_kinds` entry are gone. The owner is one node, the life hub (kind
+`hub`); his person page is a redirect stub to it and never a node, so no kind
+duplicates another.
 
 ### 5.3 Places
 
@@ -450,7 +453,7 @@ is what the owner did.
 ```
 anchor    = quantile(anchor.quantile) of credit / (weight × tier × type_scale[T])
             over the credited anchor members (type person, kind parent | spouse | partner;
-            never an exclude_kinds kind such as owner)
+            never an exclude_kinds kind; none ship since v427)
 target(e) = weight(T, kind(e)) × tier(e) × type_scale[T] × anchor
 over(e)   = max(0, told(e) / target(e) − 1)
 ```

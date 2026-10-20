@@ -106,8 +106,31 @@ as a redirect stub (J3); "Dave (narrator)" is an owner mention (J4).
   directly treats `relationship == "self"` as the owner.
 - Binds: a refusal on the owner's row is `ENTITY_IS_OWNER` (the platform
   answers 409); a person Focus for him is `THE_OWNER_IS_NOT_A_PERSON_FOCUS`.
-- Until v427 lands, a compile after this version drops
+- (Closed by v427.) Until v427 lands, a compile after this version drops
   `wiki/people/<owner>.md` (its row is no longer page-eligible) without the
   stub; ship v426 and v427 together.
 - Forecloses: a second row for the owner; a person Focus, a recommendation or
   a person page for him; an owner possessive as one of his aliases.
+
+## Amendment 2026-10-20 — v427 (D4, D5)
+
+- **The stub rule.** The compile never plans a person page for the `self` row.
+  A page at one of the owner's person-page slugs
+  (`owner_identity.owner_page_slugs`: the row's slug and the profile `name`'s
+  slug), when one exists and is a mention, Focus or redirect page, is rewritten
+  every compile as a v389-shaped redirect stub, `redirect_to: life/<hub>`
+  (`owner_identity.hub_target`), `person_ref` naming the record, and is never
+  removed as an orphan. A hand-authored page there is kept and reported; with
+  no hub yet the page is kept untouched. No stub is written where no page was.
+- **The hub carries the record.** It is written with the record's identity
+  frontmatter (`person_ref`, `handle`, `aliases`, `relationship: "self"`) —
+  the v389 keys, which every host already reads, rather than a new `record`
+  key.
+- **One spelling set.** `owner_identity.owner_spellings` (the profile
+  spellings, the hub slug, the row's name, slug and every alias that is not a
+  possessive) is what the graph's resolver, the relationship ends and the
+  viewer's wikilink index send to the hub. Wikilinks in compiled prose whose
+  target is an owner page slug are rewritten to the hub's title.
+- **No owner kind.** The graph's `owner` node kind, its weight and its
+  `exclude_kinds` entry are gone; a redirect stub is never a node and its
+  edges land on its target.

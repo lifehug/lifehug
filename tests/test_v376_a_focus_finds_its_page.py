@@ -209,7 +209,9 @@ class RealShapedVaultTests(unittest.TestCase):
         related = serve_wiki._fm_list(fm, "related")
         self.assertGreater(len(related), 2)
         self.assertEqual(related[0], "mom")
-        self.assertNotIn(related[1], {"david-james-taylor", "dave"})
+        # v427 (design D4): the hub is the page's second end, named in related.
+        self.assertEqual(related[1], "david-james-taylor")
+        self.assertNotIn("dave", related)
         rels = {e["page"]: e for e in self.graph["edges"] if e.get("kind") == "relationship"}
         hub = "wiki/life/david-james-taylor.md"
         self.assertEqual({rels["wiki/relationships/dave-and-mom.md"]["source"],
@@ -246,22 +248,30 @@ class RelationshipEndsTests(unittest.TestCase):
     """The owner's "Dave & Mom" page lists mom, then a theme and a period."""
 
     def setUp(self):
+        # v427 (design D5): the owner has no person page — no "dave" node.
         self.slug_to_id = {
-            "mom": "wiki/people/mom.md", "dave": "wiki/people/dave.md",
+            "mom": "wiki/people/mom.md",
             "childhood": "wiki/periods/childhood.md", "belonging": "wiki/themes/belonging.md",
             "grandma-betty-jo": "wiki/people/grandma-betty-jo.md",
         }
-        self.label_to_id = {"mom": "wiki/people/mom.md", "dave": "wiki/people/dave.md"}
+        self.label_to_id = {"mom": "wiki/people/mom.md"}
         self.hub = "wiki/life/david-james-taylor.md"
 
     def ends(self, title, related):
         return serve_wiki._relationship_ends(
             title, related, self.slug_to_id, self.label_to_id, self.hub,
-            "wiki/relationships/x.md", ("Dave", "David James Taylor", "david-james-taylor"))
+            "wiki/relationships/x.md",
+            ("Dave", "David James Taylor", "david-james-taylor", "dave", "David Taylor"))
 
     def test_title_first_and_the_owner_is_the_hub(self):
         related = ["mom", "childhood", "belonging", "grandma-betty-jo"]
         self.assertEqual(set(self.ends("Dave & Mom", related)), {self.hub, "wiki/people/mom.md"})
+
+    def test_every_owner_spelling_and_alias_is_the_hub(self):
+        for title in ("Dave & Mom", "David James Taylor & Mom", "David Taylor and Mom",
+                      "dave & Mom"):
+            with self.subTest(title=title):
+                self.assertEqual(set(self.ends(title, [])), {self.hub, "wiki/people/mom.md"})
 
     def test_related_is_only_a_fallback(self):
         # An end the title cannot resolve falls back to related:, then the hub.

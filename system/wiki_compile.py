@@ -53,6 +53,7 @@ from lifehug_core import (
     write_json,
     write_text,
 )
+import owner_identity  # noqa: E402 — who the owner is, the one definition (ADR 0047)
 from research_expand import DEFAULT_MODEL, parse_ai_json
 from roadmap import load_roadmap
 # The ONE category→page rule, shared with the roadmap and the graph (v376).
@@ -1052,6 +1053,10 @@ def plan_entities(entity_type, answers, manual_sources, roster, taken_slugs,
         # None` — a Focus owns the page, or the survivor of a fold does.
         if not ent.get("page_eligible") or ir.has_home(ent):
             continue
+        # v427 (design D4): the owner's record has no person page — its page
+        # is the life hub, whatever a refresh once said about page_eligible.
+        if owner_identity.is_owner_row(ent):
+            continue
         slug = ent.get("slug") or slugify(ent.get("name", ""))
         if not slug or slug in taken_slugs:
             continue  # a Focus owns it, or already emitted
@@ -1299,7 +1304,12 @@ def plan_themes(answers, manual_sources, theme_roster=None, author_slug=None):
 
 
 def plan_relationships(categories, questions, answers, manual_sources, author, person_roster=None,
-                       known_people=()):
+                       known_people=(), hub=""):
+    """One edge page per person Focus with enough material (owner & person).
+
+    v427 (design D4, J1): the page keeps its ``<name>-and-<person>`` slug, but
+    its ``related`` names BOTH ends — the person's page and ``hub``, the
+    owner's life hub — so an edge never hangs off a person page of the owner."""
     descs = []
     author = author or "Me"
     alias_map = _focus_alias_map(person_roster, _focus_slugs(categories))
@@ -1360,7 +1370,7 @@ def plan_relationships(categories, questions, answers, manual_sources, author, p
                 f"- What has gone unsaid between {author} and {person}?",
             ],
             open_questions_header="Open Questions (dyadic)",
-            seed_related=[page_slug],
+            seed_related=[page_slug] + ([hub] if hub and hub != page_slug else []),
             identity=(_person_ref_only(record) if record is not None else None),
         ))
     return descs
@@ -1388,10 +1398,16 @@ def plan_self(questions, answers):
     return descs
 
 
-def plan_life_story(categories, questions, answers, manual_sources, author_full):
+def plan_life_story(categories, questions, answers, manual_sources, author_full,
+                    owner_record=None):
     """The person at the center: a self-portrait hub plus one page per life-story
     arc (the A–E 'main' categories). This finally surfaces the author's own life
-    story — the core of the program — which no other pass renders."""
+    story — the core of the program — which no other pass renders.
+
+    v427 (design D4): the hub IS the owner's page, so when the roster has his
+    record (``owner_record``, `owner_identity.owner_row`) the hub carries its
+    identity frontmatter — ``person_ref``, ``handle``, ``aliases`` — and the
+    identity header renders on it."""
     per_cat = []
     for cid, info in sorted(categories.items()):
         if info.get("group") != "main":
@@ -1432,6 +1448,8 @@ def plan_life_story(categories, questions, answers, manual_sources, author_full)
             open_questions=[],
             origin="hub",
             section="",
+            identity=(record_identity("person", owner_record)
+                      if owner_record is not None else None),
         ))
     return descs
 
@@ -1778,16 +1796,48 @@ def _legacy_focus_path(desc: dict):
     return TYPE_DIRS["person"] / f"{desc['legacy_slug']}.md"
 
 
-def redirect_stub_text(desc: dict) -> str:
-    """The one-line page left at a Focus page's old path for one version
-    (v389): ``redirect_to`` names the record's page, the body says so."""
+def redirect_stub_text(desc: dict, redirect_to: str = "") -> str:
+    """The one-line page left at a page's old path for one version (v389):
+    ``redirect_to`` names the page it moved to, the body says so.
+
+    ``redirect_to`` is a wiki-relative target, no extension. It defaults to
+    the record's person page (``people/<slug>``, a Focus page that moved to its
+    record's slug); v427 passes ``life/<hub>`` for the owner's old person page
+    (design D4). The frontmatter shape is v389's either way, so every host that
+    already follows ``redirect_to`` follows this one too."""
     identity = desc.get("identity") or {}
     ref_only = {"ref_key": "person_ref", "ref": identity.get("ref", ""), "ref_only": True} \
         if identity.get("ref") else None
+    target = redirect_to or f"people/{desc['slug']}"
     head = frontmatter(
         desc["title"], "person", [], [], synthesized=False, origin=REDIRECT_ORIGIN,
-        redirect_to=f"people/{desc['slug']}", identity=ref_only)
-    return f"{head}\n\nThis page moved to [[{desc['slug']}]].\n"
+        redirect_to=target, identity=ref_only)
+    return f"{head}\n\nThis page moved to [[{target.rsplit('/', 1)[-1]}]].\n"
+
+
+def owner_stub_text(title: str, hub: str, owner_ref: str = "") -> str:
+    """The owner's old person page as a redirect stub to the life hub (v427,
+    design D4 / J3): ``redirect_to: life/<hub>``, naming his record."""
+    desc = {"title": title, "slug": hub, "identity": {"ref": owner_ref} if owner_ref else {}}
+    return redirect_stub_text(desc, redirect_to=f"{TYPE_DIRS['life'].name}/{hub}")
+
+
+def repoint_wikilinks(text: str, slugs, label: str) -> str:
+    """``[[Dave]]`` / ``[[dave|him]]`` → the hub (v427, design D4): a wikilink
+    whose target slugifies to one of ``slugs`` (the owner's page slugs) is
+    rewritten to ``label`` (the hub's title), keeping any display text."""
+    targets = {slugify(s) for s in slugs if s}
+    if not targets or not text:
+        return text
+
+    def repl(match):
+        inner = match.group(1)
+        target, bar, shown = inner.partition("|")
+        if slugify(target) not in targets:
+            return match.group(0)
+        return f"[[{label}{bar}{shown}]]"
+
+    return WIKILINK_RE.sub(repl, text)
 
 
 def _page_is_redirect(page: Path) -> bool:
@@ -1799,8 +1849,7 @@ def _page_is_redirect(page: Path) -> bool:
 
 
 def update_index(written_pages: list[Path], dry_run=False):
-    cfg = load_config()
-    author_full = cfg.get("full_name") or cfg.get("name") or "Me"
+    _author, author_full = owner_identity.author_names(load_config())
 
     def label(page: Path) -> str:
         title = frontmatter_value(page.read_text(encoding="utf-8", errors="replace"), "title")
@@ -2070,9 +2119,12 @@ def main():
     if _n_corrected or _RETRACTIONS:
         print(f"  ⚖ corrections applied: {_n_corrected}; retractions active: {len(_RETRACTIONS)}")
     cfg = load_config()
-    author = cfg.get("name", "Me")
-    author_full = cfg.get("full_name") or author
+    author, author_full = owner_identity.author_names(cfg)
     person_roster = load_roster("person")
+    # v427 (ADR 0047, design D4): the owner's record, whose page is the hub.
+    owner_record = owner_identity.owner_row(
+        person_roster, owner_identity.owner_names_from_profile(cfg))
+    hub = hub_slug(author_full)
     focus_slugs = {slugify(clean_focus_name(info["name"]))
                    for info in categories.values() if info.get("group") == "focus"}
     # Who the vault knows about, by name token — the census that decides whether
@@ -2081,13 +2133,14 @@ def main():
 
     # 1. plan — the person's own life story leads.
     descs = []
-    descs += plan_life_story(categories, questions, answers, manual_sources, author_full)
+    descs += plan_life_story(categories, questions, answers, manual_sources, author_full,
+                             owner_record)
     descs += plan_focuses(categories, questions, answers, manual_sources, person_roster,
                           known_people)
     descs += plan_projects(categories, questions, answers, manual_sources)
     descs += plan_themes(answers, manual_sources, load_roster("theme"), slugify(author_full))
     descs += plan_relationships(categories, questions, answers, manual_sources, author,
-                                person_roster, known_people)
+                                person_roster, known_people, hub=hub)
     descs += plan_self(questions, answers)
 
     # Entity/node graduation: build out every node of the life graph from mentions —
@@ -2097,6 +2150,17 @@ def main():
     for entity_type in ("person", "place", "period", "object"):
         descs += plan_entities(entity_type, answers, manual_sources,
                                load_roster(entity_type), taken_slugs, known_people)
+
+    # v427 (design D4): the hub is one end of every relationship page — it
+    # lists them, and the owner's old person page slugs point at it.
+    hub_desc = next((d for d in descs if d.get("origin") == "hub"), None)
+    if hub_desc is not None:
+        for d in descs:
+            if d["type"] == "relationship" and d["slug"] not in hub_desc["seed_related"]:
+                hub_desc["seed_related"].append(d["slug"])
+    person_page_slugs = {d["slug"] for d in descs if d["type"] == "person"}
+    owner_slugs = [s for s in owner_identity.owner_page_slugs(cfg, person_roster)
+                   if s not in person_page_slugs and s != hub]
 
     slug_title = {d["slug"]: d["title"] for d in descs}
     roster = [{"slug": d["slug"], "title": d["title"], "type": d["type"]} for d in descs]
@@ -2151,6 +2215,9 @@ def main():
     repoint = fold_repoints(
         [person_roster] + [load_roster(t) for t in ("place", "period", "object", "theme")],
         planned_slugs)
+    if hub_desc is not None:
+        for slug in owner_slugs:
+            repoint[slug] = hub
     final_related, backlinks = compute_crosslinks(descs, synths, repoint)
 
     # 4. write
@@ -2179,7 +2246,11 @@ def main():
             preserved += 1
             print(f"  ↻ preserved {d['slug']} (no key/draft to refresh)")
         else:
-            text = render_page(d, synths[d["slug"]], final_related[d["slug"]], backlinks[d["slug"]], slug_title)
+            synth = synths[d["slug"]]
+            if hub_desc is not None and owner_slugs:
+                synth = dict(synth, narrative=repoint_wikilinks(
+                    synth["narrative"], owner_slugs, hub_desc["title"]))
+            text = render_page(d, synth, final_related[d["slug"]], backlinks[d["slug"]], slug_title)
             if write_page(d["path"], text, args.dry_run):
                 written.append(d["path"])
         if legacy_path is not None:
@@ -2191,6 +2262,26 @@ def main():
                 stub_slugs.add(legacy_path.stem)
                 if write_page(legacy_path, stub, args.dry_run):
                     written.append(legacy_path)
+    # v427 (design D4 / J3): the owner's old person page becomes a redirect
+    # stub to the hub, kept for one version; never an orphan to delete.
+    hub_exists = hub_desc is not None or (TYPE_DIRS["life"] / f"{hub}.md").is_file()
+    owner_ref = (owner_identity.row_ref(owner_record) if owner_record is not None else "")
+    for slug in owner_slugs:
+        page = TYPE_DIRS["person"] / f"{slug}.md"
+        if not page.is_file():
+            continue
+        stub_slugs.add(slug)  # never deleted by the orphan rule, stub or not
+        current = page.read_text(encoding="utf-8", errors="replace")
+        origin = frontmatter_value(current, "origin")
+        if not hub_exists:
+            print(f"  ⚠ kept {rel(page)} — the owner's page, no life hub to point it at yet")
+            continue
+        if not is_redirect_stub(current) and origin not in ("mention", "focus"):
+            print(f"  ⚠ kept {rel(page)} — hand-authored page, no redirect stub written")
+            continue
+        title = frontmatter_value(current, "title") or author
+        if write_page(page, owner_stub_text(title, hub, owner_ref), args.dry_run):
+            written.append(page)
     removed = cleanup_orphan_entity_pages(taken_slugs, args.dry_run, stub_slugs)
     compile_timeline(args.dry_run)
     update_index(written, args.dry_run)
