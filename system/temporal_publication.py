@@ -958,103 +958,20 @@ def rebuild_signature(payload: object) -> dict:
 # Owner identity — ONE definition, every seat (v328)
 # --------------------------------------------------------------------------
 
-#: The profile keys that spell the owner's own name, in the order the fold is
-#: handed them. WHOLE spellings only: a middle name is not the owner
-#: (`tests/test_owner_name_subject.py`), so no key here is ever tokenized.
-OWNER_NAME_PROFILE_KEYS = ("name", "full_name")
+#: v426 (ADR 0047): the owner's profile readers live in `owner_identity`, the
+#: one definition every seat asks; they are re-exported here under their v328
+#: names so every caller and test keeps working unchanged.
+from owner_identity import (  # noqa: E402
+    OWNER_NAME_PROFILE_KEYS,
+    owner_identity_inputs,
+    owner_name_variants,
+    owner_names_from_profile,
+    owner_profile,
+)
 
 
 def _spelling(value: object) -> str:
     return " ".join(str(value or "").split())
-
-
-def owner_profile(vault_root: str | Path) -> dict:
-    """The owner's profile as THIS vault spells it.
-
-    ``profile.yaml`` (committed: name, full_name) under ``config.yaml`` (local,
-    wins on conflict) — the same two files and the same precedence as
-    `lifehug_core.load_config`, read from the vault being published rather
-    than from the process binding. A vault without either is ``{}``.
-    """
-    try:
-        from lifehug_core import load_config  # noqa: PLC0415
-        from vault_paths import vault_data_path  # noqa: PLC0415
-
-        root = Path(str(vault_root))
-        merged: dict = {}
-        for name in ("profile", "config"):
-            merged.update(load_config(vault_data_path(name, vault_root=root)) or {})
-        return merged
-    except Exception:  # noqa: BLE001 — no readable profile is simply no profile
-        return {}
-
-
-def owner_names_from_profile(profile: object) -> tuple[str, ...]:
-    """The owner's own spellings: ``name`` and ``full_name``, whole, deduplicated.
-
-    This is the set `temporal_timeline` folds with (`timeline-rules:8`, via
-    `identity_resolution.owner_name_refs`): a roster entity answering to one of
-    these WHOLE spellings is the owner. Interior tokens never enter — "Pat
-    Quincy Example" puts "Pat Quincy Example" in, not "Quincy".
-    """
-    row = profile if isinstance(profile, dict) else {}
-    names: list[str] = []
-    for key in OWNER_NAME_PROFILE_KEYS:
-        text = _spelling(row.get(key))
-        if text and text not in names:
-            names.append(text)
-    return tuple(names)
-
-
-def owner_name_variants(owner_names: object) -> tuple[str, ...]:
-    """The whole spellings PLUS each one's first word ("Dave", "David").
-
-    For the RESOLVER only (`resolver.spine`'s ``owner_names``, v325): the
-    `subject_age_not_owner` refusal must not fire on the owner's own nickname.
-    Never an input to the fold — a first name alone would make every namesake
-    in the roster the owner, which is exactly the leak `timeline-rules:8`
-    refuses. Order: the whole spellings first, then the new first words.
-    """
-    out: list[str] = []
-    for name in owner_names or ():
-        text = _spelling(name)
-        if text and text not in out:
-            out.append(text)
-    for text in list(out):
-        first = text.split()[0]
-        if first not in out:
-            out.append(first)
-    return tuple(out)
-
-
-def owner_identity_inputs(vault_root: str | Path) -> tuple[object, tuple[str, ...]]:
-    """``(roster_snapshot, owner_names)`` for a fold of ``vault_root``.
-
-    The one definition behind every publish seat (ADR 0021's "one definition,
-    many hosts"): `timeline.publish_calculated_timeline`, a Mirror resolution's
-    republish, the frame-display command, the CLI, `verify` — and
-    `resolver.spine`, through :func:`owner_names_from_profile`. Before v328 each
-    seat spelled its own inputs, and a vault whose roster listed the owner
-    changed its mind about whose nodes they were according to which seat had
-    republished last.
-
-    * the roster is this vault's ``person`` roster (`entity_roster.load_roster`
-      with ``vault_root``), an unreadable one being no roster (``()``);
-    * the names are :func:`owner_names_from_profile` over :func:`owner_profile`.
-
-    Both are read from the vault being published, never from the process
-    binding, so the roster and the substrate can never come from two vaults
-    (the split `timeline._projection_vault_root` exists to make impossible).
-    """
-    root = Path(str(vault_root))
-    roster: object
-    try:
-        import entity_roster  # noqa: PLC0415
-
-        roster = entity_roster.load_roster("person", vault_root=root)
-    except Exception:  # noqa: BLE001 — a roster problem is "no roster"
-        roster = ()
-    return roster, owner_names_from_profile(owner_profile(root))
 
 
 def owner_identity_digest(roster_snapshot: object, owner_names: object) -> str:

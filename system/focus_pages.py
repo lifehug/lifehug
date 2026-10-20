@@ -159,10 +159,11 @@ def relationship_slug(author: str, person: str) -> str:
 
 
 def author_names(config: dict) -> tuple[str, str]:
-    """(name, full_name) as the compiler reads them."""
-    author = (config or {}).get("name") or "Me"
-    full = (config or {}).get("full_name") or author
-    return str(author), str(full)
+    """(name, full_name) as the compiler reads them — read through
+    `owner_identity.author_names`, the one definition (v426, ADR 0047)."""
+    import owner_identity  # noqa: PLC0415
+
+    return owner_identity.author_names(config)
 
 
 def hub_page(author_full: str) -> str:
