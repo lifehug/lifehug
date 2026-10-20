@@ -137,6 +137,11 @@ def owner_names_from_profile(profile: object) -> tuple[str, ...]:
     return tuple(names)
 
 
+def profile_name(profile: object) -> str:
+    """The profile's ``name`` as written ("Dave"), or ``""``."""
+    return _spelling(profile.get("name")) if isinstance(profile, dict) else ""
+
+
 def author_names(profile: object) -> tuple[str, str]:
     """``(name, full_name)`` as the compiler writes pages with them: ``name``
     falls back to "Me" and ``full_name`` to ``name`` (`focus_pages.author_names`)."""
@@ -415,6 +420,65 @@ def is_owner_possessive(text: object, owner_names: object = ()) -> bool:
         or folded in ir.OWNER_SUBJECT_MENTIONS
 
 
+# --------------------------------------------------------------------------
+# The verb: lifehug.py owner-identity [--apply] [--json] (design D6)
+# --------------------------------------------------------------------------
+
+
+def render_report(report: dict) -> str:
+    """The human report of `entity_roster.repair_owner_identity`."""
+    names = ", ".join(report.get("profile_names") or ()) or "(no name in profile.yaml)"
+    lines = [f"owner-identity: profile spellings: {names}"]
+    if not report.get("roster"):
+        lines.append("  no person roster on disk yet — nothing to do")
+        return "\n".join(lines)
+    found = report.get("found")
+    if found == FOUND_AMBIGUOUS:
+        lines.append("  row: ambiguous — " + ", ".join(report.get("candidates") or ())
+                     + " (say which with entity-verdict --fold-into; nothing is guessed)")
+    elif found == FOUND_NONE:
+        lines.append("  row: none — no roster row answers to the profile names")
+    else:
+        how = "marked self" if found == FOUND_SELF else "found by name"
+        lines.append(f"  row: {report.get('slug')} ({how})")
+    changes = report.get("changes") or {}
+    verb = "changed" if report.get("applied") else "would change"
+    parts = []
+    for key in ("relationship", "focus", "page_eligible"):
+        if key in changes:
+            parts.append(f"{key} {changes[key].get('was')!r} -> {changes[key].get('now')!r}")
+    if changes.get("aliases_dropped"):
+        parts.append("aliases dropped: " + ", ".join(changes["aliases_dropped"]))
+    if parts:
+        lines.append(f"  {verb}: " + "; ".join(parts))
+    elif not report.get("changed"):
+        lines.append("  nothing to do")
+    if report.get("changed") and not report.get("applied"):
+        lines.append("  run with --apply to write it")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse  # noqa: PLC0415
+    import json  # noqa: PLC0415
+
+    parser = argparse.ArgumentParser(
+        description="Who the owner is (ADR 0047): report the owner's roster row and "
+                    "what the converter's owner step changes on it; --apply writes it.")
+    parser.add_argument("--apply", action="store_true",
+                        help="Write the converted person roster (idempotent)")
+    parser.add_argument("--json", action="store_true", help="Print the report as JSON")
+    args = parser.parse_args(argv)
+    import entity_roster  # noqa: PLC0415
+
+    report = entity_roster.repair_owner_identity(apply=args.apply)
+    if args.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))
+    else:
+        print(render_report(report))
+    return 0
+
+
 __all__ = [
     "A_ROSTER_NEVER_MAKES_A_STRANGER_OF_THE_OWNER",
     "ENTITY_IS_OWNER",
@@ -441,6 +505,12 @@ __all__ = [
     "owner_row",
     "owner_slug",
     "primary_focus_id",
+    "profile_name",
+    "render_report",
     "row_ref",
     "strip_role_suffix",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

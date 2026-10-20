@@ -191,6 +191,10 @@ DIRECT_MUTATION_COMMANDS = frozenset({
     # v423 (ADR 0046): select/unselect write one Focus row's `selected` and
     # `selection` in state/roadmap.json — the focus-set family.
     "focus-select", "focus-unselect",
+    # v426 (ADR 0047): the owner step of the roster converter, on demand —
+    # --apply rewrites state/entity_rosters/person.json (the entity-roster
+    # family). Classified BY NAME: without --apply it writes nothing.
+    "owner-identity",
     # entity-identity-context (v190): the entity -> focus hand-off appends one
     # row to state/focus_recommendations.json — same single-file writer-lock
     # family as focus-dismiss/recommend-focuses. It creates no Focus.
@@ -1942,6 +1946,11 @@ def cmd_focus_select(args: argparse.Namespace) -> int:
 def cmd_focus_unselect(args: argparse.Namespace) -> int:
     flags = ["unselect", args.focus_id] + (["--json"] if args.json else [])
     return run_python("focus_selection.py", flags)
+
+
+def cmd_owner_identity(args: argparse.Namespace) -> int:
+    flags = (["--apply"] if args.apply else []) + (["--json"] if args.json else [])
+    return run_python("owner_identity.py", flags)
 
 
 def cmd_focus_finish(args: argparse.Namespace) -> int:
@@ -4234,6 +4243,15 @@ def build_parser() -> argparse.ArgumentParser:
                         "attach each Focus to its person. Keyless, idempotent; takes the "
                         "writer lock. With --dry-run: report, write nothing")
     p.set_defaults(func=cmd_entity_roster)
+
+    p = sub.add_parser("owner-identity",
+                       help="Who the owner is (v426, ADR 0047): report the owner's roster row "
+                            "and what marking it self changes; --apply writes it (idempotent)")
+    p.add_argument("--apply", action="store_true",
+                   help="Write the change (relationship self, the primary Focus, no person "
+                        "page, owner-possessive aliases off his row)")
+    p.add_argument("--json", action="store_true", help="Print the report as JSON")
+    p.set_defaults(func=cmd_owner_identity)
 
     p = sub.add_parser("identity-work-items",
                        help="Turn the listener's ambiguous/unknown person_identity records "

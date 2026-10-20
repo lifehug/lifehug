@@ -274,14 +274,26 @@ def _bounds(record: object) -> dict | None:
     }
 
 
+#: The owner's own subject handle (`temporal_work_items.OWNER_SUBJECT_REF`,
+#: spelled here because this module is a timeline dependency).
+OWNER_SUBJECT_REF = "self"
+
+
 def _resolved_subject_refs(
     values: object,
     *,
     rosters: dict[str, identity_resolution.RosterIndex],
+    owner_names: object = (),
 ) -> tuple[list[str], list[str], list[dict]]:
-    """Resolve legacy labels only when the canonical roster has one answer."""
+    """Resolve legacy labels only when the canonical roster has one answer.
+
+    v426 (ADR 0047): an owner mention ("Dave", "David James Taylor", "Dave
+    (narrator)") is asked FIRST (`owner_identity.is_owner_mention`) and is the
+    owner's own subject, ``self`` — never ``person/<owner>``, even when the
+    roster lists him."""
     # The timeline owns this normalization. Import locally because the
     # evidence/context modules are themselves timeline dependencies.
+    import owner_identity  # noqa: PLC0415
     from temporal_timeline import is_owner_reference_only
 
     refs: set[str] = set()
@@ -290,6 +302,9 @@ def _resolved_subject_refs(
     for value in values if isinstance(values, (list, tuple, set)) else ():
         mention = str(value or "").strip()
         if not mention:
+            continue
+        if owner_names and owner_identity.is_owner_mention(mention, owner_names):
+            refs.add(OWNER_SUBJECT_REF)
             continue
         matches: dict[str, dict] = {}
         for kind, roster in rosters.items():
@@ -360,6 +375,7 @@ def _candidate(
     *,
     roster_aliases: dict[str, tuple[str, ...]],
     rosters: dict[str, identity_resolution.RosterIndex],
+    owner_names: object = (),
 ) -> dict | None:
     candidate_id = str(node.get("node_id") or "")
     if not candidate_id:
@@ -374,7 +390,7 @@ def _candidate(
     if usable is None:
         return None
     entity_refs, unresolved_mentions, entity_ref_ambiguities = _resolved_subject_refs(
-        node.get("subject_refs"), rosters=rosters
+        node.get("subject_refs"), rosters=rosters, owner_names=owner_names
     )
     if (unresolved_mentions and not entity_refs and not entity_ref_ambiguities
             and str(node.get("occurrence_subject_scope") or "") == "owner"):
@@ -848,6 +864,9 @@ def _load_context_catalog(vault_root: Path) -> dict:
     import episode_fold  # noqa: PLC0415 - avoids the timeline import cycle
 
     roster_aliases, rosters, person_roster = _load_roster_catalog(vault_root)
+    import owner_identity  # noqa: PLC0415
+
+    owner_names = owner_identity.owner_names_from_profile(owner_identity.owner_profile(vault_root))
     roster_matchers = tuple(
         (ref, term, re.compile(rf"(?<!\w){re.escape(term.casefold())}(?!\w)"))
         for ref, terms in roster_aliases.items()
@@ -905,7 +924,8 @@ def _load_context_catalog(vault_root: Path) -> dict:
         claim_ids = frozenset(
             str(value) for value in node.get("input_claim_refs") or () if value
         )
-        row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters)
+        row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters,
+                         owner_names=owner_names)
         if row is not None:
             candidate_identity[str(row["candidate_id"])] = _candidate_identity(
                 node, row, claim_ids, independent_claims_by_id, landmark_place_refs,
@@ -957,7 +977,8 @@ def _load_context_catalog(vault_root: Path) -> dict:
             claim_ids = frozenset(
                 str(value) for value in node.get("input_claim_refs") or () if value
             )
-            row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters)
+            row = _candidate(node, roster_aliases=roster_aliases, rosters=rosters,
+                             owner_names=owner_names)
             if row is None:
                 continue
             candidate_identity.setdefault(str(row["candidate_id"]), _candidate_identity(

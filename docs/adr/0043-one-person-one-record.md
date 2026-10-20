@@ -198,3 +198,13 @@ only NAMES the `entity-verdict person <slug> clear --ensure --name <name>` argv
 (`owner_choice_argv`); a host runs it only on the owner's explicit choice, and
 a conversation never mints a person. `entity-roster --convert-identity` is now
 reachable through `lifehug.py`.
+
+## The owner (2026-10-20, ADR 0047)
+
+The owner is the one record this ADR's rules never named: the roster row that
+answers to the profile names is marked `relationship: "self"`, attended by the
+primary life-story Focus (`focus`, decision 1's meaning), never page-eligible,
+and never given a relationship, a person Focus, a graduation, a veto, a
+retirement or a fold into another row (`ENTITY_IS_OWNER`). The v386 converter
+gains an owner step, and step 2 no longer reattributes a possessive ("Dave's
+kids") onto its possessor. See ADR 0047.

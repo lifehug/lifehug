@@ -214,6 +214,13 @@ def person_focus(entity: dict) -> str:
     return str(entity.get("focus") or "").strip()
 
 
+#: How the owner's own row is marked when it leads the "People you already
+#: know" block (v426): ``- Dave (you, the author) — also: David Taylor, …``.
+#: The prompt's rule — write the listed name without the part in parentheses —
+#: then gives the owner's own name, never a stranger's.
+OWNER_LINE_MARK = "(you, the author)"
+
+
 def render_known_people(person_roster: object, *, story_text: str = "",
                         limit: int = KNOWN_PEOPLE_LIMIT) -> str:
     """One line per person record, bounded, saying what it hid.
@@ -223,7 +230,13 @@ def render_known_people(person_roster: object, *, story_text: str = "",
     the display name disambiguated when two records share it (design D7).
     Ordered people-this-text-names first, then family, then everyone else,
     roster order within a tier, so the surviving set is stable. Pure.
+
+    v426 (ADR 0047): the owner's row (``relationship: "self"``) is never
+    listed as somebody else. It leads the block as
+    ``- <name> (you, the author) — also: <alias>, …`` (:data:`OWNER_LINE_MARK`),
+    every spelling of his, so the model writes none of them as a stranger.
     """
+    import owner_identity  # noqa: PLC0415
     from landmarks_interaction import person_date_relations
 
     rows = person_rows(person_roster)
@@ -233,6 +246,8 @@ def render_known_people(person_roster: object, *, story_text: str = "",
     family = person_date_relations()
 
     def tier(entity: dict) -> int:
+        if owner_identity.is_owner_row(entity):
+            return -1
         if text_key.strip() and named_in_text(entity, text_key):
             return 0
         rel = ir.normalized_mention_key(entity.get(ir.ROSTER_RELATIONSHIP_KEY))
@@ -241,6 +256,15 @@ def render_known_people(person_roster: object, *, story_text: str = "",
     ordered = sorted(enumerate(rows), key=lambda pair: (tier(pair[1]), pair[0]))
     lines: list[str] = []
     for _index, entity in ordered[:max(int(limit), 0)]:
+        if owner_identity.is_owner_row(entity):
+            name = ir.collapsed_text(entity.get("name"))
+            others = list(dict.fromkeys(
+                ir.collapsed_text(a) for a in entity.get("aliases") or ()
+                if ir.collapsed_text(a) and ir.normalized_mention_key(a)
+                != ir.normalized_mention_key(name)))
+            lines.append(f"- {name} {OWNER_LINE_MARK}"
+                         + (" — also: " + ", ".join(others) if others else ""))
+            continue
         own = ir.normalized_mention_key(entity.get("name"))
         aliases = [str(a).strip() for a in entity.get("aliases") or ()
                    if str(a).strip() and ir.normalized_mention_key(a) != own]

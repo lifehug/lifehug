@@ -90,7 +90,8 @@ each other:
 `base_page_eligible` asks for `focus is None and folded_into is None`. A
 one-version converter (`roster_relations.convert_legacy_roster`) runs on every
 `load_roster` and every roster write, and `entity-roster --convert-identity`
-persists it: a `maps_to_focus` naming another row becomes `folded_into`,
+persists it (v426, ADR 0047: so does `lifehug.py owner-identity --apply`,
+which runs only the owner step below): a `maps_to_focus` naming another row becomes `folded_into`,
 anything else becomes `focus`, and the key is dropped — byte-stable on a second
 run. The same pass retires the **placeholder rows** — a row NAMED by a role word
 whose relation is a set (Son, Daughter, Kids, Parents, Siblings, Friend,
@@ -102,6 +103,20 @@ spelling of it that names somebody ("my son Otto") moves to that person's
 record. A role-word alias ("my son") stays only on a record whose relation has
 cardinality one ("my wife", "dad" — one father per word, `identity_resolution.RELATION_WORD_CARDINALITY`); elsewhere it moves onto the relation's
 query, and the record gains that `relationship` if it had none.
+
+**The owner is one record (v426, ADR 0047).** With the vault's profile names
+the converter also runs an owner step: the row `owner_identity.find_owner_row`
+finds (the one marked `relationship: "self"`, else the ONE row the profile
+`name` / `full_name` answers to — two is ambiguous and nothing changes) is
+marked `relationship: "self"`, its `focus` becomes the primary life-story
+Focus (left alone when there is no roadmap), `page_eligible` is cleared (his
+page is the life hub), and an owner possessive alias ("Dave's kids") goes back
+to its relation query. A possessive is never reattributed onto its own
+possessor. Every spelling of the owner a refresh finds ("Dave", "David
+Taylor", "Dave (narrator)") merges into that row; `entity-verdict` refuses a
+relationship, a person Focus, graduate, never, retire and fold-as-loser on it
+(`ENTITY_IS_OWNER`). `lifehug.py owner-identity [--apply] [--json]` reports
+and applies the step.
 
 A **collective/role** row the converter keeps (it carries a Focus, a fold or a
 birth date) keeps its exact keys but never enters the given-name census, as

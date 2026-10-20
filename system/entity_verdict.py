@@ -126,6 +126,7 @@ if str(SYSTEM_DIR) not in sys.path:
 import chronology  # noqa: E402
 import identity_handles  # noqa: E402
 import identity_resolution as ir  # noqa: E402
+import owner_identity  # noqa: E402
 import roster_relations  # noqa: E402
 from entity_roster import (  # noqa: E402
     ENTITY_TYPES,
@@ -152,6 +153,45 @@ class EntityVerdictError(ValueError):
     """A verdict that must not apply — unknown type/slug, or `graduate` on
     a mapped entity. Always raised BEFORE any write: a refused verdict
     leaves the roster file byte-for-byte unchanged."""
+
+
+class EntityIsOwner(EntityVerdictError):
+    """v426 (ADR 0047, `owner_identity.THE_OWNER_IS_ONE_RECORD`): an act that
+    would treat the owner's row as somebody else's — a relationship, a person
+    Focus, graduate, never, retire, or folding it INTO another row. ``reason``
+    is always :data:`ENTITY_IS_OWNER` (the platform's 409); ``act`` names the
+    refused act. Raised before any write. Folding another row INTO the owner
+    stays allowed (an alias like "Me")."""
+
+    def __init__(self, slug: str, act: str, reason: str = owner_identity.ENTITY_IS_OWNER) -> None:
+        self.slug = slug
+        self.act = act
+        self.reason = reason
+        super().__init__(f"{reason}: {slug!r} is the owner — refusing {act} "
+                         "(the owner is one record; his page is the life hub)")
+
+
+#: The one reason :class:`EntityIsOwner` carries.
+ENTITY_IS_OWNER = owner_identity.ENTITY_IS_OWNER
+#: `attach_focus` / `roadmap.focus_new` on the owner (a person Focus for him).
+THE_OWNER_IS_NOT_A_PERSON_FOCUS = "THE_OWNER_IS_NOT_A_PERSON_FOCUS"
+
+
+def owner_refusal(target: dict, *, verdict: str, relationship: object = None,
+                  focus: object = None, fold_into: object = None) -> str:
+    """The act this verdict would perform on the owner's row that is refused,
+    or ``""`` (not the owner, or nothing refused). PURE."""
+    if not owner_identity.is_owner_row(target):
+        return ""
+    if relationship is not None and relationship != owner_identity.SELF_RELATIONSHIP:
+        return "a relationship"
+    if focus is not None:
+        return "a person Focus"
+    if fold_into is not None:
+        return "folding the owner into another row"
+    if verdict in ("graduate", "never"):
+        return verdict
+    return ""
 
 
 #: The CLI's exit code for a verdict refused by the alias collision rule
@@ -462,6 +502,13 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
         else:
             focus = maps_to
 
+    # v426 (ADR 0047): the owner's row is never re-typed, given a person
+    # Focus, graduated, vetoed or folded away — refused before any write.
+    refused = owner_refusal(target, verdict=verdict, relationship=relationship,
+                            focus=focus, fold_into=fold_into)
+    if refused:
+        raise EntityIsOwner(slug, refused)
+
     # The pure, per-alias acts first — retract, share, handle, located_in — so
     # a refusal leaves the file untouched.
     snapshot = {"entities": entities}
@@ -650,6 +697,7 @@ def apply_verdict(entity_type: str, slug: str, verdict: str, *,
             entity_type, bool(target.get("qualifies")), ir.roster_home(target),
             float(target.get("score", 0.0) or 0.0), int(target.get("unique_answers", 0) or 0),
             min_score, min_answers)
+        apply_owner_verdict(entity_type, target)
     else:
         target["owner_verdict"] = verdict
         apply_owner_verdict(entity_type, target)
@@ -676,6 +724,8 @@ def retire_row(entity_type: str, slug: str, *, receipt: dict) -> dict | None:
     target = next((e for e in entities if isinstance(e, dict) and e.get("slug") == slug), None)
     if target is None:
         return None
+    if owner_identity.is_owner_row(target):
+        raise EntityIsOwner(slug, "retire")
     if ir.has_home(target) or any(
             isinstance(e, dict) and ir.folded_into_of(e) == slug for e in entities):
         raise EntityVerdictError(
@@ -735,6 +785,10 @@ def attach_focus(slug: str, focus_slug: str) -> dict:
         raise EntityVerdictError(f"no such person: {slug!r}")
     if ir.is_alias_row(target):
         raise EntityVerdictError(f"refusing: {slug!r} is folded into {ir.folded_into_of(target)!r}")
+    if owner_identity.is_owner_row(target) and ir.focus_of(target) != focus_slug:
+        # v426 (ADR 0047): the life story attends to the owner (J2).
+        raise EntityIsOwner(slug, f"a person Focus ({focus_slug!r})",
+                            reason=THE_OWNER_IS_NOT_A_PERSON_FOCUS)
     twin = next((e for e in entities if isinstance(e, dict) and e is not target
                  and not ir.is_alias_row(e) and ir.focus_of(e) == focus_slug), None)
     if twin is not None:

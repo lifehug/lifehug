@@ -245,6 +245,46 @@ def resolve_focus_person_slug(slug: str) -> tuple[str | None, str]:
     return None, ""
 
 
+THE_OWNER_IS_NOT_A_PERSON_FOCUS = "THE_OWNER_IS_NOT_A_PERSON_FOCUS"
+
+
+class OwnerIsNotAPersonFocusError(ValueError):
+    """v426 (ADR 0047): a person Focus for the OWNER is refused — the primary
+    life-story Focus attends to him (`owner_identity.THE_OWNER_IS_NOT_A_PERSON_FOCUS`).
+    ``reason`` is :data:`THE_OWNER_IS_NOT_A_PERSON_FOCUS`."""
+
+    reason = THE_OWNER_IS_NOT_A_PERSON_FOCUS
+
+    def __init__(self, label: str, person_ref: str | None = None):
+        self.label = label
+        self.person_ref = person_ref
+        super().__init__(f"{THE_OWNER_IS_NOT_A_PERSON_FOCUS}: {label!r} is the owner"
+                         + (f" ({person_ref})" if person_ref else "")
+                         + " — the life story is his Focus; refusing a person Focus")
+
+
+def owner_person_ref() -> str | None:
+    """``person/<slug>`` of the owner's roster row (`owner_identity.owner_ref`
+    over the identity roster and the bound profile), or ``None``."""
+    try:
+        import owner_identity  # noqa: PLC0415
+        from entity_roster import load_identity_roster  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return None
+    names = owner_identity.owner_names_from_profile(owner_identity.bound_owner_profile())
+    return owner_identity.owner_ref(load_identity_roster("person"), names)
+
+
+def is_owner_label(label: str) -> bool:
+    """Does a person-Focus label name the owner (`owner_identity.is_owner_mention`)?"""
+    try:
+        import owner_identity  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return False
+    names = owner_identity.owner_names_from_profile(owner_identity.bound_owner_profile())
+    return bool(names) and owner_identity.is_owner_mention(label, names)
+
+
 class FocusKeyCollisionError(ValueError):
     """Raised by a Focus-creation door (focus_new, the `roadmap add` CLI)
     when the requested label's normalized_focus_key collides with an
@@ -323,7 +363,12 @@ def derive_focuses(md_text: str) -> list[dict]:
     main_cats = sorted(c for c, m in categories.items() if m["group"] == "main")
     if main_cats:
         total_main = sum(counts.get(c, 0) for c in main_cats)
-        full_name = load_config().get("full_name") or load_config().get("name") or "My Life"
+        # v426 (ADR 0047): the owner's spellings are owner_identity's to read.
+        import owner_identity  # noqa: PLC0415
+
+        cfg = load_config()
+        full_name = (owner_identity.author_names(cfg)[1]
+                     if owner_identity.owner_names_from_profile(cfg) else "My Life")
         focuses.append({
             "id": "my-life",
             "label": full_name,
@@ -714,12 +759,17 @@ def focus_new(label: str, focus_type: str, tier: str, objective: str = "",
         person_ref, attending = resolve_focus_person_slug(person_slug)
         if person_ref is None:
             raise ValueError(f"no such person record: {person_slug!r}")
+        if person_ref == owner_person_ref():
+            raise OwnerIsNotAPersonFocusError(label, person_ref)
         if attending and attending != slugify(label):
             raise FocusTwinError(label, person_ref, attending)
     # v386 (ADR 0043): a person Focus RESOLVES first and attaches to the record
     # it names; a record another Focus already attends to is a twin, refused.
     if focus_type == "person":
         resolved_ref, attending = resolve_focus_person(label)
+        owner_ref = owner_person_ref()
+        if is_owner_label(label) or (owner_ref and owner_ref in (resolved_ref, person_ref)):
+            raise OwnerIsNotAPersonFocusError(label, owner_ref)
         if person_ref is None:
             person_ref = resolved_ref
         if attending and person_ref == resolved_ref and attending != slugify(label):

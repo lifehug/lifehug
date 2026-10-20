@@ -37,6 +37,7 @@ sys.path.insert(0, str(SYSTEM_DIR))
 
 import chronology
 import identity_resolution as ir
+import owner_identity
 import relation_words
 import roster_relations
 from ai_provider import failure_metadata
@@ -541,6 +542,10 @@ def apply_previous_decisions(raw_entities: list[dict], previous_roster: dict | N
         for field in _SETTLED_IDENTITY_FIELDS:
             if slot.get(field) is None and prev.get(field) is not None:
                 slot[field] = prev[field]
+        # v426 (ADR 0047): `relationship: "self"` is the owner's row — a
+        # refresh never re-types it, whatever the model said.
+        if owner_identity.is_owner_row(prev):
+            slot["relationship"] = owner_identity.SELF_RELATIONSHIP
         # An owner_verdict on the previous entry is a settled fact — it
         # always wins, whatever this refresh's raw entry carries or omits.
         if prev.get("owner_verdict"):
@@ -574,9 +579,13 @@ def _alias_contested(alias: str, prev: dict, previous: list[dict]) -> bool:
     return decision.get("reason") == roster_relations.IDENTITY_UNCERTAIN_KIND
 
 
+_BOUND_OWNER_PROMPT = object()
+
+
 def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, str],
                  excerpts: list[dict] | None = None,
-                 previous_roster: dict | None = None) -> str:
+                 previous_roster: dict | None = None,
+                 *, owner: object = _BOUND_OWNER_PROMPT) -> str:
     focuses = ", ".join(f'"{n}" (slug: {s})' for s, n in focus_map.items()) or "(none)"
     plural = {"person": "people", "place": "places", "period": "periods",
               "object": "objects", "theme": "themes"}[entity_type]
@@ -632,6 +641,16 @@ def build_prompt(entity_type: str, candidates: list[dict], focus_map: dict[str, 
             "variants in `aliases`. Never emit both a role-word entry and a proper-name "
             "entry for the same individual.",
         ]
+        context = _owner_context("person") if owner is _BOUND_OWNER_PROMPT else owner
+        owner_names = tuple(getattr(context, "names", ()) or ())
+        if owner_names:
+            # v426 (ADR 0047): the author is one entry, never a stranger.
+            spelled = ", ".join(f'"{n}"' for n in owner_names)
+            lines += [
+                f"- The AUTHOR is {spelled} (also written as the narrator, the author, me). "
+                "Never output the author as a separate person: every spelling of the author "
+                f'goes in ONE entry named "{owner_names[0]}".',
+            ]
     lines += [
         "",
     ]
@@ -803,12 +822,23 @@ def apply_owner_verdict(entity_type: str, entry: dict) -> dict:
         entry["page_eligible"] = False
     elif verdict == "graduate" and not ir.has_home(entry):
         entry["page_eligible"] = True
+    if owner_identity.is_owner_row(entry):
+        # v426 (ADR 0047): the owner's page is the life hub, never a person page.
+        entry["page_eligible"] = False
     return entry
 
 
+_BOUND_OWNER = object()
+
+
 def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict],
-              focus_map: dict[str, str], min_score: float, min_answers: int) -> list[dict]:
-    """Validate AI/agent output into roster entries with computed page_eligible."""
+              focus_map: dict[str, str], min_score: float, min_answers: int,
+              *, owner: object = _BOUND_OWNER) -> list[dict]:
+    """Validate AI/agent output into roster entries with computed page_eligible.
+
+    v426 (ADR 0047): a person entry that names the owner merges into the one
+    owner row (:func:`merge_owner_mentions`). ``owner`` is an
+    `owner_identity.OwnerContext`; the default reads the bound vault's."""
     stats = _stats_index(candidates)
     focus_slugs = set(focus_map)
     out = []
@@ -871,7 +901,7 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
         owner_verdict = e.get("owner_verdict")
         if owner_verdict in ("graduate", "never"):
             entry["owner_verdict"] = owner_verdict
-            apply_owner_verdict(entity_type, entry)
+        apply_owner_verdict(entity_type, entry)
         if entity_type == "period":
             # Chronological rank (1 = earliest in life) drives index ordering.
             try:
@@ -886,6 +916,90 @@ def normalize(entity_type: str, raw_entities: list[dict], candidates: list[dict]
             if name.lower() not in keywords:
                 keywords.insert(0, name.lower())
             entry["keywords"] = keywords
+        out.append(entry)
+    if entity_type == "person":
+        context = _owner_context("person") if owner is _BOUND_OWNER else owner
+        out = merge_owner_mentions(out, context)
+    return out
+
+
+def merge_owner_mentions(entries: list[dict], owner: object) -> list[dict]:
+    """:data:`owner_identity.A_ROSTER_NEVER_MAKES_A_STRANGER_OF_THE_OWNER`, on
+    normalized person entries. Pure.
+
+    Every entry that names the owner — its name an owner mention
+    (`owner_identity.is_owner_mention`: "Dave", "David Taylor", "David James
+    Taylor", "Dave (narrator)"), an alias equal to a whole profile spelling, or
+    already marked ``self`` — becomes ONE entry: the ``self`` row when there
+    is one, else the entry named the profile ``name``, else a minted row named
+    it. The others' spellings become its aliases (a role in brackets and an
+    owner-only word like "narrator" are not spellings and are dropped); it is
+    ``relationship: "self"``, never page-eligible, and attended by the
+    primary Focus when there is one. Without profile names nothing changes."""
+    names = tuple(getattr(owner, "names", ()) or ())
+    if not names:
+        return entries
+    primary = str(getattr(owner, "primary_focus", "") or "")
+    whole = {n.casefold() for n in names}
+
+    def names_owner(entry: dict) -> bool:
+        if owner_identity.is_owner_row(entry):
+            return True
+        if ir.is_alias_row(entry):
+            return False
+        if owner_identity.is_owner_mention(entry.get("name"), names):
+            return True
+        return any(" ".join(str(a or "").split()).casefold() in whole
+                   for a in entry.get("aliases") or ())
+
+    hits = [e for e in entries if isinstance(e, dict) and names_owner(e)]
+    if not hits:
+        return entries
+    own_slug = slugify(names[0])
+    survivor = (next((e for e in hits if owner_identity.is_owner_row(e)), None)
+                or next((e for e in hits if e.get("slug") == own_slug), None))
+    if survivor is None:
+        survivor = {"name": names[0], "slug": own_slug, "aliases": [], "qualifies": True,
+                    "focus": None, "folded_into": None, "score": 0.0, "unique_answers": 0,
+                    "page_eligible": False}
+    survivor = dict(survivor)
+    seen = {" ".join(str(survivor.get("name") or "").split()).casefold()}
+    aliases: list[str] = []
+
+    def add(spelling: object) -> None:
+        text = owner_identity.strip_role_suffix(spelling)
+        key = text.casefold()
+        if not text or key in seen or ir.normalized_mention_key(text) in ir.OWNER_SUBJECT_MENTIONS \
+                or owner_identity.is_owner_possessive(text, names):
+            return
+        seen.add(key)
+        aliases.append(text)
+
+    for alias in survivor.get("aliases") or ():
+        add(alias)
+    for entry in hits:
+        if entry.get("slug") == survivor.get("slug") and entry.get("name") == survivor.get("name"):
+            continue
+        add(entry.get("name"))
+        for alias in entry.get("aliases") or ():
+            add(alias)
+        survivor["score"] = max(float(survivor.get("score") or 0.0), float(entry.get("score") or 0.0))
+        survivor["unique_answers"] = max(int(survivor.get("unique_answers") or 0),
+                                         int(entry.get("unique_answers") or 0))
+    survivor["aliases"] = aliases
+    survivor["qualifies"] = True
+    survivor["relationship"] = owner_identity.SELF_RELATIONSHIP
+    survivor["page_eligible"] = False
+    if primary and not ir.is_alias_row(survivor):
+        survivor["focus"] = primary
+    out: list[dict] = []
+    placed = False
+    for entry in entries:
+        if any(entry is hit for hit in hits):
+            if not placed:
+                out.append(survivor)
+                placed = True
+            continue
         out.append(entry)
     return out
 
@@ -923,6 +1037,14 @@ def deterministic(entity_type: str, candidates: list[dict], focus_map: dict[str,
     return normalize(entity_type, raw, candidates, focus_map, min_score, min_answers)
 
 
+def _owner_context(entity_type: str, vault_root: object = None):
+    """The owner context the converter's owner step needs (v426, ADR 0047) —
+    person rosters only; ``None`` (no owner step) for every other type."""
+    if entity_type != "person":
+        return None
+    return owner_identity.owner_context(vault_root)
+
+
 def write_roster(entity_type: str, entities: list[dict], *, source: str | None = None,
                  sampled_answer_ids: list[str] | None = None,
                  preserved_count: int = 0,
@@ -940,7 +1062,8 @@ def write_roster(entity_type: str, entities: list[dict], *, source: str | None =
     # v402: so is the retired ledger — a refresh never un-retires a row.
     if isinstance(previous, dict) and previous.get(ROSTER_RETIRED_KEY):
         payload[ROSTER_RETIRED_KEY] = previous[ROSTER_RETIRED_KEY]
-    payload, _report = roster_relations.convert_legacy_roster(payload, entity_type=entity_type)
+    payload, _report = roster_relations.convert_legacy_roster(
+        payload, entity_type=entity_type, owner=_owner_context(entity_type))
     if source:
         payload["source"] = source
     if sampled_answer_ids is not None:
@@ -962,7 +1085,8 @@ def load_roster(entity_type: str = "person", *, vault_root: object = None) -> di
         # v386 (ADR 0043): the one-version converter, in memory. A reader
         # never sees `maps_to_focus` or a placeholder row; the next writer
         # persists the converted shape.
-        converted, _report = roster_relations.convert_legacy_roster(data, entity_type=entity_type)
+        converted, _report = roster_relations.convert_legacy_roster(
+            data, entity_type=entity_type, owner=_owner_context(entity_type, vault_root))
         return converted
     return {"version": 1, "type": entity_type, "entities": []}
 
@@ -975,7 +1099,8 @@ def read_roster_payload(entity_type: str) -> tuple[Path, dict | None]:
     data = read_json(path, default=None)
     if not isinstance(data, dict) or not isinstance(data.get("entities"), list):
         return path, None
-    converted, _report = roster_relations.convert_legacy_roster(data, entity_type=entity_type)
+    converted, _report = roster_relations.convert_legacy_roster(
+        data, entity_type=entity_type, owner=_owner_context(entity_type))
     return path, converted
 
 
@@ -993,8 +1118,8 @@ def load_identity_roster(entity_type: str = "person", *, focus_map: dict | None 
 
 def convert_identity(*, dry_run: bool = False, focus_map: dict | None = None) -> dict:
     """The v386 converter, persisted: every roster type through
-    `roster_relations.convert_legacy_roster`, and the person roster's Focuses
-    attached (`attach_focuses`). Writes a file only when it changed, so a
+    `roster_relations.convert_legacy_roster` (v426: with the owner step, ADR
+    0047), and the person roster's Focuses attached (`attach_focuses`). Writes a file only when it changed, so a
     second run is byte-identical (P8). ``{type: report}``."""
     focuses = _focus_map() if focus_map is None else focus_map
     out: dict = {}
@@ -1003,7 +1128,8 @@ def convert_identity(*, dry_run: bool = False, focus_map: dict | None = None) ->
         raw = read_json(path, default=None)
         if not isinstance(raw, dict) or not isinstance(raw.get("entities"), list):
             continue
-        converted, report = roster_relations.convert_legacy_roster(raw, entity_type=entity_type)
+        converted, report = roster_relations.convert_legacy_roster(
+            raw, entity_type=entity_type, owner=_owner_context(entity_type))
         if entity_type == "person":
             converted, attached = roster_relations.attach_focuses(converted, focuses)
             report["attached"] = attached
@@ -1012,6 +1138,38 @@ def convert_identity(*, dry_run: bool = False, focus_map: dict | None = None) ->
             write_json(path, converted)
         out[entity_type] = report
     return out
+
+
+def repair_owner_identity(*, apply: bool = False) -> dict:
+    """v426 (ADR 0047, design D6): the owner step of the converter, on demand —
+    `lifehug.py owner-identity [--apply]`.
+
+    Reports the profile spellings, the owner's row (or ``none`` /
+    ``ambiguous`` and the candidates) and what the step changes on it —
+    ``relationship``, ``focus``, ``page_eligible``, ``aliases_dropped``. With
+    ``apply`` the converted person roster is written (every top-level key kept,
+    the `convert_identity` precedent), only when it changed, so a second
+    ``--apply`` reports nothing to do and leaves the file byte-identical."""
+    context = _owner_context("person")
+    path = roster_file("person")
+    raw = read_json(path, default=None)
+    report: dict = {"profile_names": list(context.names), "primary_focus": context.primary_focus or None,
+                    "roster": isinstance(raw, dict) and isinstance(raw.get("entities"), list),
+                    "found": owner_identity.FOUND_NONE, "slug": None, "candidates": [],
+                    "changes": {}, "changed": False, "applied": False}
+    if not report["roster"]:
+        return report
+    converted, converter = roster_relations.convert_legacy_roster(
+        raw, entity_type="person", owner=context)
+    owner = converter.get("owner") or {}
+    report.update({"found": owner.get("found", owner_identity.FOUND_NONE),
+                   "slug": owner.get("slug"), "candidates": owner.get("candidates") or [],
+                   "changes": owner.get("changes") or {}})
+    report["changed"] = converted != raw
+    if report["changed"] and apply:
+        write_json(path, converted)
+        report["applied"] = True
+    return report
 
 
 def _focus_by_title(name: str, focus_map: dict[str, str], aliases: object = ()) -> str | None:
@@ -1749,6 +1907,10 @@ def first_name_aliases(*, dry_run: bool = False) -> dict:
         key = first_key(entity)
         slug = str(entity.get("slug") or "")
         if not key or ir.is_alias_row(entity) or str(entity["name"]).split()[0].lower() in ROLE_WORDS:
+            continue
+        if owner_identity.is_owner_row(entity):
+            # v426 (ADR 0047): the owner's names are his profile's; a first
+            # word of one is every namesake's, never an alias of his row.
             continue
         token = str(entity["name"]).split()[0]
         if any(normalized_focus_key(str(a)) == key for a in entity.get("aliases") or ()):
