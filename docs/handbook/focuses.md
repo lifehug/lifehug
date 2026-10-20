@@ -325,8 +325,10 @@ its category, questions, answers and page; its open questions can still come
 up by ordinary rotation. `focus-select <id>` adds it back with its tier
 preference. The weekly sweep rests a Focus automatically when its bar reaches
 100% (answered reaches the tier target) or it is complete, so other Focuses get
-the queue's space; choosing **keep going** on its Mirror row, or
-`focus-select`, brings it back, and the sweep never rests it again on its own.
+the queue's space, whoever selected it. Choosing **keep going** on its Mirror
+row, or `focus-select` on a Focus at its target, raises it one tier (basic 8 →
+standard 20 → extreme 50, then 100, 150, … — extreme is not a ceiling) and
+brings it back, so the bar has room again (v425).
 
 Start a Focus with a primer: `focus-new "Grandpa Joe" --type person --person grandpa-joe --primer-file primer.json` (`{"objective","relationship","living","context"}`, context up to 2000 characters); `focus-set <id> --primer-file` replaces it. The viewer's Foundation has ＋ Add and Edit (Remove, Tier) for the same verbs.
 

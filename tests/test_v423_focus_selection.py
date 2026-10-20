@@ -66,10 +66,11 @@ class TheRule(unittest.TestCase):
         self.assertTrue(fs.should_rest({}, at))
         self.assertTrue(fs.should_rest({"phase": "complete"}, {"saturation": 0.4, "pending": 0}))
         self.assertFalse(fs.should_rest({"selected": False}, at))
+        # v425 (owner, 2026-10-19): no owner exemption.
         owner = {"selection": {"by": "owner", "reason": "added", "at": NOW}}
-        self.assertFalse(fs.should_rest(owner, at))
-        self.assertFalse(fs.should_rest(dict(owner, phase="complete"),
-                                        {"saturation": 2.0, "pending": 0}))
+        self.assertTrue(fs.should_rest(owner, at))
+        self.assertTrue(fs.should_rest(dict(owner, phase="complete"),
+                                       {"saturation": 2.0, "pending": 0}))
 
 
 # ---------------------------------------------------------------------------
@@ -222,11 +223,12 @@ class Sweep(Base):
         self.assertEqual([r["reason"] for r in out["rested"]], ["complete"])
         self.assertFalse(fs.is_selected(self.focus()))
 
-    def test_never_rests_what_the_owner_selected(self):
+    def test_rests_what_the_owner_selected_too(self):
+        # v425 (owner, 2026-10-19): a Focus at 100% rests whoever selected it.
         owner = {"by": "owner", "at": NOW, "reason": "added"}
         self.put(bank(3, 2), [PRIMARY, katie(target_depth=3, selected=True, selection=owner)])
-        self.assertEqual(self.sweep()["rested"], [])
-        self.assertTrue(fs.is_selected(self.focus()))
+        self.assertEqual([r["reason"] for r in self.sweep()["rested"]], ["tier_target"])
+        self.assertFalse(fs.is_selected(self.focus()))
 
     def test_dry_run_reports_and_writes_nothing(self):
         self.put(bank(3, 0), [PRIMARY, katie()])
@@ -235,7 +237,8 @@ class Sweep(Base):
         self.assertEqual([r["reason"] for r in out["rested"]], ["complete"])
         self.assertEqual(self.rm_file.read_bytes(), before)
 
-    def test_keep_going_reselects_and_the_next_sweep_leaves_it_alone(self):
+    def test_keep_going_reselects_and_raises(self):
+        # v425: keep_going raises the tier and selects (reason kept_going).
         self.put(bank(3, 0), [PRIMARY, katie()])
         self.sweep()
         self.assertFalse(fs.is_selected(self.focus()))
@@ -243,9 +246,8 @@ class Sweep(Base):
         focus = self.focus()
         self.assertTrue(fs.is_selected(focus))
         self.assertEqual(focus["selection"]["by"], "owner")
-        self.assertEqual(focus["selection"]["reason"], "added")
-        self.assertEqual(self.sweep(now="2026-10-27T12:00:00Z")["rested"], [])
-        self.assertTrue(fs.is_selected(self.focus()))
+        self.assertEqual(focus["selection"]["reason"], "kept_going")
+        self.assertEqual((focus["tier"], focus["target_depth"]), ("standard", 20))
 
     def test_rest_unselects_a_complete_focus_the_sweep_had_not(self):
         self.put(bank(3, 0), [PRIMARY, katie(

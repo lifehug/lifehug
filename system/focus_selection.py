@@ -12,7 +12,7 @@ So a Focus carries ONE boolean on its roadmap row, `selected` (absent means
     {"selected": false,
      "selection": {"by": "sweep" | "owner", "at": "<iso>",
                    "reason": "tier_target" | "complete" | "removed" | "added"
-                             | "reopened"}}
+                             | "reopened" | "kept_going"}}
 
 Selected, the Focus carries its tier weight in the planner exactly as before.
 Unselected, `question_planner.focus_weight` returns 0.0 (as for a complete
@@ -39,7 +39,7 @@ if str(SYSTEM_DIR) not in sys.path:
 
 from lifehug_core import now_utc, write_json  # noqa: E402
 
-#: Who changed a selection. The owner's word is never undone by the sweep.
+#: Who changed a selection. At the target the sweep rests either one (v425).
 BY_OWNER = "owner"
 BY_SWEEP = "sweep"
 BYS = (BY_OWNER, BY_SWEEP)
@@ -51,8 +51,10 @@ REASON_REMOVED = "removed"
 REASON_ADDED = "added"
 #: The sweep's own undo: a Focus it rested as complete reopened (ADR 0044).
 REASON_REOPENED = "reopened"
+#: The owner's Keep going on a focus_complete row (v425): raises the tier and selects.
+REASON_KEPT_GOING = "kept_going"
 REASONS = (REASON_TIER_TARGET, REASON_COMPLETE, REASON_REMOVED, REASON_ADDED,
-           REASON_REOPENED)
+           REASON_REOPENED, REASON_KEPT_GOING)
 
 #: The rule, by name: a Focus is a preference in the queue, nothing more.
 A_FOCUS_IS_A_QUEUE_PREFERENCE = (
@@ -60,9 +62,18 @@ A_FOCUS_IS_A_QUEUE_PREFERENCE = (
     "nothing is deleted, and adding it back restores its preference."
 )
 #: The rest rule, by name (design D1): the bar's 100% is the tier target.
+#: v425 (owner, 2026-10-19): no owner exemption; who selected it does not matter.
 A_FOCUS_AT_ITS_TARGET_RESTS = (
     "A non-primary Focus whose answered count reaches its tier target, or that "
-    "is complete, is unselected by the weekly sweep, unless the owner selected it."
+    "is complete, is unselected by the weekly sweep, whoever selected it."
+)
+#: The raise rule, by name (v425): Keep going, or adding a Focus back at or
+#: past its target, raises it one step; the one definition is
+#: `roadmap.raise_tier`.
+A_RAISE_IS_PROPORTIONAL_TO_THE_TIER = (
+    "Keep going, or adding back a Focus at its target, raises it one tier: "
+    "basic 8, standard 20, extreme 50, then extreme again by 50 each time; the "
+    "step is the size of the tier the Focus is at, and extreme is not a ceiling."
 )
 
 
@@ -97,15 +108,15 @@ def unselect(focus: dict, *, by: str, reason: str, now: str | None = None) -> bo
 def should_rest(focus: dict, fill: dict) -> bool:
     """Should the weekly sweep unselect this Focus? (A_FOCUS_AT_ITS_TARGET_RESTS)
 
-    Selected, at or past its tier target (`fill["saturation"] >= 1.0`) or
-    complete (ADR 0044), and not last selected by the owner: an owner's
-    explicit add is never undone by the sweep.
+    Selected, and at or past its tier target (`fill["saturation"] >= 1.0`) or
+    complete (ADR 0044). Who selected it plays no part (v425, owner ruling
+    2026-10-19): the owner's way to keep a Focus going is to raise its tier
+    (`roadmap.raise_tier`), which moves the target.
     """
     from roadmap import is_complete  # noqa: PLC0415
 
     return (is_selected(focus)
-            and (float(fill.get("saturation") or 0.0) >= 1.0 or is_complete(focus, fill))
-            and (focus.get("selection") or {}).get("by") != BY_OWNER)
+            and (float(fill.get("saturation") or 0.0) >= 1.0 or is_complete(focus, fill)))
 
 
 def reopen_selection(focus: dict, *, when: str | None = None) -> bool:
@@ -131,10 +142,21 @@ def selection_row(focus: dict) -> dict:
 # --------------------------------------------------------------------------
 
 
+def raises_on_add(focus: dict, fill: dict) -> bool:
+    """Does adding this Focus raise its tier? At or past its target, and not
+    the primary life story (A_RAISE_IS_PROPORTIONAL_TO_THE_TIER)."""
+    return not focus.get("primary") and float(fill.get("saturation") or 0.0) >= 1.0
+
+
 def set_by_owner(focus_id: str, value: bool, *, now: str | None = None) -> dict:
     """The owner's Add (value=True) or Remove (value=False). Writes the roadmap.
-    Raises LookupError for an unknown id."""
+    Raises LookupError for an unknown id.
+
+    v425: an Add on a Focus at or past its target raises it one tier first
+    (`roadmap.raise_tier`), so the add has room; the result's `raised` says
+    how (None when the Focus was below its target)."""
     import roadmap as roadmap_mod  # noqa: PLC0415
+    from lifehug_core import parse_questions  # noqa: PLC0415
 
     rm = roadmap_mod.load_roadmap()
     if not rm.get("focuses"):
@@ -143,15 +165,20 @@ def set_by_owner(focus_id: str, value: bool, *, now: str | None = None) -> dict:
     if not focus:
         raise LookupError(f"No such focus: {focus_id}")
     when = now or now_utc()
+    raised = None
     if value:
-        changed = select(focus, by=BY_OWNER, reason=REASON_ADDED, now=when)
+        qfile = Path(roadmap_mod.QUESTIONS_FILE)
+        bank = qfile.read_text(encoding="utf-8") if qfile.exists() else ""
+        if raises_on_add(focus, roadmap_mod.focus_fill(focus, parse_questions(bank))):
+            raised = roadmap_mod.raise_tier(focus)
+        changed = select(focus, by=BY_OWNER, reason=REASON_ADDED, now=when) or bool(raised)
     else:
         changed = unselect(focus, by=BY_OWNER, reason=REASON_REMOVED, now=when)
     if changed:
         rm["generated_at"] = when
         write_json(roadmap_mod.ROADMAP_FILE, rm)
     return {"focus": focus.get("id"), "label": focus.get("label"), "changed": changed,
-            **selection_row(focus)}
+            "raised": raised, **selection_row(focus)}
 
 
 def cli(argv: list[str] | None = None) -> int:
@@ -177,6 +204,10 @@ def cli(argv: list[str] | None = None) -> int:
     else:
         state = "selected" if result["selected"] else "unselected"
         note = "" if result["changed"] else " (unchanged)"
+        raised = result.get("raised")
+        if raised:
+            note += (f"; it was at its target, so the tier is raised to {raised['tier']} "
+                     f"(target {raised['was']['target_depth']} -> {raised['target_depth']})")
         print(f"✓ {result['label'] or result['focus']} is {state}{note}")
     return 0
 

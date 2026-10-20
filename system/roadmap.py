@@ -47,6 +47,32 @@ from focus_selection import is_selected, reopen_selection  # noqa: E402
 TIER_TARGETS = {"basic": 8, "standard": 20, "extreme": 50}
 TIER_ORDER = ("basic", "standard", "extreme")
 
+
+def raise_tier(focus: dict) -> dict:
+    """Raise a Focus one step (v425, ADR 0046 amendment 2026-10-20). Mutates
+    `focus["tier"]` and `focus["target_depth"]`; returns
+    `{tier, target_depth, was: {tier, target_depth}}`. ONE definition: the
+    `keep_going` Play and a re-add at the target both call it
+    (A_RAISE_IS_PROPORTIONAL_TO_THE_TIER).
+
+    The rule, whole: the next tier is one step up `TIER_ORDER`, and extreme is
+    not a ceiling (past it the label stays `extreme`). The new target is
+    `max(next tier's base, current target + current tier's base)`: the step
+    is the size of the tier the Focus is at, so basic 8 -> standard 20 ->
+    extreme 50 -> 100 -> 150 -> ..., and an owner-set target above its tier's
+    base (`focus-set --target`) is never lowered by a raise. The current
+    target is the one `focus_fill` measures against (`target_depth`, else the
+    tier's base).
+    """
+    tier = focus.get("tier") if focus.get("tier") in TIER_TARGETS else "standard"
+    current = int(focus.get("target_depth") or TIER_TARGETS[tier])
+    nxt = TIER_ORDER[min(TIER_ORDER.index(tier) + 1, len(TIER_ORDER) - 1)]
+    target = max(TIER_TARGETS[nxt], current + TIER_TARGETS[tier])
+    focus["tier"] = nxt
+    focus["target_depth"] = target
+    return {"tier": nxt, "target_depth": target,
+            "was": {"tier": tier, "target_depth": current}}
+
 DEFAULT_CAP = 0.30        # max share of a week's questions one Focus may take
 PRIMARY_CAP = 0.40        # the author's own life story (primary focus) may take a larger share
 FINISHING_CAP = 0.50      # raised cap while a Focus is being pushed to done

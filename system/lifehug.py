@@ -4819,14 +4819,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_focus_complete_sweep)
 
     p = sub.add_parser("focus-complete-play",
-                       help="Play a completed Focus's Mirror row: keep_going | rest | make")
+                       help="Play a completed Focus's Mirror row: keep_going (raises the tier "
+                            "one step and selects it) | rest | make")
     p.add_argument("focus_id")
     p.add_argument("which", choices=["keep_going", "rest", "make"])
     p.set_defaults(func=cmd_focus_complete_play)
 
     p = sub.add_parser("focus-select",
                        help="Prefer a Focus in the question queue again (ADR 0046); "
-                            "the sweep never undoes it")
+                            "a Focus at or past its target is raised one tier as part of the add")
     p.add_argument("focus_id")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_focus_select)
