@@ -133,9 +133,9 @@ class TargetModelTests(unittest.TestCase):
         self.assertAlmostEqual(mom["target"],
                                portrait_targets.WEIGHT_PARENT * portrait_targets.TIER_BASIC * scale,
                                places=2)
-        # Calibration: the best-told person (not the owner) sits on its target.
-        people = [n for n in self.after["nodes"]
-                  if n["type"] == "people" and n["kind"] != "owner" and n["told"] > 0]
+        # Calibration: the best-told person sits on its target. v427: the owner
+        # is the hub, never a person node, so no kind is filtered out.
+        people = [n for n in self.after["nodes"] if n["type"] == "people" and n["told"] > 0]
         best = max(people, key=lambda n: n["told"] / n["target"])
         self.assertAlmostEqual(best["told"], best["target"], places=2)
         self.assertEqual(best["gap"], 0)
@@ -222,13 +222,28 @@ class CalibrationTests(unittest.TestCase):
         self.assertAlmostEqual(rows[1]["gap"], 1 - 2.0 / 3.2)
         self.assertEqual(rows[4]["gap"], 1.0)
 
-    def test_the_owner_page_is_not_calibrated_on(self):
+    def test_the_owner_has_no_separate_page(self):
+        # v427 (design D5): the owner is one node, the hub. No `owner` kind
+        # remains to weigh or to keep out of the calibration.
+        cfg = self.cfg()
+        self.assertNotIn("owner", cfg.get("targets.person"))
+        self.assertEqual(cfg.get("calibration.exclude_kinds"), [])
         rows = [
-            {"type": "person", "kind": "owner", "credit": 100.0, "base": 1.0},
             {"type": "person", "kind": "parent", "credit": 4.0, "base": 1.0},
             {"type": "person", "kind": "child", "credit": 2.0, "base": 1.0},
         ]
-        cal = portrait_targets.apply_targets(rows, self.cfg())
+        cal = portrait_targets.apply_targets(rows, cfg)
+        self.assertEqual(cal["person"]["scale"], 4.0)
+
+    def test_an_excluded_kind_is_still_never_calibrated_on(self):
+        cfg = self.cfg()
+        cfg.values["calibration"]["exclude_kinds"] = ["colleague"]
+        rows = [
+            {"type": "person", "kind": "colleague", "credit": 100.0, "base": 1.0},
+            {"type": "person", "kind": "parent", "credit": 4.0, "base": 1.0},
+            {"type": "person", "kind": "child", "credit": 2.0, "base": 1.0},
+        ]
+        cal = portrait_targets.apply_targets(rows, cfg)
         self.assertEqual(cal["person"]["scale"], 4.0)
 
     def test_relevance_gate_reads_tags_not_names(self):

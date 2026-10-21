@@ -27,7 +27,10 @@ page describes what is built.
   between its two ends, not as a node.
 - **Life hub** — the owner's self-portrait page, `wiki/life/<slug(full_name)>.md`.
   The owner appears on the graph as the hub, never as a person page that
-  shares his name.
+  shares his name. Since v427 (ADR 0047) he is ONE node: his roster row
+  (`relationship: "self"`) has no person page, his old `wiki/people/<name>.md`
+  is a redirect stub to the hub, a stub is never a node and a link to it lands
+  on its target, and every spelling and alias of his row resolves to the hub.
 - **Credit / told** — how much of the telling an entity holds: each credited
   source gives `1/n` to each of the `n` entities that hold it (owner ruling,
   2026-09-29). An answer is held by the pages that list it; any other source
@@ -79,8 +82,10 @@ silently dropped.
 the life hub.
 
 **A_RELATIONSHIP_HAS_TWO_ENDS.** A relationship page's ends come from its
-title first ("Dave & Mom"). A title part that is the owner's `name`,
-`full_name`, or the hub's slug is the hub. `related:` is a fallback only —
+title first ("Dave & Mom"). A title part that is one of the owner's
+spellings — `name`, `full_name`, the hub's slug, or (v427) his roster row's
+name, slug or any alias, read through `owner_identity.owner_spellings` — is
+the hub. Each relationship page also names the hub in its `related:` (v427). `related:` is a fallback only —
 it lists everything the page links to, and its second entry is usually a
 theme or a period. One resolved end joins the hub.
 
@@ -142,8 +147,10 @@ provisional numbers; rationale per row in the research note's "Amendment
 `relationship` 1.0 and `self` 0.6 are the builder's choice (not in the
 owner's list); a type not listed scales 1.0. A theme's target is therefore
 0.3 of a parent's; an A–E arc (table weight 0.6, life 1.0) is 0.6 of one.
-The owner's own person page (kind `owner`) is never calibrated on. Nothing is
-summed across types (D7): one scale lets two rings be compared by eye.
+No kind is excluded from calibration by default: before v427 the owner's own
+person page (kind `owner`) duplicated the hub and was kept out; v427 removed
+that page and the kind, and `calibration.exclude_kinds` ships empty (a vault
+may still list kinds there). Nothing is summed across types (D7): one scale lets two rings be compared by eye.
 
 **Per-type calibration (v378) is one config line away:**
 `{"calibration": {"mode": "per_type"}}`. Then `scale(T)` is the same

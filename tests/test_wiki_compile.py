@@ -939,7 +939,8 @@ class SidebarNavTests(unittest.TestCase):
         self.assertLess(out.index('data-group="life"'), out.index('data-group="people"'))  # life first
         self.assertIn(">David James Taylor<", out)        # section labeled with full name
         self.assertIn(">Who I am<", out)                  # hub surfaced as an item
-        self.assertIn(">David James Taylor &rarr;<", out.replace("→", "&rarr;"))  # People pointer
+        # People pointer — v427: the owner is listed once, as "You", at the hub.
+        self.assertIn(">You · David James Taylor &rarr;<", out.replace("→", "&rarr;"))
 
     def test_nav_people_before_themes(self):
         wiki = self.sw.WIKI_DIR

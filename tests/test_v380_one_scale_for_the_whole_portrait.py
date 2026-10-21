@@ -330,7 +330,6 @@ class SharedCalibrationUnitTests(unittest.TestCase):
         rows = [
             {"id": "dad", "type": "person", "kind": "parent", "credit": 10.0, "base": 1.0},
             {"id": "kid", "type": "person", "kind": "child", "credit": 30.0, "base": 1.0},
-            {"id": "me", "type": "person", "kind": "owner", "credit": 99.0, "base": 1.0},
             {"id": "fam", "type": "theme", "kind": "theme", "credit": 12.0, "base": 1.0},
             {"id": "home", "type": "place", "kind": "residence", "credit": 3.0, "base": 1.0},
         ]
@@ -340,8 +339,8 @@ class SharedCalibrationUnitTests(unittest.TestCase):
         self.assertAlmostEqual(cal["place"]["scale"], 6.0)
         self.assertEqual(rows[0]["gap"], 0.0)
         self.assertAlmostEqual(rows[1]["over"], 2.0)  # a child told past a parent's target
-        self.assertAlmostEqual(rows[3]["over"], 3.0)  # Family: 12 told on a 3.0 target
-        self.assertAlmostEqual(rows[4]["gap"], 0.5)
+        self.assertAlmostEqual(rows[2]["over"], 3.0)  # Family: 12 told on a 3.0 target
+        self.assertAlmostEqual(rows[3]["gap"], 0.5)
 
     def test_no_credited_anchor_falls_back_to_everything(self):
         rows = [

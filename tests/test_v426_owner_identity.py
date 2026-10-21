@@ -559,11 +559,11 @@ class OwnerIdentityVerb(_TmpRoster):
 
 class NoInlineProfileNameReads(unittest.TestCase):
     """The known readers of the owner's profile spellings read them through
-    `owner_identity` (or `focus_pages.author_names`, which does). `serve_wiki`
-    and `wiki_compile` still spell `full_name` themselves; rewiring them is
-    O2's (v427), which adds them to :data:`READERS` here."""
+    `owner_identity` (or `focus_pages.author_names`, which does). v427 (O2)
+    rewired `serve_wiki` and `wiki_compile` and added them here."""
 
-    READERS = ("focus_pages.py", "roadmap.py", "mirror.py", "lifehug.py")
+    READERS = ("focus_pages.py", "roadmap.py", "mirror.py", "lifehug.py",
+               "serve_wiki.py", "wiki_compile.py")
     INLINE = re.compile(
         r"""(?:cfg|config|profile|load_config\(\))\s*(?:\.get\(\s*|\[\s*)["'](?:name|full_name)["']""")
 
@@ -574,7 +574,8 @@ class NoInlineProfileNameReads(unittest.TestCase):
                 self.assertEqual(self.INLINE.findall(text), [])
 
     def test_the_readers_ask_owner_identity(self):
-        for name in ("focus_pages.py", "roadmap.py", "mirror.py"):
+        for name in ("focus_pages.py", "roadmap.py", "mirror.py", "serve_wiki.py",
+                     "wiki_compile.py"):
             text = (ROOT / "system" / name).read_text(encoding="utf-8")
             with self.subTest(module=name):
                 self.assertIn("owner_identity", text)
