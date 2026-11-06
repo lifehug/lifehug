@@ -3508,6 +3508,20 @@ def _era_groups(era_views: object, *, owner_ref: str) -> dict:
     return groups
 
 
+#: v428 (lifehug, owner vault 2026-11-06). Two filings of one stay — an entry
+#: and the owner's later revision of it — each seed a participation node; when
+#: `bind-episodes` rules the two tellings one episode, every claim of one seed
+#: folds onto the episode node and that seed would be drawn with no input
+#: (``node_without_inputs``), which raised out of the fold and parked every
+#: publish. A seed emptied that way, all of whose claims went to ONE other
+#: node, is not drawn: its id is published as a ``node_aliases`` redirect.
+A_STAY_BOUND_INTO_AN_EPISODE_REDIRECTS_TO_IT = (
+    "a landmark stay's seeded node whose every claim a bind folded into one "
+    "other node is not drawn empty: its id is published as a redirect to that "
+    "node, so a revision of a stay never parks the publish"
+)
+
+
 def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
                   identity: object = None, participation: object = None,
                   births: "KnownBirths | None" = None) -> dict:
@@ -3627,12 +3641,17 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
             for claim, _, _, _, alias_key, episode_node in readings
         )
 
+    # v428, `A_STAY_BOUND_INTO_AN_EPISODE_REDIRECTS_TO_IT`: where each seeded
+    # stay's own claims went when a bind or carry folded them elsewhere.
+    seed_moves: dict[str, set] = {}
     for claim, subject, event_kind, own_key, alias_key, episode_node in readings:
         node_id = episode_node or own_key
         if identity is not None and not episode_node:
             carried = identity.carried_node_for(claim)
             if carried and not identity.stands_aside(event_kind, carried):
                 node_id = episode_node = carried
+        if own_key in seeded and node_id != own_key:
+            seed_moves.setdefault(own_key, set()).add(node_id)
         group = groups.get(node_id)
         if group is None:
             # v353, `AN_EPISODE_NODES_KIND_IS_THE_NODES_AND_NOT_ITS_FIRST_CLAIMS`.
@@ -3676,6 +3695,23 @@ def _group_claims(claims: list[dict], *, owner_ref: str, era_views: object = (),
         if collapsed_text(claim.get("subject_ref")):
             group["resolved"] = True
         group["claims"].append(claim)
+    # v428, `A_STAY_BOUND_INTO_AN_EPISODE_REDIRECTS_TO_IT`. Two filings of one
+    # stay (a revision beside the entry it revises) each seed a node; when the
+    # binder rules them one episode, every claim of one seed folds into the
+    # other's node and the emptied seed would be refused as
+    # `node_without_inputs` — parking the whole publish. A seed left with no
+    # claim of its own, whose claims ALL went to one other node, is not drawn:
+    # its id is published as a redirect to that node instead.
+    for seed_id, targets in seed_moves.items():
+        seed = groups.get(seed_id)
+        if (seed is None or seed["claims"] or len(targets) != 1
+                or not seed.get("participation_domain") or participation is None):
+            continue
+        target = next(iter(targets))
+        if target not in groups or target == seed_id:
+            continue
+        groups.pop(seed_id)
+        participation.node_aliases[seed_id] = target
     for group in groups.values():
         group["claims"].sort(key=lambda row: collapsed_text(row.get("claim_id")))
         group["subjects"].sort()
